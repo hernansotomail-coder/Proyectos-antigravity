@@ -50,6 +50,7 @@ export default function Dashboard() {
   const [statusFilter, setStatusFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [activeKpiFilter, setActiveKpiFilter] = useState(null); // 'Trabajando', 'Vacaciones', 'Licencia', 'Ausente'
+  const [selectedStaffKpi, setSelectedStaffKpi] = useState(null); // ID of the selected staff to filter KPIs
 
   const loadData = () => {
     const start = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
@@ -111,16 +112,17 @@ export default function Dashboard() {
     return rawMatrix;
   }, [filteredStaff, attendanceList, daysArray, selectedYear, selectedMonth, activeKpiFilter]);
 
-  // KPIs Calculation (calculated on ALL filteredStaff to maintain totals)
+  // KPIs Calculation (calculated on ALL filteredStaff to maintain totals, unless one is selected)
   const kpis = useMemo(() => {
-    const totalStaff = filteredStaff.length;
+    const staffToCalculate = selectedStaffKpi ? filteredStaff.filter(s => s.id === selectedStaffKpi) : filteredStaff;
+    const totalStaff = staffToCalculate.length;
     let totalTrabajando = 0;
     let totalVacaciones = 0;
     let totalLicencias = 0;
     let totalAusencias = 0;
 
     // Use full attendance list for the current filtered staff to calculate KPI counts
-    filteredStaff.forEach(staff => {
+    staffToCalculate.forEach(staff => {
       const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
       staffAttendance.forEach(val => {
         if (val.service_type === 'Trabajando') totalTrabajando++;
@@ -131,7 +133,7 @@ export default function Dashboard() {
     });
 
     return { totalStaff, totalTrabajando, totalVacaciones, totalLicencias, totalAusencias };
-  }, [filteredStaff, attendanceList, daysInMonth]);
+  }, [filteredStaff, attendanceList, daysInMonth, selectedStaffKpi]);
 
   // Export to Excel
   const exportToExcel = () => {
@@ -184,33 +186,49 @@ export default function Dashboard() {
               options={[2025, 2026, 2027].map(y => ({value: y, label: y.toString()}))}
             />
           </div>
-          <div className="w-40">
-            <Select 
-              value={roleFilter} 
-              onChange={(e) => setRoleFilter(e.target.value)}
-              options={[{value: '', label: 'Todos los cargos'}, {value: 'Conductor', label: 'Conductores'}, {value: 'Auxiliar', label: 'Auxiliares'}, {value: 'Movilizador', label: 'Movilizadores'}]}
-            />
-          </div>
-          <div className="w-40">
-            <Input 
-              placeholder="Buscar personal..." 
-              value={searchFilter}
-              onChange={(e) => setSearchFilter(e.target.value)}
-              className="h-10"
-            />
-          </div>
-          <Button onClick={exportToExcel} className="flex gap-2 h-10 bg-green-600 hover:bg-green-700">
-            <Download size={18} /> Exportar Excel
-          </Button>
         </div>
       </div>
+       <div className="flex flex-col md:flex-row gap-4 mb-6">
+        <div className="flex-1">
+          <Input 
+            placeholder="Buscar por RUT o Nombre..." 
+            value={searchFilter} 
+            onChange={(e) => setSearchFilter(e.target.value)} 
+          />
+        </div>
+        <div className="w-full md:w-48">
+          <Select 
+            value={roleFilter} 
+            onChange={(e) => setRoleFilter(e.target.value)}
+            options={[
+              { value: '', label: 'Todos los cargos' },
+              { value: 'Conductor', label: 'Conductor' },
+              { value: 'Auxiliar', label: 'Auxiliar' }
+            ]}
+          />
+        </div>
+        <div className="w-full md:w-48">
+          <Select 
+            value={statusFilter} 
+            onChange={(e) => setStatusFilter(e.target.value)}
+            options={[
+              { value: '', label: 'Todos los estados' },
+              { value: 'Activo', label: 'Activo' },
+              { value: 'Inactivo', label: 'Inactivo' }
+            ]}
+          />
+        </div>
+        <Button onClick={exportToExcel} className="flex gap-2 items-center" variant="outline">
+          <Download size={18} /> Exportar Excel
+        </Button>
+      </div>
 
-      {/* KPIs Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6 shrink-0">
-        <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm flex items-center gap-4">
+      {/* Tarjetas de KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div className="p-4 bg-white rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
           <div className="p-3 bg-blue-100 text-blue-600 rounded-lg"><Users size={24} /></div>
           <div>
-            <p className="text-sm text-slate-500 font-medium">Total Dotación</p>
+            <p className="text-sm text-slate-500 font-medium">Personal Mostrado</p>
             <p className="text-2xl font-bold text-slate-800">{kpis.totalStaff}</p>
           </div>
         </div>
@@ -262,41 +280,55 @@ export default function Dashboard() {
           <div className="flex h-full items-center justify-center text-slate-500">Cargando matriz...</div>
         ) : (
           <table className="w-full text-sm text-left border-collapse whitespace-nowrap">
-            <thead className="bg-slate-100 text-slate-600 sticky top-0 z-20 shadow-sm">
-              <tr>
-                <th className="px-4 py-3 font-semibold border-b border-r border-slate-200 sticky left-0 z-30 bg-slate-100 min-w-[250px]">
-                  Personal
-                </th>
-                <th className="px-3 py-3 font-semibold border-b border-r border-slate-200 min-w-[100px]">Cargo</th>
-                {daysArray.map(day => (
-                  <th key={day} className="px-1 py-3 font-semibold border-b border-r border-slate-200 text-center min-w-[36px]">
-                    {day}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="bg-white">
-              {matrix.map((row) => (
-                <tr key={row.rut} className="hover:bg-slate-50 transition-colors border-b border-slate-100 group">
-                  <td className="px-4 py-2 border-r border-slate-100 sticky left-0 z-10 bg-white group-hover:bg-slate-50 transition-colors">
-                    <p className="font-medium text-slate-800">{row.name}</p>
-                    <p className="text-xs text-slate-400">{row.rut}</p>
-                  </td>
-                  <td className="px-3 py-2 border-r border-slate-100 text-slate-600">
-                    {row.role}
-                  </td>
+              <thead className="bg-slate-100 text-slate-600 sticky top-0 z-20 shadow-sm">
+                <tr>
+                  <th className="px-4 py-3 font-semibold border-b border-r border-slate-200 sticky left-0 z-30 bg-slate-100 min-w-[250px]">Personal</th>
+                  <th className="px-3 py-3 font-semibold border-b border-r border-slate-200 min-w-[100px]">Cargo</th>
                   {daysArray.map(day => {
-                    const service = row.days[day];
+                    const isWeekend = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0 || new Date(selectedYear, selectedMonth - 1, day).getDay() === 6;
                     return (
-                      <td key={day} className="p-1 border-r border-slate-100 text-center" title={`${row.name} - ${day}/${selectedMonth} - ${service || 'Sin registro'}`}>
-                        <div className={`w-full h-8 flex items-center justify-center rounded-md ${getServiceColor(service)}`}>
-                          {getServiceAbbr(service)}
-                        </div>
-                      </td>
+                      <th key={day} className={`px-1 py-3 font-semibold border-b border-r border-slate-200 text-center min-w-[36px] ${isWeekend ? 'bg-orange-200 text-orange-900' : ''}`}>
+                        {day}
+                      </th>
                     );
                   })}
                 </tr>
-              ))}
+              </thead>
+              <tbody className="bg-white">
+                {matrix.map((row) => {
+                  const staff = filteredStaff.find(s => s.rut === row.rut);
+                  const isSelected = selectedStaffKpi === staff?.id;
+                  
+                  return (
+                    <tr 
+                      key={row.rut} 
+                      className={`transition-colors border-b border-slate-100 group ${isSelected ? 'bg-blue-50/70' : 'hover:bg-slate-50'}`}
+                    >
+                      <td 
+                        className={`px-4 py-2 border-r border-slate-100 sticky left-0 z-10 transition-colors cursor-pointer ${isSelected ? 'bg-blue-50/70 shadow-[inset_4px_0_0_0_#2563eb]' : 'bg-white group-hover:bg-slate-50'}`}
+                        onClick={() => setSelectedStaffKpi(isSelected ? null : staff?.id)}
+                        title="Clic para ver KPIs individuales"
+                      >
+                        <p className="font-medium text-slate-800">{row.name}</p>
+                        <p className="text-xs text-slate-400">{row.rut}</p>
+                      </td>
+                      <td className="px-3 py-2 border-r border-slate-100 text-slate-600">
+                        {row.role}
+                      </td>
+                      {daysArray.map(day => {
+                        const service = row.days[day];
+                        const isWeekend = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0 || new Date(selectedYear, selectedMonth - 1, day).getDay() === 6;
+                        return (
+                          <td key={day} className={`p-1 border-r border-slate-100 text-center ${isWeekend ? 'bg-orange-100' : ''}`} title={`${row.name} - ${day}/${selectedMonth} - ${service || 'Sin registro'}`}>
+                            <div className={`w-full h-8 flex items-center justify-center rounded-md ${getServiceColor(service)}`}>
+                              {getServiceAbbr(service)}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               {matrix.length === 0 && (
                 <tr>
                   <td colSpan={daysInMonth + 2} className="px-4 py-8 text-center text-slate-500">

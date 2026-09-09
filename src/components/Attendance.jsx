@@ -602,9 +602,14 @@ export default function Attendance() {
                 <tr>
                   <th className="px-4 py-3 font-semibold border-b border-r border-slate-200 sticky left-0 z-30 bg-slate-100 min-w-[250px]">Personal</th>
                   <th className="px-3 py-3 font-semibold border-b border-r border-slate-200 min-w-[100px]">Cargo</th>
-                  {daysArray.map(day => (
-                    <th key={day} className="px-1 py-3 font-semibold border-b border-r border-slate-200 text-center min-w-[36px]">{day}</th>
-                  ))}
+                  {daysArray.map(day => {
+                    const isWeekend = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0 || new Date(selectedYear, selectedMonth - 1, day).getDay() === 6;
+                    return (
+                      <th key={day} className={`px-1 py-3 font-semibold border-b border-r border-slate-200 text-center min-w-[36px] ${isWeekend ? 'bg-orange-200 text-orange-900' : ''}`}>
+                        {day}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody className="bg-white">
@@ -618,10 +623,12 @@ export default function Attendance() {
                     {daysArray.map(day => {
                       const service = row.days[day];
                       const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const isWeekend = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0 || new Date(selectedYear, selectedMonth - 1, day).getDay() === 6;
+                      
                       return (
                         <td 
                           key={day} 
-                          className="p-1 border-r border-slate-100 text-center cursor-pointer hover:bg-blue-50 transition-colors relative" 
+                          className={`p-1 border-r border-slate-100 text-center cursor-pointer transition-colors relative ${isWeekend ? 'bg-orange-100 hover:bg-orange-200' : 'hover:bg-blue-50'}`} 
                           title={`Editar asistencia de ${row.name} el ${day}/${selectedMonth} - Actual: ${service || 'Vacío'}`}
                           onClick={() => setEditCell({ staff_id: row.rut, id_db: staffList.find(s=>s.rut === row.rut)?.id, name: row.name, day, dateStr, currentService: service })}
                         >
