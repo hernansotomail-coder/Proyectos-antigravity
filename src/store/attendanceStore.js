@@ -1,0 +1,80 @@
+import { create } from 'zustand';
+import { supabase } from '../lib/supabase';
+import { toast } from 'sonner';
+
+export const useAttendanceStore = create((set) => ({
+  attendanceList: [],
+  isLoading: false,
+
+  fetchAttendanceByDateRange: async (startDate, endDate) => {
+    set({ isLoading: true });
+    try {
+      const { data, error } = await supabase
+        .from('attendance')
+        .select('*')
+        .gte('date', startDate)
+        .lte('date', endDate);
+
+      if (error) throw error;
+      set({ attendanceList: data });
+      return data;
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al cargar la asistencia');
+      return [];
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  saveAttendanceBulk: async (attendanceRecords) => {
+    set({ isLoading: true });
+    try {
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(attendanceRecords, { onConflict: 'staff_id,date' });
+
+      if (error) throw error;
+      toast.success(`${attendanceRecords.length} registros guardados exitosamente`);
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al guardar asistencia masiva');
+      return false;
+    } finally {
+      set({ isLoading: false });
+    }
+  },
+
+  saveAttendanceRange: async (staffId, startDate, endDate, serviceType) => {
+    set({ isLoading: true });
+    try {
+      // Generar arreglo de fechas
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      const records = [];
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        records.push({
+          staff_id: staffId,
+          date: d.toISOString().split('T')[0],
+          service_type: serviceType
+        });
+      }
+
+      const { error } = await supabase
+        .from('attendance')
+        .upsert(records, { onConflict: 'staff_id,date' });
+
+      if (error) throw error;
+      toast.success(`Se asignó ${serviceType} desde ${startDate} hasta ${endDate}`);
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al guardar rango de fechas');
+      return false;
+    } finally {
+      set({ isLoading: false });
+    }
+  }
+}));
