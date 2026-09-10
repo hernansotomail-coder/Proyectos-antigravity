@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { supabase } from '../lib/supabase';
 import { useStaffStore } from '../store/staffStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { Button } from './ui/Button';
@@ -14,7 +15,7 @@ const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
 
 const getServiceColor = (serviceType) => {
   switch (serviceType) {
-    case 'Trabajando': return 'bg-green-100 text-green-700 font-bold';
+    case 'Trabajado': return 'bg-green-100 text-green-700 font-bold';
     case 'Vacaciones': return 'bg-yellow-100 text-yellow-700';
     case 'Licencia': return 'bg-orange-100 text-orange-700';
     case 'Ausente': return 'bg-red-100 text-red-700 font-bold';
@@ -28,7 +29,7 @@ const getServiceColor = (serviceType) => {
 
 const getServiceAbbr = (serviceType) => {
   switch (serviceType) {
-    case 'Trabajando': return 'T';
+    case 'Trabajado': return 'T';
     case 'Vacaciones': return 'V';
     case 'Licencia': return 'L';
     case 'Ausente': return 'A';
@@ -41,7 +42,7 @@ const getServiceAbbr = (serviceType) => {
 };
 
 const serviceOptions = [
-  'Trabajando', 'Licencia', 'Disponible', 'Ausente', 
+  'Trabajado', 'Licencia', 'Disponible', 'Ausente', 
   'Vacaciones', 'Baja', 'Permiso con goce', 'Permiso sin goce'
 ];
 
@@ -168,8 +169,8 @@ export default function Attendance() {
           const conductorDB = staffList.find(s => formatRut(s.rut) === rutConductor);
           const auxiliarDB = staffList.find(s => formatRut(s.rut) === rutAuxiliar);
 
-          // Determinar estado por defecto (Trabajando si hay tipo de servicio, o en blanco)
-          const matchedServiceType = rawServiceType ? 'Trabajando' : '';
+          // Determinar estado por defecto (Trabajado si hay tipo de servicio, o en blanco)
+          const matchedServiceType = rawServiceType ? 'Trabajado' : '';
 
           if (rutConductor) {
             processedRecords.push({
@@ -243,7 +244,7 @@ export default function Attendance() {
       rut: staff.rut,
       role: staff.role,
       isMatched: true,
-      service_type: newData[index].service_type || 'Trabajando'
+      service_type: newData[index].service_type || 'Trabajado'
     };
     setPreviewData(newData);
   };
@@ -262,7 +263,7 @@ export default function Attendance() {
         staff_id: null,
         name: 'Seleccionar manualmente...',
         role: '-',
-        service_type: 'Trabajando',
+        service_type: 'Trabajado',
         isMatched: false
       }
     ]);
@@ -270,7 +271,7 @@ export default function Attendance() {
 
   const submitBulk = async () => {
     // Solo enviamos los que tienen ID (encontrados) y tienen un service_type asignado
-    const validRecords = previewData
+    let validRecords = previewData
       .filter(r => r.isMatched && r.service_type)
       .map(r => ({
         staff_id: r.staff_id,
@@ -283,6 +284,29 @@ export default function Attendance() {
       return;
     }
 
+    // Prevención de sobrescritura para estados prioritarios
+    try {
+      const { data: existingRecords } = await supabase
+        .from('attendance')
+        .select('staff_id, service_type')
+        .eq('date', bulkDate);
+
+      if (existingRecords && existingRecords.length > 0) {
+        const protectedStatuses = ['Vacaciones', 'Licencia', 'Ausente', 'Permiso con goce', 'Permiso sin goce'];
+        
+        validRecords = validRecords.map(record => {
+          const existing = existingRecords.find(e => e.staff_id === record.staff_id);
+          // Si ya existe un estado protegido en la BD para esa persona, lo conservamos (ej. si el excel intenta poner Trabajado u otro)
+          if (existing && protectedStatuses.includes(existing.service_type)) {
+            return { ...record, service_type: existing.service_type };
+          }
+          return record;
+        });
+      }
+    } catch (e) {
+      console.error('Error verificando registros existentes en la BD', e);
+    }
+
     const success = await saveAttendanceBulk(validRecords);
     if (success) {
       setPreviewData(null);
@@ -291,7 +315,7 @@ export default function Attendance() {
 
 
   // Tab 2: Manual
-  const [manualData, setManualData] = useState({ staff_id: '', date: '', service_type: 'Trabajando' });
+  const [manualData, setManualData] = useState({ staff_id: '', date: '', service_type: 'Trabajado' });
   const submitManual = async (e) => {
     e.preventDefault();
     if (!manualData.staff_id || !manualData.date || !manualData.service_type) return;
@@ -670,7 +694,7 @@ export default function Attendance() {
                 onChange={(e) => setEditCell({...editCell, currentService: e.target.value})}
                 options={[
                   { value: '', label: 'Seleccione Estado' },
-                  { value: 'Trabajando', label: 'Trabajando' },
+                  { value: 'Trabajado', label: 'Trabajado' },
                   { value: 'Vacaciones', label: 'Vacaciones' },
                   { value: 'Licencia', label: 'Licencia Médica' },
                   { value: 'Ausente', label: 'Ausente' },

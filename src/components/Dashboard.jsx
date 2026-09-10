@@ -13,7 +13,7 @@ const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
 
 const getServiceColor = (serviceType) => {
   switch (serviceType) {
-    case 'Trabajando': return 'bg-green-100 text-green-700 font-bold';
+    case 'Trabajado': return 'bg-green-100 text-green-700 font-bold';
     case 'Vacaciones': return 'bg-yellow-100 text-yellow-700';
     case 'Licencia': return 'bg-orange-100 text-orange-700';
     case 'Ausente': return 'bg-red-100 text-red-700 font-bold';
@@ -27,7 +27,7 @@ const getServiceColor = (serviceType) => {
 
 const getServiceAbbr = (serviceType) => {
   switch (serviceType) {
-    case 'Trabajando': return 'T';
+    case 'Trabajado': return 'T';
     case 'Vacaciones': return 'V';
     case 'Licencia': return 'L';
     case 'Ausente': return 'A';
@@ -49,7 +49,7 @@ export default function Dashboard() {
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
-  const [activeKpiFilter, setActiveKpiFilter] = useState(null); // 'Trabajando', 'Vacaciones', 'Licencia', 'Ausente'
+  const [activeKpiFilter, setActiveKpiFilter] = useState(null); // 'Trabajado', 'Vacaciones', 'Licencia', 'Ausente'
   const [selectedStaffKpi, setSelectedStaffKpi] = useState(null); // ID of the selected staff to filter KPIs
 
   const loadData = () => {
@@ -116,7 +116,7 @@ export default function Dashboard() {
   const kpis = useMemo(() => {
     const staffToCalculate = selectedStaffKpi ? filteredStaff.filter(s => s.id === selectedStaffKpi) : filteredStaff;
     const totalStaff = staffToCalculate.length;
-    let totalTrabajando = 0;
+    let totalTrabajado = 0;
     let totalVacaciones = 0;
     let totalLicencias = 0;
     let totalAusencias = 0;
@@ -125,14 +125,14 @@ export default function Dashboard() {
     staffToCalculate.forEach(staff => {
       const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
       staffAttendance.forEach(val => {
-        if (val.service_type === 'Trabajando') totalTrabajando++;
+        if (val.service_type === 'Trabajado') totalTrabajado++;
         if (val.service_type === 'Vacaciones') totalVacaciones++;
         if (val.service_type === 'Licencia') totalLicencias++;
         if (val.service_type === 'Ausente') totalAusencias++;
       });
     });
 
-    return { totalStaff, totalTrabajando, totalVacaciones, totalLicencias, totalAusencias };
+    return { totalStaff, totalTrabajado, totalVacaciones, totalLicencias, totalAusencias };
   }, [filteredStaff, attendanceList, daysInMonth, selectedStaffKpi]);
 
   // Export to Excel
@@ -233,13 +233,13 @@ export default function Dashboard() {
           </div>
         </div>
         <div 
-          onClick={() => setActiveKpiFilter(prev => prev === 'Trabajando' ? null : 'Trabajando')}
-          className={`p-4 rounded-xl border shadow-sm flex items-center gap-4 cursor-pointer transition-all transform hover:scale-105 ${activeKpiFilter === 'Trabajando' ? 'border-green-500 ring-2 ring-green-200 bg-green-50' : 'border-slate-200 bg-white'}`}
+          onClick={() => setActiveKpiFilter(prev => prev === 'Trabajado' ? null : 'Trabajado')}
+          className={`p-4 rounded-xl border shadow-sm flex items-center gap-4 cursor-pointer transition-all transform hover:scale-105 ${activeKpiFilter === 'Trabajado' ? 'border-green-500 ring-2 ring-green-200 bg-green-50' : 'border-slate-200 bg-white'}`}
         >
           <div className="p-3 bg-green-100 text-green-600 rounded-lg"><Briefcase size={24} /></div>
           <div>
             <p className="text-sm text-slate-500 font-medium">Días Trabajados</p>
-            <p className="text-2xl font-bold text-slate-800">{kpis.totalTrabajando}</p>
+            <p className="text-2xl font-bold text-slate-800">{kpis.totalTrabajado}</p>
           </div>
         </div>
         <div 
@@ -342,7 +342,7 @@ export default function Dashboard() {
       </div>
 
       <div className="mt-4 shrink-0 flex gap-4 text-xs text-slate-500 justify-center">
-        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-green-100 rounded"></div> Trabajando (T)</span>
+        <span className="flex items-center gap-1"><div className="w-3 h-3 bg-green-100 rounded"></div> Trabajado (T)</span>
         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-yellow-100 rounded"></div> Vacaciones (V)</span>
         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-orange-100 rounded"></div> Licencia (L)</span>
         <span className="flex items-center gap-1"><div className="w-3 h-3 bg-red-100 rounded"></div> Ausente (A)</span>
