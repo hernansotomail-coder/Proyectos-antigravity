@@ -51,6 +51,7 @@ export default function Dashboard() {
   const [searchFilter, setSearchFilter] = useState('');
   const [activeKpiFilter, setActiveKpiFilter] = useState(null); // 'Trabajado', 'Vacaciones', 'Licencia', 'Ausente'
   const [selectedStaffKpi, setSelectedStaffKpi] = useState(null); // ID of the selected staff to filter KPIs
+  const [selectedDayKpi, setSelectedDayKpi] = useState(null); // Selected day number to filter KPIs
 
   const loadData = () => {
     const start = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
@@ -124,15 +125,21 @@ export default function Dashboard() {
     const td = String(todayObj.getDate()).padStart(2, '0');
     const todayStr = `${ty}-${tm}-${td}`;
 
+    const specificDateStr = selectedDayKpi ? `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(selectedDayKpi).padStart(2, '0')}` : null;
+
     if (selectedStaffKpi) {
-      // Vista individual: Contar Días (solo de hoy en adelante)
+      // Vista individual: Contar Días (solo de hoy en adelante, o del día seleccionado)
       let totalTrabajado = 0;
       let totalVacaciones = 0;
       let totalLicencias = 0;
       let totalAusencias = 0;
 
       staffToCalculate.forEach(staff => {
-        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id && a.date >= todayStr);
+        const staffAttendance = attendanceList.filter(a => {
+          if (a.staff_id !== staff.id) return false;
+          if (specificDateStr) return a.date === specificDateStr;
+          return a.date >= todayStr;
+        });
         staffAttendance.forEach(val => {
           if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) totalTrabajado++;
           if (val.service_type === 'Vacaciones') totalVacaciones++;
@@ -142,14 +149,18 @@ export default function Dashboard() {
       });
       return { totalStaff, totalTrabajado, totalVacaciones, totalLicencias, totalAusencias, isPeople: false };
     } else {
-      // Vista global: Contar Personas únicas (solo de hoy en adelante)
+      // Vista global: Contar Personas únicas (solo de hoy en adelante, o del día seleccionado)
       let efectivosSet = new Set();
       let vacacionesSet = new Set();
       let licenciasSet = new Set();
       let ausentesSet = new Set();
 
       staffToCalculate.forEach(staff => {
-        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id && a.date >= todayStr);
+        const staffAttendance = attendanceList.filter(a => {
+          if (a.staff_id !== staff.id) return false;
+          if (specificDateStr) return a.date === specificDateStr;
+          return a.date >= todayStr;
+        });
         staffAttendance.forEach(val => {
           if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) efectivosSet.add(staff.id);
           if (val.service_type === 'Vacaciones') vacacionesSet.add(staff.id);
@@ -166,7 +177,7 @@ export default function Dashboard() {
         isPeople: true
       };
     }
-  }, [filteredStaff, attendanceList, selectedStaffKpi]);
+  }, [filteredStaff, attendanceList, selectedStaffKpi, selectedDayKpi, selectedYear, selectedMonth]);
 
   // Export to Excel
   const exportToExcel = () => {
@@ -319,8 +330,13 @@ export default function Dashboard() {
                   <th className="px-3 py-3 font-semibold border-b border-r border-slate-200 min-w-[100px]">Cargo</th>
                   {daysArray.map(day => {
                     const isWeekend = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0 || new Date(selectedYear, selectedMonth - 1, day).getDay() === 6;
+                    const isDaySelected = selectedDayKpi === day;
                     return (
-                      <th key={day} className={`px-1 py-3 font-semibold border-b border-r border-slate-200 text-center min-w-[36px] ${isWeekend ? 'bg-orange-200 text-orange-900' : ''}`}>
+                      <th 
+                        key={day} 
+                        onClick={() => setSelectedDayKpi(prev => prev === day ? null : day)}
+                        className={`px-1 py-3 font-semibold border-b border-r border-slate-200 text-center min-w-[36px] cursor-pointer hover:bg-blue-100 transition-colors ${isDaySelected ? 'bg-blue-200 text-blue-900 ring-2 ring-inset ring-blue-500' : isWeekend ? 'bg-orange-200 text-orange-900' : ''}`}
+                      >
                         {day}
                       </th>
                     );
