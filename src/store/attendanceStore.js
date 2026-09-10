@@ -39,7 +39,7 @@ export const useAttendanceStore = create((set) => ({
       return true;
     } catch (err) {
       console.error(err);
-      toast.error('Error al guardar asistencia masiva');
+      toast.error('Error masivo: ' + (err.message || 'Desconocido'));
       return false;
     } finally {
       set({ isLoading: false });
