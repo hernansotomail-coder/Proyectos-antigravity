@@ -112,28 +112,54 @@ export default function Dashboard() {
     return rawMatrix;
   }, [filteredStaff, attendanceList, daysArray, selectedYear, selectedMonth, activeKpiFilter]);
 
-  // KPIs Calculation (calculated on ALL filteredStaff to maintain totals, unless one is selected)
+  // KPIs Calculation
   const kpis = useMemo(() => {
     const staffToCalculate = selectedStaffKpi ? filteredStaff.filter(s => s.id === selectedStaffKpi) : filteredStaff;
     const totalStaff = staffToCalculate.length;
-    let totalTrabajado = 0;
-    let totalVacaciones = 0;
-    let totalLicencias = 0;
-    let totalAusencias = 0;
 
-    // Use full attendance list for the current filtered staff to calculate KPI counts
-    staffToCalculate.forEach(staff => {
-      const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
-      staffAttendance.forEach(val => {
-        if (val.service_type === 'Trabajado') totalTrabajado++;
-        if (val.service_type === 'Vacaciones') totalVacaciones++;
-        if (val.service_type === 'Licencia') totalLicencias++;
-        if (val.service_type === 'Ausente') totalAusencias++;
+    if (selectedStaffKpi) {
+      // Vista individual: Contar Días
+      let totalTrabajado = 0;
+      let totalVacaciones = 0;
+      let totalLicencias = 0;
+      let totalAusencias = 0;
+
+      staffToCalculate.forEach(staff => {
+        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
+        staffAttendance.forEach(val => {
+          if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) totalTrabajado++;
+          if (val.service_type === 'Vacaciones') totalVacaciones++;
+          if (val.service_type === 'Licencia') totalLicencias++;
+          if (val.service_type === 'Ausente') totalAusencias++;
+        });
       });
-    });
+      return { totalStaff, totalTrabajado, totalVacaciones, totalLicencias, totalAusencias, isPeople: false };
+    } else {
+      // Vista global: Contar Personas únicas
+      let efectivosSet = new Set();
+      let vacacionesSet = new Set();
+      let licenciasSet = new Set();
+      let ausentesSet = new Set();
 
-    return { totalStaff, totalTrabajado, totalVacaciones, totalLicencias, totalAusencias };
-  }, [filteredStaff, attendanceList, daysInMonth, selectedStaffKpi]);
+      staffToCalculate.forEach(staff => {
+        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
+        staffAttendance.forEach(val => {
+          if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) efectivosSet.add(staff.id);
+          if (val.service_type === 'Vacaciones') vacacionesSet.add(staff.id);
+          if (val.service_type === 'Licencia') licenciasSet.add(staff.id);
+          if (val.service_type === 'Ausente') ausentesSet.add(staff.id);
+        });
+      });
+      return { 
+        totalStaff, 
+        totalTrabajado: efectivosSet.size, 
+        totalVacaciones: vacacionesSet.size, 
+        totalLicencias: licenciasSet.size, 
+        totalAusencias: ausentesSet.size,
+        isPeople: true
+      };
+    }
+  }, [filteredStaff, attendanceList, selectedStaffKpi]);
 
   // Export to Excel
   const exportToExcel = () => {
@@ -238,7 +264,7 @@ export default function Dashboard() {
         >
           <div className="p-3 bg-green-100 text-green-600 rounded-lg"><Briefcase size={24} /></div>
           <div>
-            <p className="text-sm text-slate-500 font-medium">Días Trabajados</p>
+            <p className="text-sm text-slate-500 font-medium">{kpis.isPeople ? 'Personal Efectivo' : 'Días Efectivos'}</p>
             <p className="text-2xl font-bold text-slate-800">{kpis.totalTrabajado}</p>
           </div>
         </div>
@@ -248,7 +274,7 @@ export default function Dashboard() {
         >
           <div className="p-3 bg-yellow-100 text-yellow-600 rounded-lg"><CalendarOff size={24} /></div>
           <div>
-            <p className="text-sm text-slate-500 font-medium">Días Vacaciones</p>
+            <p className="text-sm text-slate-500 font-medium">{kpis.isPeople ? 'Personas Vacaciones' : 'Días Vacaciones'}</p>
             <p className="text-2xl font-bold text-slate-800">{kpis.totalVacaciones}</p>
           </div>
         </div>
@@ -258,7 +284,7 @@ export default function Dashboard() {
         >
           <div className="p-3 bg-orange-100 text-orange-600 rounded-lg"><AlertTriangle size={24} /></div>
           <div>
-            <p className="text-sm text-slate-500 font-medium">Días Licencia</p>
+            <p className="text-sm text-slate-500 font-medium">{kpis.isPeople ? 'Personas Licencia' : 'Días Licencia'}</p>
             <p className="text-2xl font-bold text-slate-800">{kpis.totalLicencias}</p>
           </div>
         </div>
@@ -268,7 +294,7 @@ export default function Dashboard() {
         >
           <div className="p-3 bg-red-100 text-red-600 rounded-lg"><UserXIcon size={24} /></div>
           <div>
-            <p className="text-sm text-slate-500 font-medium">Días Ausente</p>
+            <p className="text-sm text-slate-500 font-medium">{kpis.isPeople ? 'Personas Ausentes' : 'Días Ausentes'}</p>
             <p className="text-2xl font-bold text-slate-800">{kpis.totalAusencias}</p>
           </div>
         </div>
