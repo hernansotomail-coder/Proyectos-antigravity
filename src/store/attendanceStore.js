@@ -49,17 +49,23 @@ export const useAttendanceStore = create((set) => ({
   saveAttendanceRange: async (staffId, startDate, endDate, serviceType) => {
     set({ isLoading: true });
     try {
-      // Generar arreglo de fechas
-      const start = new Date(startDate);
-      const end = new Date(endDate);
       const records = [];
-
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      let currentStr = startDate;
+      
+      while (currentStr <= endDate) {
         records.push({
           staff_id: staffId,
-          date: d.toISOString().split('T')[0],
+          date: currentStr,
           service_type: serviceType
         });
+        
+        // Avanzar 1 día de forma segura ignorando zonas horarias
+        const [y, m, d] = currentStr.split('-').map(Number);
+        const nextDate = new Date(y, m - 1, d + 1);
+        const ny = nextDate.getFullYear();
+        const nm = String(nextDate.getMonth() + 1).padStart(2, '0');
+        const nd = String(nextDate.getDate()).padStart(2, '0');
+        currentStr = `${ny}-${nm}-${nd}`;
       }
 
       const { error } = await supabase
@@ -71,7 +77,7 @@ export const useAttendanceStore = create((set) => ({
       return true;
     } catch (err) {
       console.error(err);
-      toast.error('Error al guardar rango de fechas');
+      toast.error('Error de rango: ' + (err.message || 'Desconocido'));
       return false;
     } finally {
       set({ isLoading: false });
