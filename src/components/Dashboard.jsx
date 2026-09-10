@@ -117,15 +117,22 @@ export default function Dashboard() {
     const staffToCalculate = selectedStaffKpi ? filteredStaff.filter(s => s.id === selectedStaffKpi) : filteredStaff;
     const totalStaff = staffToCalculate.length;
 
+    // Obtener fecha local de hoy (YYYY-MM-DD)
+    const todayObj = new Date();
+    const ty = todayObj.getFullYear();
+    const tm = String(todayObj.getMonth() + 1).padStart(2, '0');
+    const td = String(todayObj.getDate()).padStart(2, '0');
+    const todayStr = `${ty}-${tm}-${td}`;
+
     if (selectedStaffKpi) {
-      // Vista individual: Contar Días
+      // Vista individual: Contar Días (solo de hoy en adelante)
       let totalTrabajado = 0;
       let totalVacaciones = 0;
       let totalLicencias = 0;
       let totalAusencias = 0;
 
       staffToCalculate.forEach(staff => {
-        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
+        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id && a.date >= todayStr);
         staffAttendance.forEach(val => {
           if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) totalTrabajado++;
           if (val.service_type === 'Vacaciones') totalVacaciones++;
@@ -135,14 +142,14 @@ export default function Dashboard() {
       });
       return { totalStaff, totalTrabajado, totalVacaciones, totalLicencias, totalAusencias, isPeople: false };
     } else {
-      // Vista global: Contar Personas únicas
+      // Vista global: Contar Personas únicas (solo de hoy en adelante)
       let efectivosSet = new Set();
       let vacacionesSet = new Set();
       let licenciasSet = new Set();
       let ausentesSet = new Set();
 
       staffToCalculate.forEach(staff => {
-        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
+        const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id && a.date >= todayStr);
         staffAttendance.forEach(val => {
           if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) efectivosSet.add(staff.id);
           if (val.service_type === 'Vacaciones') vacacionesSet.add(staff.id);
