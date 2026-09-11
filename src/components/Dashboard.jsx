@@ -105,13 +105,41 @@ export default function Dashboard() {
       return row;
     });
 
-    // Apply KPI Filter (Only show rows that contain the active kpi service_type at least once)
+    // Apply KPI Filter
     if (activeKpiFilter) {
-      return rawMatrix.filter(row => Object.values(row.days).includes(activeKpiFilter));
+      const todayObj = new Date();
+      const ty = todayObj.getFullYear();
+      const tm = String(todayObj.getMonth() + 1).padStart(2, '0');
+      const td = String(todayObj.getDate()).padStart(2, '0');
+      const todayStr = `${ty}-${tm}-${td}`;
+      
+      const specificDateStr = selectedDayKpi ? `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(selectedDayKpi).padStart(2, '0')}` : null;
+
+      return rawMatrix.filter(row => {
+        for (const [day, service] of Object.entries(row.days)) {
+          const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          
+          let isValidDate = false;
+          if (specificDateStr) {
+             isValidDate = (dateStr === specificDateStr);
+          } else {
+             isValidDate = (dateStr >= todayStr);
+          }
+
+          if (isValidDate) {
+             if (activeKpiFilter === 'Trabajado') {
+                 if (!['Vacaciones', 'Licencia', 'Baja', ''].includes(service)) return true;
+             } else {
+                 if (service === activeKpiFilter) return true;
+             }
+          }
+        }
+        return false;
+      });
     }
 
     return rawMatrix;
-  }, [filteredStaff, attendanceList, daysArray, selectedYear, selectedMonth, activeKpiFilter]);
+  }, [filteredStaff, attendanceList, daysArray, selectedYear, selectedMonth, activeKpiFilter, selectedDayKpi]);
 
   // KPIs Calculation
   const kpis = useMemo(() => {

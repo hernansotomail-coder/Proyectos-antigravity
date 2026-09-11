@@ -115,16 +115,36 @@ export default function Attendance() {
     e.preventDefault();
     if (!editCell) return;
 
-    let records = [];
-    if (editCell.currentService) {
-      records = [{
-        staff_id: editCell.id_db,
-        date: editCell.dateStr,
-        service_type: editCell.currentService
-      }];
-    } else {
-      toast.warning('No se puede asignar estado "Vacío" por aquí. Para borrarlo de la base de datos se debe usar SQL.');
+    if (editCell.currentService === "Limpiar" || editCell.currentService === "") {
+      const { error } = await supabase
+        .from('attendance')
+        .delete()
+        .match({ staff_id: editCell.id_db, date: editCell.dateStr });
+      
+      if (error) {
+        toast.error('Error al limpiar estado: ' + error.message);
+      } else {
+        toast.success('Estado limpiado exitosamente');
+        setEditCell(null);
+        loadMatrixData();
+      }
       return;
+    }
+
+    let records = [{
+      staff_id: editCell.id_db,
+      date: editCell.dateStr,
+      service_type: editCell.currentService
+    }];
+
+    if (editCell.applyToOtherStaff && editCell.applyToOtherStaff.length > 0) {
+      editCell.applyToOtherStaff.forEach(otherId => {
+        records.push({
+          staff_id: otherId,
+          date: editCell.dateStr,
+          service_type: editCell.currentService
+        });
+      });
     }
 
     const success = await saveAttendanceBulk(records);
@@ -693,17 +713,41 @@ export default function Attendance() {
                 value={editCell.currentService}
                 onChange={(e) => setEditCell({...editCell, currentService: e.target.value})}
                 options={[
-                  { value: '', label: 'Seleccione Estado' },
+                  { value: 'Limpiar', label: 'Limpiar (Eliminar estado)' },
                   { value: 'Trabajado', label: 'Trabajado' },
                   { value: 'Vacaciones', label: 'Vacaciones' },
                   { value: 'Licencia', label: 'Licencia Médica' },
                   { value: 'Ausente', label: 'Ausente' },
                   { value: 'Disponible', label: 'Disponible' },
                   { value: 'Permiso con goce', label: 'Permiso con goce' },
-                  { value: 'Permiso sin goce', label: 'Permiso sin goce' }
+                  { value: 'Permiso sin goce', label: 'Permiso sin goce' },
+                  { value: 'Baja', label: 'Baja' }
                 ]}
                 required
               />
+              <div className="space-y-1 mt-2">
+                <label className="text-sm font-medium text-slate-700">También aplicar a (Opcional)</label>
+                <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-2 bg-slate-50">
+                  {staffList.filter(s => s.status === 'Activo' && s.id !== editCell.id_db).map(s => (
+                    <label key={s.id} className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:text-slate-800">
+                      <input 
+                        type="checkbox" 
+                        checked={(editCell.applyToOtherStaff || []).includes(s.id)}
+                        onChange={(e) => {
+                          const currentList = editCell.applyToOtherStaff || [];
+                          if (e.target.checked) {
+                            setEditCell({...editCell, applyToOtherStaff: [...currentList, s.id]});
+                          } else {
+                            setEditCell({...editCell, applyToOtherStaff: currentList.filter(id => id !== s.id)});
+                          }
+                        }}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      {s.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="pt-4 flex justify-end gap-2 border-t border-slate-100">
                 <Button type="button" variant="ghost" onClick={() => setEditCell(null)}>
                   Cancelar

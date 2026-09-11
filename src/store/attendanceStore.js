@@ -53,14 +53,19 @@ export const useAttendanceStore = create((set) => ({
       let currentStr = startDate;
       
       while (currentStr <= endDate) {
-        records.push({
-          staff_id: staffId,
-          date: currentStr,
-          service_type: serviceType
-        });
+        const [y, m, d] = currentStr.split('-').map(Number);
+        const loopDate = new Date(y, m - 1, d);
+
+        // No contabilizar los días domingos (0 = Domingo en getDay())
+        if (loopDate.getDay() !== 0) {
+          records.push({
+            staff_id: staffId,
+            date: currentStr,
+            service_type: serviceType
+          });
+        }
         
         // Avanzar 1 día de forma segura ignorando zonas horarias
-        const [y, m, d] = currentStr.split('-').map(Number);
         const nextDate = new Date(y, m - 1, d + 1);
         const ny = nextDate.getFullYear();
         const nm = String(nextDate.getMonth() + 1).padStart(2, '0');
