@@ -97,9 +97,14 @@ export default function Dashboard() {
       };
 
       daysArray.forEach(day => {
-        const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const record = staffAttendance.find(a => a.date === dateStr);
-        row.days[day] = record ? record.service_type : '';
+        const isSunday = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0;
+        if (isSunday) {
+          row.days[day] = '';
+        } else {
+          const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const record = staffAttendance.find(a => a.date === dateStr);
+          row.days[day] = record ? record.service_type : '';
+        }
       });
 
       return row;
@@ -156,7 +161,7 @@ export default function Dashboard() {
     const specificDateStr = selectedDayKpi ? `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(selectedDayKpi).padStart(2, '0')}` : null;
 
     if (selectedStaffKpi) {
-      // Vista individual: Contar Días (solo de hoy en adelante, o del día seleccionado)
+      // Vista individual: Contar Días (toda la línea del mes, a menos que se presione un día específico)
       let totalTrabajado = 0;
       let totalVacaciones = 0;
       let totalLicencias = 0;
@@ -165,8 +170,15 @@ export default function Dashboard() {
       staffToCalculate.forEach(staff => {
         const staffAttendance = attendanceList.filter(a => {
           if (a.staff_id !== staff.id) return false;
+          
+          // No contabilizar los domingos
+          const [ay, am, ad] = a.date.split('-').map(Number);
+          const isSunday = new Date(ay, am - 1, ad).getDay() === 0;
+          if (isSunday) return false;
+
           if (specificDateStr) return a.date === specificDateStr;
-          return a.date >= todayStr;
+          // Si es vista individual completa, consideramos todos los días (histórico incluido)
+          return true;
         });
         staffAttendance.forEach(val => {
           if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) totalTrabajado++;
@@ -186,6 +198,12 @@ export default function Dashboard() {
       staffToCalculate.forEach(staff => {
         const staffAttendance = attendanceList.filter(a => {
           if (a.staff_id !== staff.id) return false;
+
+          // No contabilizar los domingos
+          const [ay, am, ad] = a.date.split('-').map(Number);
+          const isSunday = new Date(ay, am - 1, ad).getDay() === 0;
+          if (isSunday) return false;
+
           if (specificDateStr) return a.date === specificDateStr;
           return a.date >= todayStr;
         });

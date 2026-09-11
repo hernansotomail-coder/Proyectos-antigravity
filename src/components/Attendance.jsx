@@ -93,9 +93,14 @@ export default function Attendance() {
       };
 
       daysArray.forEach(day => {
-        const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        const record = staffAttendance.find(a => a.date === dateStr);
-        row.days[day] = record ? record.service_type : '';
+        const isSunday = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0;
+        if (isSunday) {
+          row.days[day] = '';
+        } else {
+          const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          const record = staffAttendance.find(a => a.date === dateStr);
+          row.days[day] = record ? record.service_type : '';
+        }
       });
 
       return row;
