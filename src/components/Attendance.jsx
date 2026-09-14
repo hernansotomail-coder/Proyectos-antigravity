@@ -338,6 +338,13 @@ export default function Attendance() {
       console.error('Error verificando registros existentes en la BD', e);
     }
 
+    // Remover duplicados en el payload usando staff_id, conservando el último ingresado
+    const uniqueMap = new Map();
+    validRecords.forEach(record => {
+      uniqueMap.set(record.staff_id, record);
+    });
+    validRecords = Array.from(uniqueMap.values());
+
     const success = await saveAttendanceBulk(validRecords);
     if (success) {
       setPreviewData(null);
@@ -737,7 +744,28 @@ export default function Attendance() {
                 required
               />
               <div className="space-y-1 mt-2">
-                <label className="text-sm font-medium text-slate-700">También aplicar a (Opcional)</label>
+                <div className="flex justify-between items-center">
+                  <label className="text-sm font-medium text-slate-700">También aplicar a (Opcional)</label>
+                  <label className="text-xs font-medium text-blue-600 cursor-pointer flex items-center gap-1 hover:text-blue-800">
+                    <input 
+                      type="checkbox"
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          const allIds = matrix.filter(row => row.rut !== editCell.staff_id).map(r => r.id).filter(Boolean);
+                          setEditCell({...editCell, applyToOtherStaff: allIds});
+                        } else {
+                          setEditCell({...editCell, applyToOtherStaff: []});
+                        }
+                      }}
+                      checked={
+                        matrix.filter(row => row.rut !== editCell.staff_id).length > 0 && 
+                        (editCell.applyToOtherStaff || []).length === matrix.filter(row => row.rut !== editCell.staff_id).length
+                      }
+                    />
+                    Seleccionar todos
+                  </label>
+                </div>
                 <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-2 bg-slate-50">
                   {matrix.filter(row => row.rut !== editCell.staff_id).map(row => {
                     const staffId = row.id;

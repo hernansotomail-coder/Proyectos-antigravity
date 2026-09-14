@@ -13,7 +13,7 @@ export const useStaffStore = create((set, get) => ({
       const { data, error } = await supabase
         .from('staff')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('name', { ascending: true });
 
       if (error) throw error;
       set({ staffList: data, error: null });
@@ -36,7 +36,10 @@ export const useStaffStore = create((set, get) => ({
 
       if (error) throw error;
       
-      set((state) => ({ staffList: [data[0], ...state.staffList], error: null }));
+      set((state) => {
+        const newList = [data[0], ...state.staffList];
+        return { staffList: newList.sort((a, b) => a.name.localeCompare(b.name)), error: null };
+      });
       toast.success('Registro guardado correctamente');
       return true;
     } catch (err) {
