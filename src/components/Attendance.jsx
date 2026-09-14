@@ -120,7 +120,7 @@ export default function Attendance() {
     e.preventDefault();
     if (!editCell) return;
 
-    if (editCell.currentService === "Limpiar" || editCell.currentService === "") {
+    if (editCell.currentService === "Limpiar") {
       const { error } = await supabase
         .from('attendance')
         .delete()
@@ -133,6 +133,11 @@ export default function Attendance() {
         setEditCell(null);
         loadMatrixData();
       }
+      return;
+    }
+
+    if (!editCell.currentService) {
+      toast.warning('Por favor, selecciona un estado de la lista o elige Limpiar.');
       return;
     }
 
@@ -733,24 +738,27 @@ export default function Attendance() {
               <div className="space-y-1 mt-2">
                 <label className="text-sm font-medium text-slate-700">También aplicar a (Opcional)</label>
                 <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-2 bg-slate-50">
-                  {staffList.filter(s => s.status === 'Activo' && s.id !== editCell.id_db).map(s => (
-                    <label key={s.id} className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:text-slate-800">
+                  {matrix.filter(row => row.rut !== editCell.staff_id).map(row => {
+                    const staffId = staffList.find(s => s.rut === row.rut)?.id;
+                    if (!staffId) return null;
+                    return (
+                    <label key={staffId} className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:text-slate-800">
                       <input 
                         type="checkbox" 
-                        checked={(editCell.applyToOtherStaff || []).includes(s.id)}
+                        checked={(editCell.applyToOtherStaff || []).includes(staffId)}
                         onChange={(e) => {
                           const currentList = editCell.applyToOtherStaff || [];
                           if (e.target.checked) {
-                            setEditCell({...editCell, applyToOtherStaff: [...currentList, s.id]});
+                            setEditCell({...editCell, applyToOtherStaff: [...currentList, staffId]});
                           } else {
-                            setEditCell({...editCell, applyToOtherStaff: currentList.filter(id => id !== s.id)});
+                            setEditCell({...editCell, applyToOtherStaff: currentList.filter(id => id !== staffId)});
                           }
                         }}
                         className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                       />
-                      {s.name}
+                      {row.name}
                     </label>
-                  ))}
+                  )})}
                 </div>
               </div>
               <div className="pt-4 flex justify-end gap-2 border-t border-slate-100">
