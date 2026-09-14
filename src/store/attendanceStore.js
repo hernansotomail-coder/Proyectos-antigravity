@@ -13,7 +13,8 @@ export const useAttendanceStore = create((set) => ({
         .from('attendance')
         .select('*')
         .gte('date', startDate)
-        .lte('date', endDate);
+        .lte('date', endDate)
+        .limit(10000);
 
       if (error) throw error;
       set({ attendanceList: data });

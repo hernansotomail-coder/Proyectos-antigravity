@@ -102,7 +102,7 @@ export default function Dashboard() {
           row.days[day] = '';
         } else {
           const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-          const record = staffAttendance.find(a => a.date === dateStr);
+          const record = staffAttendance.find(a => a.date && a.date.startsWith(dateStr));
           row.days[day] = record ? record.service_type : '';
         }
       });
