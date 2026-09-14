@@ -9,16 +9,34 @@ export const useAttendanceStore = create((set) => ({
   fetchAttendanceByDateRange: async (startDate, endDate) => {
     set({ isLoading: true });
     try {
-      const { data, error } = await supabase
-        .from('attendance')
-        .select('*')
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .limit(10000);
+      let allData = [];
+      let from = 0;
+      const limit = 1000;
+      let hasMore = true;
 
-      if (error) throw error;
-      set({ attendanceList: data });
-      return data;
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('attendance')
+          .select('*')
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .range(from, from + limit - 1);
+
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allData = [...allData, ...data];
+          from += limit;
+          if (data.length < limit) {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+      }
+
+      set({ attendanceList: allData });
+      return allData;
     } catch (err) {
       console.error(err);
       toast.error('Error al cargar la asistencia');
