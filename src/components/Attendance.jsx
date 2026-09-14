@@ -85,6 +85,7 @@ export default function Attendance() {
       const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
       
       const row = {
+        id: staff.id,
         rut: staff.rut,
         name: staff.name,
         role: staff.role,
@@ -684,7 +685,7 @@ export default function Attendance() {
                           key={day} 
                           className={`p-1 border-r border-slate-100 text-center cursor-pointer transition-colors relative ${isWeekend ? 'bg-orange-100 hover:bg-orange-200' : 'hover:bg-blue-50'}`} 
                           title={`Editar asistencia de ${row.name} el ${day}/${selectedMonth} - Actual: ${service || 'Vacío'}`}
-                          onClick={() => setEditCell({ staff_id: row.rut, id_db: staffList.find(s=>s.rut === row.rut)?.id, name: row.name, day, dateStr, currentService: service })}
+                          onClick={() => setEditCell({ staff_id: row.rut, id_db: row.id, name: row.name, day, dateStr, currentService: service })}
                         >
                           <div className={`w-full h-8 flex items-center justify-center rounded-md transition-transform hover:scale-110 ${getServiceColor(service)}`}>
                             {getServiceAbbr(service)}
@@ -739,7 +740,7 @@ export default function Attendance() {
                 <label className="text-sm font-medium text-slate-700">También aplicar a (Opcional)</label>
                 <div className="max-h-32 overflow-y-auto border border-slate-200 rounded-lg p-2 space-y-2 bg-slate-50">
                   {matrix.filter(row => row.rut !== editCell.staff_id).map(row => {
-                    const staffId = staffList.find(s => s.rut === row.rut)?.id;
+                    const staffId = row.id;
                     if (!staffId) return null;
                     return (
                     <label key={staffId} className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer hover:text-slate-800">
