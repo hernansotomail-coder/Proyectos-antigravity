@@ -20,6 +20,7 @@ export const useAttendanceStore = create((set) => ({
           .select('*')
           .gte('date', startDate)
           .lte('date', endDate)
+          .order('id', { ascending: true })
           .range(from, from + limit - 1);
 
         if (error) throw error;
