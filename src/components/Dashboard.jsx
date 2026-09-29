@@ -300,7 +300,10 @@ export default function Dashboard() {
               { value: 'Auxiliar', label: 'Auxiliar' },
               { value: 'Auxiliar Rampla', label: 'Auxiliar Rampla' },
               { value: 'Movilizador', label: 'Movilizador' },
-              { value: 'Movilizador Nocturno', label: 'Movilizador Nocturno' }
+              { value: 'Movilizador Nocturno', label: 'Movilizador Nocturno' },
+              { value: 'Movilizador Rampla Día', label: 'Movilizador Rampla Día' },
+              { value: 'Movilizador Rampla Noche', label: 'Movilizador Rampla Noche' },
+              { value: 'Movilizador A4 Día', label: 'Movilizador A4 Día' }
             ]}
           />
         </div>
