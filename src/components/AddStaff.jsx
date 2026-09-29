@@ -182,6 +182,7 @@ export default function AddStaff() {
               { value: 'Conductor A5', label: 'Conductor A5' },
               { value: 'Conductor B', label: 'Conductor B' },
               { value: 'Auxiliar', label: 'Auxiliar' },
+              { value: 'Auxiliar Rampla', label: 'Auxiliar Rampla' },
               { value: 'Movilizador', label: 'Movilizador' },
               { value: 'Movilizador Nocturno', label: 'Movilizador Nocturno' }
             ]}
