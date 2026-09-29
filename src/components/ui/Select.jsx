@@ -10,7 +10,9 @@ export function Select({ label, error, options = [], className = '', ...props })
         } ${className}`}
         {...props}
       >
-        <option value="" disabled>Seleccione una opción</option>
+        {props.placeholder !== false && (
+          <option value="" disabled>{props.placeholder || 'Seleccione una opción'}</option>
+        )}
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}

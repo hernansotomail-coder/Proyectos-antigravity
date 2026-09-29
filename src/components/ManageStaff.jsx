@@ -221,9 +221,12 @@ export default function ManageStaff() {
                 value={editingStaff.role}
                 onChange={(e) => setEditingStaff({...editingStaff, role: e.target.value})}
                 options={[
-                  { value: 'Conductor', label: 'Conductor' },
+                  { value: 'Conductor A4', label: 'Conductor A4' },
+                  { value: 'Conductor A5', label: 'Conductor A5' },
+                  { value: 'Conductor B', label: 'Conductor B' },
                   { value: 'Auxiliar', label: 'Auxiliar' },
-                  { value: 'Movilizador', label: 'Movilizador' }
+                  { value: 'Movilizador', label: 'Movilizador' },
+                  { value: 'Movilizador Nocturno', label: 'Movilizador Nocturno' }
                 ]}
                 required
               />

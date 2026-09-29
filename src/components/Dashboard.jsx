@@ -288,17 +288,25 @@ export default function Dashboard() {
         </div>
         <div className="w-full md:w-48">
           <Select 
+            label="Cargo"
+            placeholder={false}
             value={roleFilter} 
             onChange={(e) => setRoleFilter(e.target.value)}
             options={[
               { value: '', label: 'Todos los cargos' },
-              { value: 'Conductor', label: 'Conductor' },
-              { value: 'Auxiliar', label: 'Auxiliar' }
+              { value: 'Conductor A4', label: 'Conductor A4' },
+              { value: 'Conductor A5', label: 'Conductor A5' },
+              { value: 'Conductor B', label: 'Conductor B' },
+              { value: 'Auxiliar', label: 'Auxiliar' },
+              { value: 'Movilizador', label: 'Movilizador' },
+              { value: 'Movilizador Nocturno', label: 'Movilizador Nocturno' }
             ]}
           />
         </div>
         <div className="w-full md:w-48">
           <Select 
+            label="Estado dotación"
+            placeholder={false}
             value={statusFilter} 
             onChange={(e) => setStatusFilter(e.target.value)}
             options={[

@@ -83,8 +83,6 @@ export default function AddStaff() {
           
           // Mapeo simple de cargos si vienen como 'Conductor A4' -> dejarlo pasar, la BD lo acepta.
           let role = rawRole || 'Auxiliar';
-          if (role.toLowerCase().includes('conductor')) role = 'Conductor';
-          if (role.toLowerCase().includes('movilizador')) role = 'Movilizador';
 
           return {
             rut: formattedRut,
@@ -180,9 +178,12 @@ export default function AddStaff() {
             value={formData.role}
             onChange={(e) => setFormData({...formData, role: e.target.value})}
             options={[
-              { value: 'Conductor', label: 'Conductor' },
+              { value: 'Conductor A4', label: 'Conductor A4' },
+              { value: 'Conductor A5', label: 'Conductor A5' },
+              { value: 'Conductor B', label: 'Conductor B' },
               { value: 'Auxiliar', label: 'Auxiliar' },
-              { value: 'Movilizador', label: 'Movilizador' }
+              { value: 'Movilizador', label: 'Movilizador' },
+              { value: 'Movilizador Nocturno', label: 'Movilizador Nocturno' }
             ]}
             required
           />
