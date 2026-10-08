@@ -58,23 +58,24 @@ export default function AddFleet() {
           const rawYear = getValue(row, ['año', 'ano']);
           let rawStatus = getValue(row, ['estado', 'status', 'vigencia']);
 
-          if (rawStatus && rawStatus.toString().toUpperCase().includes('VIGENTE')) {
+          if (rawStatus && String(rawStatus).toUpperCase().includes('VIGENTE')) {
             rawStatus = 'Activo';
           } else if (!rawStatus) {
             rawStatus = 'Activo';
           }
 
-          const cleanPlate = String(rawPlate).toUpperCase().trim();
+          const cleanPlate = rawPlate != null ? String(rawPlate).toUpperCase().trim() : '';
+          const cleanInternal = rawInternal != null ? String(rawInternal).trim() : 'S/N'; // S/N si viene vacio para no fallar
 
           return {
-            type: rawType || 'Camión',
+            type: rawType ? String(rawType).trim() : 'Camión',
             plate: cleanPlate,
-            internal_number: String(rawInternal).trim(),
-            brand: String(rawBrand).trim(),
-            model: String(rawModel).trim(),
-            year: String(rawYear).trim(),
-            status: rawStatus,
-            isValid: !!cleanPlate && !!rawInternal
+            internal_number: cleanInternal,
+            brand: rawBrand != null ? String(rawBrand).trim() : null,
+            model: rawModel != null ? String(rawModel).trim() : null,
+            year: rawYear != null ? String(rawYear).trim() : null,
+            status: String(rawStatus).trim(),
+            isValid: !!cleanPlate
           };
         });
 
@@ -129,7 +130,18 @@ export default function AddFleet() {
       return;
     }
 
-    const success = await addFleetBulk(validData);
+    // Deduplicar por patente para evitar errores de Supabase Upsert en la misma carga
+    const uniqueData = [];
+    const seen = new Set();
+    // Procesar de fin a inicio para quedarse con la última aparición de la patente en el Excel
+    for (let i = validData.length - 1; i >= 0; i--) {
+      if (!seen.has(validData[i].plate)) {
+        seen.add(validData[i].plate);
+        uniqueData.push(validData[i]);
+      }
+    }
+
+    const success = await addFleetBulk(uniqueData);
     if (success) {
       setPreviewData(null);
     }

@@ -73,5 +73,43 @@ export const useFleetStore = create((set, get) => ({
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  updateFleet: async (id, fleetData) => {
+    try {
+      const { error } = await supabase
+        .from('fleet')
+        .update(fleetData)
+        .eq('id', id);
+
+      if (error) throw error;
+      
+      toast.success('Vehículo actualizado exitosamente');
+      await get().fetchFleet();
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al actualizar el vehículo');
+      return false;
+    }
+  },
+
+  deleteFleet: async (id) => {
+    try {
+      const { error } = await supabase
+        .from('fleet')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      
+      toast.success('Vehículo eliminado');
+      await get().fetchFleet();
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al eliminar el vehículo');
+      return false;
+    }
   }
 }));

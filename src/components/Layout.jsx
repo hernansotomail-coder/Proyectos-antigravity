@@ -19,7 +19,8 @@ export default function Layout() {
 
   const asignacionItems = [
     { name: 'Disponibilización', path: '/assignment', icon: Truck },
-    { name: 'Flota', path: '/fleet', icon: Truck },
+    { name: 'Agregar Flota', path: '/fleet', icon: Truck },
+    { name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
   ];
 
   const asistenciaItems = [
