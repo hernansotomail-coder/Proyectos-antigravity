@@ -7,6 +7,7 @@ import { useAuthStore } from '../store/authStore';
 export default function Layout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAsistenciaOpen, setIsAsistenciaOpen] = useState(true);
+  const [isAsignacionOpen, setIsAsignacionOpen] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, logout } = useAuthStore();
@@ -16,8 +17,9 @@ export default function Layout() {
     navigate('/');
   };
 
-  const navStructure = [
-    { name: 'Control de Asignación', path: '/assignment', icon: Truck },
+  const asignacionItems = [
+    { name: 'Disponibilización', path: '/assignment', icon: Truck },
+    { name: 'Flota', path: '/fleet', icon: Truck },
   ];
 
   const asistenciaItems = [
@@ -27,6 +29,7 @@ export default function Layout() {
     { name: 'Asistencia', path: '/attendance', icon: CalendarClock },
   ];
 
+  const isAnyAsignacionActive = asignacionItems.some(item => location.pathname === item.path);
   const isAnyAsistenciaActive = asistenciaItems.some(item => location.pathname === item.path);
 
   return (
@@ -40,22 +43,44 @@ export default function Layout() {
           </div>
         </div>
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
-          {navStructure.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                  isActive
-                    ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-                }`
-              }
+          {/* Menú Control de Asignación */}
+          <div className="pt-2">
+            <button
+              onClick={() => setIsAsignacionOpen(!isAsignacionOpen)}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 ${
+                isAnyAsignacionActive && !isAsignacionOpen
+                  ? 'bg-slate-50 text-blue-600 font-semibold'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
             >
-              <item.icon size={20} />
-              <span>{item.name}</span>
-            </NavLink>
-          ))}
+              <div className="flex items-center gap-3">
+                <Truck size={20} />
+                <span>Control Asignación</span>
+              </div>
+              {isAsignacionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            
+            {isAsignacionOpen && (
+              <div className="mt-1 ml-4 pl-4 border-l-2 border-slate-100 space-y-1">
+                {asignacionItems.map((item) => (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 text-sm ${
+                        isActive
+                          ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                      }`
+                    }
+                  >
+                    <item.icon size={18} />
+                    <span>{item.name}</span>
+                  </NavLink>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Menú Asistencia */}
           <div className="pt-2">
@@ -122,18 +147,22 @@ export default function Layout() {
         {/* Mobile Menu Dropdown */}
         {isMobileMenuOpen && (
           <nav className="md:hidden bg-white border-b border-slate-200 px-4 py-2 space-y-1 z-20 absolute w-full top-16 shadow-lg">
-            {navStructure.map((item) => (
+            
+            <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-2 pb-2">
+              Control Asignación
+            </div>
+            {asignacionItems.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg ${
+                  `flex items-center gap-3 px-4 py-3 rounded-lg pl-8 ${
                     isActive ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600'
                   }`
                 }
               >
-                <item.icon size={20} />
+                <item.icon size={18} />
                 <span>{item.name}</span>
               </NavLink>
             ))}
