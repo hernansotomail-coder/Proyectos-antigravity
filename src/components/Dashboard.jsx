@@ -4,7 +4,7 @@ import { useAttendanceStore } from '../store/attendanceStore';
 import { Select } from './ui/Select';
 import { Input } from './ui/Input';
 import { Button } from './ui/Button';
-import { Download, Users, Briefcase, CalendarOff, AlertTriangle } from 'lucide-react';
+import { Download, Users, Briefcase, CalendarOff, AlertTriangle, ChevronDown, Check } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 
@@ -46,12 +46,13 @@ export default function Dashboard() {
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
-  const [roleFilter, setRoleFilter] = useState('');
+  const [roleFilters, setRoleFilters] = useState([]); // Array of strings for multiselect
   const [statusFilter, setStatusFilter] = useState('');
   const [searchFilter, setSearchFilter] = useState('');
   const [activeKpiFilter, setActiveKpiFilter] = useState(null); // 'Trabajado', 'Vacaciones', 'Licencia', 'Ausente'
   const [selectedStaffKpi, setSelectedStaffKpi] = useState(null); // ID of the selected staff to filter KPIs
   const [selectedDayKpi, setSelectedDayKpi] = useState(null); // Selected day number to filter KPIs
+  const [isRoleMenuOpen, setIsRoleMenuOpen] = useState(false); // For custom multiselect UI
 
   const loadData = () => {
     const start = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-01`;
@@ -71,14 +72,16 @@ export default function Dashboard() {
   // Data processing
   const filteredStaff = useMemo(() => {
     let list = staffList;
-    if (roleFilter) list = list.filter(s => s.role === roleFilter);
+    if (roleFilters.length > 0) {
+      list = list.filter(s => roleFilters.includes(s.role));
+    }
     if (statusFilter) list = list.filter(s => s.status === statusFilter);
     if (searchFilter) {
       const lower = searchFilter.toLowerCase();
       list = list.filter(s => s.name.toLowerCase().includes(lower) || s.rut.toLowerCase().includes(lower));
     }
     return list;
-  }, [staffList, roleFilter, statusFilter, searchFilter]);
+  }, [staffList, roleFilters, statusFilter, searchFilter]);
 
   const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -286,26 +289,66 @@ export default function Dashboard() {
             onChange={(e) => setSearchFilter(e.target.value)} 
           />
         </div>
-        <div className="w-full md:w-48">
-          <Select 
-            label="Cargo"
-            placeholder={false}
-            value={roleFilter} 
-            onChange={(e) => setRoleFilter(e.target.value)}
-            options={[
-              { value: '', label: 'Todos los cargos' },
-              { value: 'Conductor A4', label: 'Conductor A4' },
-              { value: 'Conductor A5', label: 'Conductor A5' },
-              { value: 'Conductor B', label: 'Conductor B' },
-              { value: 'Auxiliar', label: 'Auxiliar' },
-              { value: 'Auxiliar Rampla', label: 'Auxiliar Rampla' },
-              { value: 'Movilizador', label: 'Movilizador' },
-              { value: 'Movilizador Nocturno', label: 'Movilizador Nocturno' },
-              { value: 'Movilizador Rampla Día', label: 'Movilizador Rampla Día' },
-              { value: 'Movilizador Rampla Noche', label: 'Movilizador Rampla Noche' },
-              { value: 'Movilizador A4 Día', label: 'Movilizador A4 Día' }
-            ]}
-          />
+        <div className="w-full md:w-64 relative">
+          <label className="text-sm font-medium text-slate-700 mb-1.5 block">Cargos</label>
+          <div 
+            className="flex min-h-10 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm cursor-pointer"
+            onClick={() => setIsRoleMenuOpen(!isRoleMenuOpen)}
+          >
+            <span className="truncate flex-1">
+              {roleFilters.length === 0 ? 'Todos los cargos' : `${roleFilters.length} seleccionados`}
+            </span>
+            <ChevronDown size={16} className="text-slate-400 ml-2" />
+          </div>
+          
+          {isRoleMenuOpen && (
+            <>
+              <div 
+                className="fixed inset-0 z-40" 
+                onClick={() => setIsRoleMenuOpen(false)}
+              ></div>
+              <div className="absolute top-full left-0 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg z-50 max-h-60 overflow-y-auto">
+                <div 
+                  className="flex items-center px-3 py-2 hover:bg-slate-50 cursor-pointer border-b border-slate-100"
+                  onClick={() => {
+                    setRoleFilters([]);
+                    setIsRoleMenuOpen(false);
+                  }}
+                >
+                  <div className="w-5 h-5 flex items-center justify-center mr-2">
+                    {roleFilters.length === 0 && <Check size={16} className="text-blue-600" />}
+                  </div>
+                  <span className={roleFilters.length === 0 ? "font-semibold text-blue-600" : "text-slate-700"}>
+                    Todos los cargos
+                  </span>
+                </div>
+              {[
+                'Conductor A4', 'Conductor A5', 'Conductor B', 'Auxiliar', 'Auxiliar Rampla', 
+                'Movilizador', 'Movilizador Nocturno', 'Movilizador Rampla Día', 
+                'Movilizador Rampla Noche', 'Movilizador A4 Día'
+              ].map(role => (
+                <div 
+                  key={role}
+                  className="flex items-center px-3 py-2 hover:bg-slate-50 cursor-pointer"
+                  onClick={() => {
+                    setRoleFilters(prev => 
+                      prev.includes(role) 
+                        ? prev.filter(r => r !== role) 
+                        : [...prev, role]
+                    );
+                  }}
+                >
+                  <div className="w-5 h-5 flex items-center justify-center mr-2">
+                    {roleFilters.includes(role) && <Check size={16} className="text-blue-600" />}
+                  </div>
+                  <span className={roleFilters.includes(role) ? "font-medium text-slate-800" : "text-slate-600"}>
+                    {role}
+                  </span>
+                </div>
+              ))}
+              </div>
+            </>
+          )}
         </div>
         <div className="w-full md:w-48">
           <Select 
