@@ -4,6 +4,7 @@ import {
   ChevronUp, ChevronDown, CheckCircle2, Circle, Check 
 } from 'lucide-react';
 import { useStaffStore } from '../store/staffStore';
+import { useFleetStore } from '../store/fleetStore';
 
 // Tipos de servicio y sus colores
 const SERVICE_COLORS = {
@@ -71,6 +72,7 @@ const MOCK_ASSIGNMENTS = [
 
 export default function AssignmentControl() {
   const { staffList, fetchStaff } = useStaffStore();
+  const { fleetList, fetchFleet } = useFleetStore();
   
   // Estado de los filtros del Header
   const [filters, setFilters] = useState({
@@ -85,15 +87,17 @@ export default function AssignmentControl() {
   const [sortVueltasAsc, setSortVueltasAsc] = useState(false); // true: asc, false: desc
   const [sortTrucksAsc, setSortTrucksAsc] = useState(false);
   const [selectedStaff, setSelectedStaff] = useState(null); // String (name)
-  const [trucks, setTrucks] = useState(MOCK_TRUCKS);
+  
+  // Guardamos las referencias escritas a mano
+  const [truckReferences, setTruckReferences] = useState({});
 
   useEffect(() => {
     fetchStaff();
-  }, [fetchStaff]);
+    fetchFleet();
+  }, [fetchStaff, fetchFleet]);
 
-  // Computed data
+  // Computed data para Dotación
   const { conductores, auxiliares } = useMemo(() => {
-    // Calculamos las vueltas reales del MOCK
     const vueltasPorPersona = {};
     MOCK_ASSIGNMENTS.forEach(a => {
       if (a.conductor_name) vueltasPorPersona[a.conductor_name] = (vueltasPorPersona[a.conductor_name] || 0) + 1;
@@ -109,7 +113,6 @@ export default function AssignmentControl() {
       ...a, vueltas: vueltasPorPersona[a.name] || 0
     }));
 
-    // Sorting
     const sortByVueltas = (a, b) => sortVueltasAsc ? a.vueltas - b.vueltas : b.vueltas - a.vueltas;
     return {
       conductores: conds.sort(sortByVueltas),
@@ -117,9 +120,24 @@ export default function AssignmentControl() {
     };
   }, [staffList, sortVueltasAsc]);
 
+  // Computed data para Camiones
   const sortedTrucks = useMemo(() => {
-    return [...trucks].sort((a, b) => sortTrucksAsc ? a.vueltas - b.vueltas : b.vueltas - a.vueltas);
-  }, [trucks, sortTrucksAsc]);
+    const vueltasPorCamion = {};
+    MOCK_ASSIGNMENTS.forEach(a => {
+      if (a.camion) vueltasPorCamion[a.camion] = (vueltasPorCamion[a.camion] || 0) + 1;
+    });
+
+    // Solo camiones Activos (excluye 'En Taller', 'Inactivo')
+    const activeTrucks = fleetList
+      .filter(t => t.status === 'Activo')
+      .map(t => ({
+        ...t,
+        vueltas: vueltasPorCamion[t.plate] || 0,
+        referencia: truckReferences[t.id] || ''
+      }));
+
+    return activeTrucks.sort((a, b) => sortTrucksAsc ? a.vueltas - b.vueltas : b.vueltas - a.vueltas);
+  }, [fleetList, truckReferences, sortTrucksAsc]);
 
   // Filtrado de Asignaciones en el panel central
   const filteredAssignments = useMemo(() => {
@@ -143,7 +161,7 @@ export default function AssignmentControl() {
   }, [filters, selectedStaff]);
 
   const handleUpdateTruckReference = (id, ref) => {
-    setTrucks(trucks.map(t => t.id === id ? { ...t, referencia: ref } : t));
+    setTruckReferences(prev => ({ ...prev, [id]: ref }));
   };
 
   const clearFilters = () => {
@@ -421,7 +439,7 @@ export default function AssignmentControl() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-slate-800 text-white text-xs font-black px-2 py-1 rounded-md tracking-wider">
-                      {truck.patente}
+                      {truck.plate}
                     </div>
                   </div>
                   <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
