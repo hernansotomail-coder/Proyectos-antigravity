@@ -17,21 +17,21 @@ export default function Layout() {
     navigate('/');
   };
 
-  const asignacionItems = [
+  const transporteItems = [
     { name: 'Disponibilización', path: '/assignment', icon: Truck },
     { name: 'Agregar Flota', path: '/fleet', icon: Truck },
     { name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
   ];
 
-  const asistenciaItems = [
+  const administracionItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'Agregar Dotación', path: '/add-staff', icon: Users },
     { name: 'Gestión Dotación', path: '/manage-staff', icon: UserCog },
     { name: 'Asistencia', path: '/attendance', icon: CalendarClock },
   ];
 
-  const isAnyAsignacionActive = asignacionItems.some(item => location.pathname === item.path);
-  const isAnyAsistenciaActive = asistenciaItems.some(item => location.pathname === item.path);
+  const isAnyTransporteActive = transporteItems.some(item => location.pathname === item.path);
+  const isAnyAdministracionActive = administracionItems.some(item => location.pathname === item.path);
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900">
@@ -44,26 +44,41 @@ export default function Layout() {
           </div>
         </div>
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
-          {/* Menú Control de Asignación */}
+          {/* Menú Planificación */}
+          <NavLink
+            to="/planning"
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
+                isActive
+                  ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`
+            }
+          >
+            <CalendarClock size={20} />
+            <span>Planificación</span>
+          </NavLink>
+
+          {/* Menú Transporte (Antes Control Asignación) */}
           <div className="pt-2">
             <button
               onClick={() => setIsAsignacionOpen(!isAsignacionOpen)}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 ${
-                isAnyAsignacionActive && !isAsignacionOpen
+                isAnyTransporteActive && !isAsignacionOpen
                   ? 'bg-slate-50 text-blue-600 font-semibold'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
               }`}
             >
               <div className="flex items-center gap-3">
                 <Truck size={20} />
-                <span>Control Asignación</span>
+                <span>Transporte</span>
               </div>
               {isAsignacionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </button>
             
             {isAsignacionOpen && (
               <div className="mt-1 ml-4 pl-4 border-l-2 border-slate-100 space-y-1">
-                {asignacionItems.map((item) => (
+                {transporteItems.map((item) => (
                   <NavLink
                     key={item.path}
                     to={item.path}
@@ -83,26 +98,26 @@ export default function Layout() {
             )}
           </div>
 
-          {/* Menú Asistencia */}
+          {/* Menú Administración (Antes Asistencia) */}
           <div className="pt-2">
             <button
               onClick={() => setIsAsistenciaOpen(!isAsistenciaOpen)}
               className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 ${
-                isAnyAsistenciaActive && !isAsistenciaOpen
+                isAnyAdministracionActive && !isAsistenciaOpen
                   ? 'bg-slate-50 text-blue-600 font-semibold'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
               }`}
             >
               <div className="flex items-center gap-3">
-                <CalendarClock size={20} />
-                <span>Asistencia</span>
+                <Users size={20} />
+                <span>Administración</span>
               </div>
               {isAsistenciaOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </button>
             
             {isAsistenciaOpen && (
               <div className="mt-1 ml-4 pl-4 border-l-2 border-slate-100 space-y-1">
-                {asistenciaItems.map((item) => (
+                {administracionItems.map((item) => (
                   <NavLink
                     key={item.path}
                     to={item.path}
@@ -149,10 +164,23 @@ export default function Layout() {
         {isMobileMenuOpen && (
           <nav className="md:hidden bg-white border-b border-slate-200 px-4 py-2 space-y-1 z-20 absolute w-full top-16 shadow-lg">
             
+            <NavLink
+              to="/planning"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 px-4 py-3 rounded-lg ${
+                  isActive ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600'
+                }`
+              }
+            >
+              <CalendarClock size={20} />
+              <span>Planificación</span>
+            </NavLink>
+
             <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-2 pb-2">
-              Control Asignación
+              Transporte
             </div>
-            {asignacionItems.map((item) => (
+            {transporteItems.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
@@ -169,9 +197,9 @@ export default function Layout() {
             ))}
             
             <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-4 pb-2">
-              Asistencia
+              Administración
             </div>
-            {asistenciaItems.map((item) => (
+            {administracionItems.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}

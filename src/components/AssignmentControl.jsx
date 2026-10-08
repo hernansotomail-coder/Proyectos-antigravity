@@ -90,6 +90,10 @@ export default function AssignmentControl() {
   
   // Guardamos las referencias escritas a mano
   const [truckReferences, setTruckReferences] = useState({});
+  
+  // Nuevos estados para las barras de búsqueda laterales
+  const [staffSearch, setStaffSearch] = useState('');
+  const [truckSearch, setTruckSearch] = useState('');
 
   useEffect(() => {
     fetchStaff();
@@ -105,7 +109,11 @@ export default function AssignmentControl() {
       if (a.aux2_name) vueltasPorPersona[a.aux2_name] = (vueltasPorPersona[a.aux2_name] || 0) + 1;
     });
 
-    const activeStaff = staffList.filter(s => s.status === 'Activo');
+    const activeStaff = staffList.filter(s => 
+      s.status === 'Activo' && 
+      s.name.toLowerCase().includes(staffSearch.toLowerCase())
+    );
+    
     const conds = activeStaff.filter(s => s.role.toLowerCase().includes('conductor')).map(c => ({
       ...c, vueltas: vueltasPorPersona[c.name] || 0
     }));
@@ -118,7 +126,7 @@ export default function AssignmentControl() {
       conductores: conds.sort(sortByVueltas),
       auxiliares: auxs.sort(sortByVueltas)
     };
-  }, [staffList, sortVueltasAsc]);
+  }, [staffList, sortVueltasAsc, staffSearch]);
 
   // Computed data para Camiones
   const sortedTrucks = useMemo(() => {
@@ -127,9 +135,13 @@ export default function AssignmentControl() {
       if (a.camion) vueltasPorCamion[a.camion] = (vueltasPorCamion[a.camion] || 0) + 1;
     });
 
-    // Solo camiones Activos (excluye 'En Taller', 'Inactivo')
+    // Solo camiones Activos (excluye 'En Taller', 'Inactivo') y filtra por busqueda
     const activeTrucks = fleetList
       .filter(t => t.status === 'Activo')
+      .filter(t => 
+        (t.internal_number || '').toLowerCase().includes(truckSearch.toLowerCase()) || 
+        (t.plate || '').toLowerCase().includes(truckSearch.toLowerCase())
+      )
       .map(t => ({
         ...t,
         vueltas: vueltasPorCamion[t.plate] || 0,
@@ -137,7 +149,7 @@ export default function AssignmentControl() {
       }));
 
     return activeTrucks.sort((a, b) => sortTrucksAsc ? a.vueltas - b.vueltas : b.vueltas - a.vueltas);
-  }, [fleetList, truckReferences, sortTrucksAsc]);
+  }, [fleetList, truckReferences, sortTrucksAsc, truckSearch]);
 
   // Filtrado de Asignaciones en el panel central
   const filteredAssignments = useMemo(() => {
@@ -273,6 +285,19 @@ export default function AssignmentControl() {
             >
               Auxiliares ({auxiliares.length})
             </button>
+          </div>
+
+          <div className="p-2 border-b border-slate-100 bg-white">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2 text-slate-400" size={14} />
+              <input 
+                type="text" 
+                placeholder="Buscar por nombre..." 
+                value={staffSearch}
+                onChange={e => setStaffSearch(e.target.value)}
+                className="w-full pl-8 pr-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all bg-slate-50"
+              />
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
@@ -433,6 +458,19 @@ export default function AssignmentControl() {
             </button>
           </div>
           
+          <div className="p-2 border-b border-slate-100 bg-white">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2 text-slate-400" size={14} />
+              <input 
+                type="text" 
+                placeholder="Buscar patente o N°..." 
+                value={truckSearch}
+                onChange={e => setTruckSearch(e.target.value)}
+                className="w-full pl-8 pr-2 py-1.5 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 transition-all bg-slate-50"
+              />
+            </div>
+          </div>
+
           <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50/30">
             {sortedTrucks.map(truck => (
               <div key={truck.id} className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow transition-shadow">

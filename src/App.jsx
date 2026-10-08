@@ -14,6 +14,7 @@ import Login from './components/Login';
 import AssignmentControl from './components/AssignmentControl';
 import AddFleet from './components/AddFleet';
 import ManageFleet from './components/ManageFleet';
+import Planning from './components/Planning';
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
           <Route path="assignment" element={<Login><AssignmentControl /></Login>} />
           <Route path="fleet" element={<Login><AddFleet /></Login>} />
           <Route path="manage-fleet" element={<Login><ManageFleet /></Login>} />
+          <Route path="planning" element={<Login><Planning /></Login>} />
           <Route path="add-staff" element={<Login><AddStaff /></Login>} />
           <Route path="manage-staff" element={<Login><ManageStaff /></Login>} />
           <Route path="attendance" element={<Login><Attendance /></Login>} />
