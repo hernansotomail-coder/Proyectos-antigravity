@@ -439,7 +439,7 @@ export default function AssignmentControl() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <div className="bg-slate-800 text-white text-xs font-black px-2 py-1 rounded-md tracking-wider">
-                      {truck.plate}
+                      {truck.internal_number}
                     </div>
                   </div>
                   <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
