@@ -11,12 +11,15 @@ import Login from './components/Login';
 
 
 
+import AssignmentControl from './components/AssignmentControl';
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
+          <Route path="assignment" element={<Login><AssignmentControl /></Login>} />
           <Route path="add-staff" element={<Login><AddStaff /></Login>} />
           <Route path="manage-staff" element={<Login><ManageStaff /></Login>} />
           <Route path="attendance" element={<Login><Attendance /></Login>} />
