@@ -50,7 +50,7 @@ export default function ManageFleet() {
       let category = 'Camiones/Camionetas';
       const t = (f.type || '').toLowerCase();
       if (t.includes('tracto')) category = 'Tractos';
-      else if (t.includes('rampla') || t.includes('semiremolque')) category = 'Semiremolques';
+      else if (t.includes('rampla') || t.includes('semiremolque') || t.includes('semirremolque')) category = 'Semiremolques';
       
       return { ...f, dashboardCategory: category };
     });
