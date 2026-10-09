@@ -15,29 +15,24 @@ const getDaysDiff = (dateStr) => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
-const getStatus14_30 = (days) => {
+const getDocumentStatus = (days) => {
   if (days === null) return 'N/A';
-  if (days <= 14) return 'red';
-  if (days <= 30) return 'yellow';
-  return 'green';
-};
-
-const getStatus30_40 = (days) => {
-  if (days === null) return 'N/A';
-  if (days <= 30) return 'red';
-  if (days <= 40) return 'yellow';
-  return 'green';
+  if (days < 0) return 'red'; // Vencido
+  if (days <= 15) return 'orange'; // 0 a 15 dias
+  if (days <= 30) return 'yellow'; // 16 a 30 dias
+  return 'green'; // > 30 dias
 };
 
 const ColorBadge = ({ status, text }) => {
   if (status === 'N/A') return <span className="text-slate-400 text-xs">N/A</span>;
   const colors = {
     red: 'bg-red-100 text-red-700 border-red-200',
+    orange: 'bg-orange-100 text-orange-700 border-orange-200',
     yellow: 'bg-yellow-100 text-yellow-700 border-yellow-200',
     green: 'bg-green-100 text-green-700 border-green-200'
   };
   return (
-    <div className={`px-2 py-1 rounded-md text-xs font-bold border ${colors[status]}`}>
+    <div className={`px-2 py-1 rounded-md text-[10px] font-bold border ${colors[status]}`}>
       {text}
     </div>
   );
@@ -73,16 +68,15 @@ export default function FleetDashboard() {
       return { 
         ...f, 
         dashboardCategory: category,
-        rtStatus: getStatus14_30(getDaysDiff(f.rt_date)),
-        gasesStatus: getStatus14_30(getDaysDiff(f.gases_date)),
-        pcStatus: getStatus14_30(getDaysDiff(f.pc_date)),
-        soapStatus: getStatus30_40(getDaysDiff(f.soap_date)),
-        carnesStatus: getStatus30_40(getDaysDiff(f.carnes_date)),
+        rtStatus: getDocumentStatus(getDaysDiff(f.rt_date)),
+        gasesStatus: getDocumentStatus(getDaysDiff(f.gases_date)),
+        pcStatus: getDocumentStatus(getDaysDiff(f.pc_date)),
+        soapStatus: getDocumentStatus(getDaysDiff(f.soap_date)),
+        carnesStatus: getDocumentStatus(getDaysDiff(f.carnes_date)),
       };
     });
   }, [fleetList]);
 
-  // Base list respects only the main dropdowns & search
   const baseFilteredVehicles = useMemo(() => {
     return categorized.filter(f => {
       if (typeFilter !== 'Todos' && f.dashboardCategory !== typeFilter) return false;
@@ -97,38 +91,43 @@ export default function FleetDashboard() {
     });
   }, [categorized, typeFilter, regionFilter, searchFilter]);
 
-  // Stats calculate OVER the base filtered list, so cards react to Region/Type dropdowns
   const stats = useMemo(() => {
     let vehiculos = 0, semiremolques = 0;
-    let alertRt = 0, alertGases = 0, alertPc = 0, alertSoap = 0, alertCarnes = 0;
+    const createAlert = () => ({ count: 0, severity: 'green' });
+    let alertRt = createAlert(), alertGases = createAlert(), alertPc = createAlert(), alertSoap = createAlert(), alertCarnes = createAlert();
+
+    const updateWorst = (alertObj, status) => {
+      if (status === 'N/A' || status === 'green') return;
+      alertObj.count++;
+      if (status === 'red') alertObj.severity = 'red';
+      else if (status === 'orange' && alertObj.severity !== 'red') alertObj.severity = 'orange';
+      else if (status === 'yellow' && alertObj.severity !== 'red' && alertObj.severity !== 'orange') alertObj.severity = 'yellow';
+    };
 
     baseFilteredVehicles.forEach(f => {
       if (f.dashboardCategory === 'Semiremolques') semiremolques++;
       else vehiculos++;
 
-      if (f.rtStatus === 'red') alertRt++;
-      if (f.gasesStatus === 'red') alertGases++;
-      if (f.pcStatus === 'red') alertPc++;
-      if (f.soapStatus === 'red') alertSoap++;
-      if (f.carnesStatus === 'red') alertCarnes++;
+      updateWorst(alertRt, f.rtStatus);
+      updateWorst(alertGases, f.gasesStatus);
+      updateWorst(alertPc, f.pcStatus);
+      updateWorst(alertSoap, f.soapStatus);
+      updateWorst(alertCarnes, f.carnesStatus);
     });
 
     return { vehiculos, semiremolques, alertRt, alertGases, alertPc, alertSoap, alertCarnes };
   }, [baseFilteredVehicles]);
 
-  // Final list applied to matrix: includes Active Card filter AND Header Color filters
   const finalVehicles = useMemo(() => {
     return baseFilteredVehicles.filter(f => {
-      // Card Filter
       if (activeCard === 'vehiculos' && f.dashboardCategory === 'Semiremolques') return false;
       if (activeCard === 'semiremolques' && f.dashboardCategory !== 'Semiremolques') return false;
-      if (activeCard === 'rt' && f.rtStatus !== 'red') return false;
-      if (activeCard === 'gases' && f.gasesStatus !== 'red') return false;
-      if (activeCard === 'pc' && f.pcStatus !== 'red') return false;
-      if (activeCard === 'soap' && f.soapStatus !== 'red') return false;
-      if (activeCard === 'carnes' && f.carnesStatus !== 'red') return false;
+      if (activeCard === 'rt' && f.rtStatus === 'green') return false; // Alerta = NO verde
+      if (activeCard === 'gases' && f.gasesStatus === 'green') return false;
+      if (activeCard === 'pc' && f.pcStatus === 'green') return false;
+      if (activeCard === 'soap' && f.soapStatus === 'green') return false;
+      if (activeCard === 'carnes' && f.carnesStatus === 'green') return false;
 
-      // Header Color Filters
       if (colorFilters.rt !== 'Todos' && f.rtStatus !== colorFilters.rt) return false;
       if (colorFilters.gases !== 'Todos' && f.gasesStatus !== colorFilters.gases) return false;
       if (colorFilters.pc !== 'Todos' && f.pcStatus !== colorFilters.pc) return false;
@@ -147,30 +146,47 @@ export default function FleetDashboard() {
       'PC': f.pc_date || 'N/A', 'SOAP': f.soap_date || 'N/A', 'Carnes': f.carnes_date || 'N/A',
       'Resolución': f.resolution || 'N/A'
     }));
-
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Dashboard Flota");
     XLSX.writeFile(workbook, "Reporte_Dashboard_Flota.xlsx");
   };
 
-  const Card = ({ id, title, value, isAlert }) => (
-    <div 
-      onClick={() => setActiveCard(activeCard === id ? 'todos' : id)}
-      className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all transform hover:scale-105 ${
-        activeCard === id 
-          ? (isAlert ? 'bg-red-100 border-red-500 ring-2 ring-red-300' : 'bg-blue-100 border-blue-500 ring-2 ring-blue-300')
-          : (isAlert ? 'bg-red-50 border-red-100' : 'bg-slate-50 border-slate-200')
-      }`}
-    >
-      <p className={`text-[10px] font-semibold uppercase ${isAlert ? (activeCard === id ? 'text-red-800' : 'text-red-600') : (activeCard === id ? 'text-blue-800' : 'text-slate-500')}`}>
-        {title}
-      </p>
-      <p className={`text-2xl font-black ${isAlert ? (activeCard === id ? 'text-red-900' : 'text-red-700') : (activeCard === id ? 'text-blue-900' : 'text-slate-800')}`}>
-        {value}
-      </p>
-    </div>
-  );
+  const DynamicCard = ({ id, title, data }) => {
+    const isActive = activeCard === id;
+    let bgColors = 'bg-slate-50 border-slate-200 text-slate-800';
+    let textColors = 'text-slate-500';
+    let activeRing = 'ring-2 ring-slate-300';
+    
+    // Severity defaults to 'green' when count is 0
+    if (data.severity === 'red') {
+      bgColors = isActive ? 'bg-red-100 border-red-500 text-red-900' : 'bg-red-50 border-red-200 text-red-800';
+      textColors = isActive ? 'text-red-800' : 'text-red-600';
+      activeRing = 'ring-2 ring-red-300';
+    } else if (data.severity === 'orange') {
+      bgColors = isActive ? 'bg-orange-100 border-orange-500 text-orange-900' : 'bg-orange-50 border-orange-200 text-orange-800';
+      textColors = isActive ? 'text-orange-800' : 'text-orange-600';
+      activeRing = 'ring-2 ring-orange-300';
+    } else if (data.severity === 'yellow') {
+      bgColors = isActive ? 'bg-yellow-100 border-yellow-500 text-yellow-900' : 'bg-yellow-50 border-yellow-200 text-yellow-800';
+      textColors = isActive ? 'text-yellow-800' : 'text-yellow-600';
+      activeRing = 'ring-2 ring-yellow-300';
+    } else {
+      bgColors = isActive ? 'bg-green-100 border-green-500 text-green-900' : 'bg-green-50 border-green-200 text-green-800';
+      textColors = isActive ? 'text-green-800' : 'text-green-600';
+      activeRing = 'ring-2 ring-green-300';
+    }
+
+    return (
+      <div 
+        onClick={() => setActiveCard(isActive ? 'todos' : id)}
+        className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all transform hover:scale-105 ${bgColors} ${isActive ? activeRing : ''}`}
+      >
+        <p className={`text-[10px] font-semibold uppercase ${textColors}`}>{title}</p>
+        <p className="text-2xl font-black">{data.count}</p>
+      </div>
+    );
+  };
 
   const HeaderFilter = ({ label, field }) => (
     <div className="flex flex-col items-center gap-1">
@@ -182,7 +198,8 @@ export default function FleetDashboard() {
       >
         <option value="Todos">Todos</option>
         <option value="red">Vencido</option>
-        <option value="yellow">Por vencer</option>
+        <option value="orange">0 a 15 días</option>
+        <option value="yellow">15 a 30 días</option>
         <option value="green">Operativo</option>
       </select>
     </div>
@@ -213,18 +230,22 @@ export default function FleetDashboard() {
         </div>
       </div>
 
-      {/* Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6 shrink-0">
-        <Card id="vehiculos" title="Vehículos (Cam/Trac)" value={stats.vehiculos} isAlert={false} />
-        <Card id="semiremolques" title="Semiremolques" value={stats.semiremolques} isAlert={false} />
-        <Card id="rt" title="Alerta Rev. Téc." value={stats.alertRt} isAlert={true} />
-        <Card id="gases" title="Alerta Gases" value={stats.alertGases} isAlert={true} />
-        <Card id="pc" title="Alerta PC" value={stats.alertPc} isAlert={true} />
-        <Card id="soap" title="Alerta SOAP" value={stats.alertSoap} isAlert={true} />
-        <Card id="carnes" title="Alerta Carnes" value={stats.alertCarnes} isAlert={true} />
+        <div onClick={() => setActiveCard(activeCard === 'vehiculos' ? 'todos' : 'vehiculos')} className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all transform hover:scale-105 ${activeCard === 'vehiculos' ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 text-blue-900' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
+          <p className={`text-[10px] font-semibold uppercase ${activeCard === 'vehiculos' ? 'text-blue-800' : 'text-slate-500'}`}>Vehículos</p>
+          <p className="text-2xl font-black">{stats.vehiculos}</p>
+        </div>
+        <div onClick={() => setActiveCard(activeCard === 'semiremolques' ? 'todos' : 'semiremolques')} className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all transform hover:scale-105 ${activeCard === 'semiremolques' ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 text-blue-900' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
+          <p className={`text-[10px] font-semibold uppercase ${activeCard === 'semiremolques' ? 'text-blue-800' : 'text-slate-500'}`}>Semiremolques</p>
+          <p className="text-2xl font-black">{stats.semiremolques}</p>
+        </div>
+        <DynamicCard id="rt" title="Alerta Rev. Téc." data={stats.alertRt} />
+        <DynamicCard id="gases" title="Alerta Gases" data={stats.alertGases} />
+        <DynamicCard id="pc" title="Alerta PC" data={stats.alertPc} />
+        <DynamicCard id="soap" title="Alerta SOAP" data={stats.alertSoap} />
+        <DynamicCard id="carnes" title="Alerta Carnes" data={stats.alertCarnes} />
       </div>
 
-      {/* Matrix */}
       <div className="flex-1 overflow-auto border border-slate-200 rounded-xl bg-slate-50">
         <table className="w-full text-xs text-left whitespace-nowrap">
           <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 shadow-sm">
