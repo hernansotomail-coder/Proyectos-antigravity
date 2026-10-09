@@ -81,7 +81,7 @@ export default function FleetDashboard() {
   }, [fetchFleet]);
 
   const frios = useMemo(() => {
-    const fSet = new Set(fleetList.map(f => f.type2).filter(Boolean));
+    const fSet = new Set(fleetList.map(f => f.type2 || 'N/A'));
     return Array.from(fSet).sort();
   }, [fleetList]);
 
@@ -113,7 +113,7 @@ export default function FleetDashboard() {
     return categorized.filter(f => {
       if (typeFilter.length > 0 && !typeFilter.includes(f.dashboardCategory)) return false;
       if (regionFilter.length > 0 && !regionFilter.includes(f.region)) return false;
-      if (frioFilter.length > 0 && !frioFilter.includes(f.type2)) return false;
+      if (frioFilter.length > 0 && !frioFilter.includes(f.type2 || 'N/A')) return false;
       if (searchFilter) {
         const lowerSearch = searchFilter.toLowerCase();
         const matchesPlate = f.plate?.toLowerCase().includes(lowerSearch);
@@ -122,7 +122,7 @@ export default function FleetDashboard() {
       }
       return true;
     });
-  }, [categorized, typeFilter, regionFilter, searchFilter]);
+  }, [categorized, typeFilter, regionFilter, searchFilter, frioFilter]);
 
   const stats = useMemo(() => {
     let vehiculos = 0, semiremolques = 0;
