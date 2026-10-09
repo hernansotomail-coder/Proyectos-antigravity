@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, LogOut, ChevronDown, ChevronRight, Truck } from 'lucide-react';
+import { Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, LogOut, ChevronDown, ChevronRight, Truck, Key } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '../store/authStore';
 
@@ -10,7 +10,7 @@ export default function Layout() {
   const [isAsignacionOpen, setIsAsignacionOpen] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
-  const { isAuthenticated, logout } = useAuthStore();
+  const { isAuthenticated, logout, user } = useAuthStore();
 
   const handleLogout = () => {
     logout();
@@ -30,6 +30,10 @@ export default function Layout() {
     { name: 'Gestión Dotación', path: '/manage-staff', icon: UserCog },
     { name: 'Asistencia', path: '/attendance', icon: CalendarClock },
   ];
+
+  if (user?.role === 'Administrador') {
+    administracionItems.push({ name: 'Usuarios', path: '/users', icon: Key });
+  }
 
   const isAnyTransporteActive = transporteItems.some(item => location.pathname === item.path);
   const isAnyAdministracionActive = administracionItems.some(item => location.pathname === item.path);

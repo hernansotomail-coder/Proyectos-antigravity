@@ -122,7 +122,7 @@ export default function FleetDashboard() {
     return baseFilteredVehicles.filter(f => {
       if (activeCard === 'vehiculos' && f.dashboardCategory === 'Semiremolques') return false;
       if (activeCard === 'semiremolques' && f.dashboardCategory !== 'Semiremolques') return false;
-      if (activeCard === 'rt' && f.rtStatus === 'green') return false; // Alerta = NO verde
+      if (activeCard === 'rt' && f.rtStatus === 'green') return false; 
       if (activeCard === 'gases' && f.gasesStatus === 'green') return false;
       if (activeCard === 'pc' && f.pcStatus === 'green') return false;
       if (activeCard === 'soap' && f.soapStatus === 'green') return false;
@@ -141,7 +141,7 @@ export default function FleetDashboard() {
   const exportToExcel = () => {
     const dataToExport = finalVehicles.map(f => ({
       'Tipo': f.type || 'N/A', 'Patente': f.plate, 'N° Interno': f.internal_number || 'N/A',
-      'Marca': f.brand || 'N/A', 'Modelo': f.model || 'N/A', 'Año': f.year || 'N/A',
+      'Marca': f.brand || 'N/A', 'Sistema de frio': f.type2 || 'N/A', 'Modelo': f.model || 'N/A', 'Año': f.year || 'N/A',
       'Región': f.region || 'N/A', 'RT': f.rt_date || 'N/A', 'Gases': f.gases_date || 'N/A',
       'PC': f.pc_date || 'N/A', 'SOAP': f.soap_date || 'N/A', 'Carnes': f.carnes_date || 'N/A',
       'Resolución': f.resolution || 'N/A'
@@ -158,7 +158,6 @@ export default function FleetDashboard() {
     let textColors = 'text-slate-500';
     let activeRing = 'ring-2 ring-slate-300';
     
-    // Severity defaults to 'green' when count is 0
     if (data.severity === 'red') {
       bgColors = isActive ? 'bg-red-100 border-red-500 text-red-900' : 'bg-red-50 border-red-200 text-red-800';
       textColors = isActive ? 'text-red-800' : 'text-red-600';
@@ -221,11 +220,11 @@ export default function FleetDashboard() {
           />
           <Select 
             value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-            options={[{ value: 'Todos', label: 'Todos los Tipos' }, { value: 'Camiones/Camionetas', label: 'Camiones/Camionetas' }, { value: 'Tractos', label: 'Tractos' }, { value: 'Semiremolques', label: 'Semiremolques' }]}
+            options={[{ value: 'Todos', label: 'Tipo de camión' }, { value: 'Camiones/Camionetas', label: 'Camiones/Camionetas' }, { value: 'Tractos', label: 'Tractos' }, { value: 'Semiremolques', label: 'Semiremolques' }]}
           />
           <Select 
             value={regionFilter} onChange={e => setRegionFilter(e.target.value)}
-            options={regions.map(r => ({ value: r, label: r }))}
+            options={regions.map(r => ({ value: r, label: r === 'Todas' ? 'Ubicación de camión' : r }))}
           />
         </div>
       </div>
@@ -254,6 +253,7 @@ export default function FleetDashboard() {
               <th className="px-3 py-2 font-semibold border-b">Patente</th>
               <th className="px-3 py-2 font-semibold border-b">N° Interno</th>
               <th className="px-3 py-2 font-semibold border-b">Marca</th>
+              <th className="px-3 py-2 font-semibold border-b">Sistema de frio</th>
               <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="RT" field="rt" /></th>
               <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="Gases" field="gases" /></th>
               <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="PC" field="pc" /></th>
@@ -269,6 +269,7 @@ export default function FleetDashboard() {
                 <td className="px-3 py-2 font-bold text-slate-800">{f.plate}</td>
                 <td className="px-3 py-2 text-slate-600">{f.internal_number || 'N/A'}</td>
                 <td className="px-3 py-2 text-slate-600">{f.brand || 'N/A'}</td>
+                <td className="px-3 py-2 text-slate-600">{f.type2 || 'N/A'}</td>
                 <td className="px-3 py-2 text-center"><ColorBadge status={f.rtStatus} text={f.rt_date || 'N/A'} /></td>
                 <td className="px-3 py-2 text-center"><ColorBadge status={f.gasesStatus} text={f.gases_date || 'N/A'} /></td>
                 <td className="px-3 py-2 text-center"><ColorBadge status={f.pcStatus} text={f.pc_date || 'N/A'} /></td>
@@ -278,7 +279,7 @@ export default function FleetDashboard() {
               </tr>
             ))}
             {finalVehicles.length === 0 && (
-              <tr><td colSpan="10" className="px-4 py-8 text-center text-slate-500">No se encontraron vehículos para estos filtros.</td></tr>
+              <tr><td colSpan="11" className="px-4 py-8 text-center text-slate-500">No se encontraron vehículos para estos filtros.</td></tr>
             )}
           </tbody>
         </table>
