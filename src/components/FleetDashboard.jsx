@@ -155,11 +155,11 @@ export default function FleetDashboard() {
     return baseFilteredVehicles.filter(f => {
       if (activeCard === 'vehiculos' && f.dashboardCategory === 'Semiremolques') return false;
       if (activeCard === 'semiremolques' && f.dashboardCategory !== 'Semiremolques') return false;
-      if (activeCard === 'rt' && f.rtStatus === 'green') return false; 
-      if (activeCard === 'gases' && f.gasesStatus === 'green') return false;
-      if (activeCard === 'pc' && f.pcStatus === 'green') return false;
-      if (activeCard === 'soap' && f.soapStatus === 'green') return false;
-      if (activeCard === 'carnes' && f.carnesStatus === 'green') return false;
+      if (activeCard === 'rt' && (f.rtStatus === 'green' || f.rtStatus === 'N/A')) return false; 
+      if (activeCard === 'gases' && (f.gasesStatus === 'green' || f.gasesStatus === 'N/A')) return false;
+      if (activeCard === 'pc' && (f.pcStatus === 'green' || f.pcStatus === 'N/A')) return false;
+      if (activeCard === 'soap' && (f.soapStatus === 'green' || f.soapStatus === 'N/A')) return false;
+      if (activeCard === 'carnes' && (f.carnesStatus === 'green' || f.carnesStatus === 'N/A')) return false;
 
       if (colorFilters.rt !== 'Todos' && f.rtStatus !== colorFilters.rt) return false;
       if (colorFilters.gases !== 'Todos' && f.gasesStatus !== colorFilters.gases) return false;
