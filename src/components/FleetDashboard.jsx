@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useFleetStore } from '../store/fleetStore';
 import { Select } from './ui/Select';
-import { Truck, AlertTriangle, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { Button } from './ui/Button';
+import { Truck, AlertTriangle, ShieldAlert, ShieldCheck, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 const getDaysDiff = (dateStr) => {
   if (!dateStr) return null;
@@ -97,10 +99,39 @@ export default function FleetDashboard() {
     return { vehiculos, semiremolques, alertRt, alertGases, alertPc, alertSoap, alertCarnes };
   }, [categorized]);
 
+  const exportToExcel = () => {
+    const dataToExport = filteredVehicles.map(f => ({
+      'Tipo': f.type || 'N/A',
+      'Patente': f.plate,
+      'N° Interno': f.internal_number || 'N/A',
+      'Marca': f.brand || 'N/A',
+      'Modelo': f.model || 'N/A',
+      'Año': f.year || 'N/A',
+      'Región': f.region || 'N/A',
+      'RT': f.rt_date || 'N/A',
+      'Gases': f.gases_date || 'N/A',
+      'PC': f.pc_date || 'N/A',
+      'SOAP': f.soap_date || 'N/A',
+      'Carnes': f.carnes_date || 'N/A',
+      'Resolución': f.resolution || 'N/A'
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Dashboard Flota");
+    XLSX.writeFile(workbook, "Reporte_Dashboard_Flota.xlsx");
+  };
+
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <h2 className="text-xl font-bold text-slate-800">Dashboard Flota</h2>
+        <div className="flex items-center gap-4">
+          <h2 className="text-xl font-bold text-slate-800">Dashboard Flota</h2>
+          <Button onClick={exportToExcel} variant="outline" className="flex items-center gap-2 h-9">
+            <Download size={16} />
+            Exportar Excel
+          </Button>
+        </div>
         <div className="flex gap-3 w-full md:w-auto">
           <Select 
             value={typeFilter}
