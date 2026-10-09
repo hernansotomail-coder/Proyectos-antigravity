@@ -10,11 +10,15 @@ export default function Login({ children }) {
   const { isAuthenticated, login } = useAuthStore();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-    const success = login(username, password);
+    setIsLoading(true);
+    const success = await login(username, password);
+    setIsLoading(false);
+    
     if (success) {
       toast.success('Sesión iniciada correctamente');
     } else {
@@ -35,7 +39,7 @@ export default function Login({ children }) {
           </div>
         </div>
         <h2 className="text-2xl font-bold text-slate-800 mb-2">Acceso Restringido</h2>
-        <p className="text-slate-500 mb-8">Ingresa tus credenciales de administrador para continuar.</p>
+        <p className="text-slate-500 mb-8">Ingresa tus credenciales para continuar.</p>
         
         <form onSubmit={handleLogin} className="space-y-4 text-left">
           <Input 
@@ -54,8 +58,8 @@ export default function Login({ children }) {
             autoComplete="current-password"
           />
           <div className="pt-4">
-            <Button type="submit" className="w-full h-12 text-lg">
-              Iniciar Sesión
+            <Button type="submit" className="w-full h-12 text-lg" disabled={isLoading}>
+              {isLoading ? 'Iniciando...' : 'Iniciar Sesión'}
             </Button>
           </div>
         </form>
