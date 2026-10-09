@@ -18,6 +18,7 @@ export default function Layout() {
   };
 
   const transporteItems = [
+    { name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
     { name: 'Disponibilización', path: '/assignment', icon: Truck },
     { name: 'Agregar Flota', path: '/fleet', icon: Truck },
     { name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
