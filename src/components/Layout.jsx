@@ -54,7 +54,6 @@ export default function Layout() {
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
           {/* Menú Planificación */}
           {user?.role !== 'Visualizador' && (
-            {user?.role !== 'Visualizador' && (
             <NavLink
             to="/planning"
             className={({ isActive }) =>
