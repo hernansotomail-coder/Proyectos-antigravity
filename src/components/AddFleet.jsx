@@ -251,24 +251,74 @@ export default function AddFleet() {
                   <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
                     <tr>
                       <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Tipo</th>
                       <th className="px-3 py-2">Patente</th>
                       <th className="px-3 py-2">N° Interno</th>
-                      <th className="px-3 py-2">Tipo</th>
-                      <th className="px-3 py-2">Región</th>
+                      <th className="px-3 py-2">Frio</th>
+                      <th className="px-3 py-2">Marca</th>
+                      <th className="px-3 py-2">Modelo</th>
+                      <th className="px-3 py-2">Año</th>
+                      <th className="px-3 py-2">Estado</th>
+                      <th className="px-3 py-2">N° Motor</th>
+                      <th className="px-3 py-2">N° Chasis</th>
+                      <th className="px-3 py-2">CC</th>
+                      <th className="px-3 py-2">Carga Estanque</th>
+                      <th className="px-3 py-2">Carga/Peso</th>
+                      <th className="px-3 py-2">Estado 2</th>
                       <th className="px-3 py-2">RT</th>
+                      <th className="px-3 py-2">Gases</th>
+                      <th className="px-3 py-2">PC</th>
+                      <th className="px-3 py-2">SOAP</th>
+                      <th className="px-3 py-2">Carnes</th>
+                      <th className="px-3 py-2">Resolución</th>
+                      <th className="px-3 py-2">Tipo 2</th>
+                      <th className="px-3 py-2">P. Laterales</th>
+                      <th className="px-3 py-2">GPS</th>
+                      <th className="px-3 py-2">Operación</th>
+                      <th className="px-3 py-2">Aseguradora</th>
+                      <th className="px-3 py-2">Región</th>
+                      <th className="px-3 py-2">TCT</th>
+                      <th className="px-3 py-2">Copia TCT</th>
+                      <th className="px-3 py-2">NEO TAC</th>
+                      <th className="px-3 py-2">Cap. Pallet</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {previewData.map((row, i) => (
-                      <tr key={i} className="bg-white">
+                      <tr key={i} className="bg-white hover:bg-slate-50">
                         <td className="px-3 py-2">
-                          {row.isValid ? <CheckCircle2 size={16} className="text-green-500" /> : <AlertCircle size={16} className="text-red-500" />}
+                          {row.isValid ? <CheckCircle2 size={16} className="text-green-500" /> : <AlertCircle size={16} className="text-red-500" title="Falta Patente" />}
                         </td>
+                        <td className="px-3 py-2">{row.type}</td>
                         <td className="px-3 py-2 font-bold">{row.plate}</td>
                         <td className="px-3 py-2">{row.internal_number}</td>
-                        <td className="px-3 py-2">{row.type}</td>
+                        <td className="px-3 py-2">{row.frio}</td>
+                        <td className="px-3 py-2">{row.brand}</td>
+                        <td className="px-3 py-2">{row.model}</td>
+                        <td className="px-3 py-2">{row.year}</td>
+                        <td className="px-3 py-2">{row.status}</td>
+                        <td className="px-3 py-2">{row.engine_number}</td>
+                        <td className="px-3 py-2">{row.chassis_number}</td>
+                        <td className="px-3 py-2">{row.cc}</td>
+                        <td className="px-3 py-2">{row.tank_capacity}</td>
+                        <td className="px-3 py-2">{row.payload}</td>
+                        <td className="px-3 py-2">{row.state2}</td>
+                        <td className="px-3 py-2 font-medium">{row.rt_date}</td>
+                        <td className="px-3 py-2 font-medium">{row.gases_date}</td>
+                        <td className="px-3 py-2 font-medium">{row.pc_date}</td>
+                        <td className="px-3 py-2 font-medium">{row.soap_date}</td>
+                        <td className="px-3 py-2 font-medium">{row.carnes_date}</td>
+                        <td className="px-3 py-2">{row.resolution}</td>
+                        <td className="px-3 py-2">{row.type2}</td>
+                        <td className="px-3 py-2">{row.side_doors}</td>
+                        <td className="px-3 py-2">{row.gps}</td>
+                        <td className="px-3 py-2">{row.operation}</td>
+                        <td className="px-3 py-2">{row.insurer}</td>
                         <td className="px-3 py-2">{row.region}</td>
-                        <td className="px-3 py-2">{row.rt_date}</td>
+                        <td className="px-3 py-2">{row.tct}</td>
+                        <td className="px-3 py-2">{row.tct_copy}</td>
+                        <td className="px-3 py-2">{row.neo_tac}</td>
+                        <td className="px-3 py-2">{row.pallet_capacity}</td>
                       </tr>
                     ))}
                   </tbody>
