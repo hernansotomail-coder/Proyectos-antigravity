@@ -47,6 +47,7 @@ export default function FleetDashboard() {
   const { fleetList, fetchFleet } = useFleetStore();
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [regionFilter, setRegionFilter] = useState('Todas');
+  const [searchFilter, setSearchFilter] = useState('');
 
   useEffect(() => {
     fetchFleet();
@@ -75,9 +76,15 @@ export default function FleetDashboard() {
     return categorized.filter(f => {
       if (typeFilter !== 'Todos' && f.dashboardCategory !== typeFilter) return false;
       if (regionFilter !== 'Todas' && f.region !== regionFilter) return false;
+      if (searchFilter) {
+        const lowerSearch = searchFilter.toLowerCase();
+        const matchesPlate = f.plate?.toLowerCase().includes(lowerSearch);
+        const matchesInternal = f.internal_number?.toLowerCase().includes(lowerSearch);
+        if (!matchesPlate && !matchesInternal) return false;
+      }
       return true;
     });
-  }, [categorized, typeFilter, regionFilter]);
+  }, [categorized, typeFilter, regionFilter, searchFilter]);
 
   // Compute Cards
   const stats = useMemo(() => {
@@ -133,6 +140,13 @@ export default function FleetDashboard() {
           </Button>
         </div>
         <div className="flex gap-3 w-full md:w-auto">
+          <input 
+            type="text" 
+            placeholder="Buscar patente o N°..."
+            value={searchFilter}
+            onChange={(e) => setSearchFilter(e.target.value)}
+            className="flex h-10 w-full md:w-48 items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+          />
           <Select 
             value={typeFilter}
             onChange={e => setTypeFilter(e.target.value)}
