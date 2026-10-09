@@ -17,14 +17,14 @@ export default function Layout() {
     navigate('/');
   };
 
-  const transporteItems = [
+  let transporteItems = [
     { name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
     { name: 'Disponibilización', path: '/assignment', icon: Truck },
     { name: 'Agregar Flota', path: '/fleet', icon: Truck },
     { name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
   ];
 
-  const administracionItems = [
+  let administracionItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'Agregar Dotación', path: '/add-staff', icon: Users },
     { name: 'Gestión Dotación', path: '/manage-staff', icon: UserCog },
@@ -33,6 +33,9 @@ export default function Layout() {
 
   if (user?.role === 'Administrador') {
     administracionItems.push({ name: 'Usuarios', path: '/users', icon: Key });
+  } else if (user?.role === 'Visualizador') {
+    transporteItems = transporteItems.filter(i => i.name === 'Dashboard Flota');
+    administracionItems = administracionItems.filter(i => i.name === 'Dashboard');
   }
 
   const isAnyTransporteActive = transporteItems.some(item => location.pathname === item.path);
@@ -50,7 +53,9 @@ export default function Layout() {
         </div>
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
           {/* Menú Planificación */}
-          <NavLink
+          {user?.role !== 'Visualizador' && (
+            {user?.role !== 'Visualizador' && (
+            <NavLink
             to="/planning"
             className={({ isActive }) =>
               `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
@@ -63,6 +68,7 @@ export default function Layout() {
             <CalendarClock size={20} />
             <span>Planificación</span>
           </NavLink>
+          )}
 
           {/* Menú Transporte (Antes Control Asignación) */}
           <div className="pt-2">
@@ -169,6 +175,7 @@ export default function Layout() {
         {isMobileMenuOpen && (
           <nav className="md:hidden bg-white border-b border-slate-200 px-4 py-2 space-y-1 z-20 absolute w-full top-16 shadow-lg">
             
+            {user?.role !== 'Visualizador' && (
             <NavLink
               to="/planning"
               onClick={() => setIsMobileMenuOpen(false)}
@@ -181,6 +188,7 @@ export default function Layout() {
               <CalendarClock size={20} />
               <span>Planificación</span>
             </NavLink>
+          )}
 
             <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-2 pb-2">
               Transporte

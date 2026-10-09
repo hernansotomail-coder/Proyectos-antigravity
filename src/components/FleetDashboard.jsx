@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { useFleetStore } from '../store/fleetStore';
 import { Select } from './ui/Select';
 import { Button } from './ui/Button';
-import { Download } from 'lucide-react';
+import { Download, ChevronDown } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const getDaysDiff = (dateStr) => {
@@ -38,10 +38,37 @@ const ColorBadge = ({ status, text }) => {
   );
 };
 
+
+const MultiSelectDropdown = ({ options, selectedValues, onChange, placeholder }) => {
+  const [isOpen, setIsOpen] = React.useState(false);
+  return (
+    <div className="relative flex-1 min-w-[150px]">
+      <div onClick={() => setIsOpen(!isOpen)} className="flex h-10 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 cursor-pointer">
+        <span className="truncate">{selectedValues.length === 0 ? placeholder : `${selectedValues.length} seleccionados`}</span>
+        <ChevronDown size={16} />
+      </div>
+      {isOpen && (
+        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-60 overflow-auto">
+          {options.map(opt => (
+            <label key={opt} className="flex items-center gap-2 px-3 py-2 hover:bg-slate-50 cursor-pointer text-sm">
+              <input type="checkbox" checked={selectedValues.includes(opt)} onChange={(e) => {
+                if (e.target.checked) onChange([...selectedValues, opt]);
+                else onChange(selectedValues.filter(v => v !== opt));
+              }} className="rounded text-blue-600 focus:ring-blue-500"/>
+              <span className="truncate">{opt}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function FleetDashboard() {
   const { fleetList, fetchFleet } = useFleetStore();
-  const [typeFilter, setTypeFilter] = useState('Todos');
-  const [regionFilter, setRegionFilter] = useState('Todas');
+  const [typeFilter, setTypeFilter] = useState([]);
+  const [regionFilter, setRegionFilter] = useState([]);
+  const [frioFilter, setFrioFilter] = useState([]);
   const [searchFilter, setSearchFilter] = useState('');
   
   const [activeCard, setActiveCard] = useState('todos');
@@ -52,6 +79,11 @@ export default function FleetDashboard() {
   useEffect(() => {
     fetchFleet();
   }, [fetchFleet]);
+
+  const frios = useMemo(() => {
+    const fSet = new Set(fleetList.map(f => f.type2).filter(Boolean));
+    return Array.from(fSet).sort();
+  }, [fleetList]);
 
   const regions = useMemo(() => {
     const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
@@ -79,8 +111,9 @@ export default function FleetDashboard() {
 
   const baseFilteredVehicles = useMemo(() => {
     return categorized.filter(f => {
-      if (typeFilter !== 'Todos' && f.dashboardCategory !== typeFilter) return false;
-      if (regionFilter !== 'Todas' && f.region !== regionFilter) return false;
+      if (typeFilter.length > 0 && !typeFilter.includes(f.dashboardCategory)) return false;
+      if (regionFilter.length > 0 && !regionFilter.includes(f.region)) return false;
+      if (frioFilter.length > 0 && !frioFilter.includes(f.type2)) return false;
       if (searchFilter) {
         const lowerSearch = searchFilter.toLowerCase();
         const matchesPlate = f.plate?.toLowerCase().includes(lowerSearch);
@@ -218,13 +251,23 @@ export default function FleetDashboard() {
             type="text" placeholder="Buscar patente o N°..." value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)}
             className="flex h-10 w-full md:w-48 items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
           />
-          <Select 
-            value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-            options={[{ value: 'Todos', label: 'Tipo de camión' }, { value: 'Camiones/Camionetas', label: 'Camiones/Camionetas' }, { value: 'Tractos', label: 'Tractos' }, { value: 'Semiremolques', label: 'Semiremolques' }]}
+          <MultiSelectDropdown 
+            options={['Camiones/Camionetas', 'Tractos', 'Semiremolques']} 
+            selectedValues={typeFilter} 
+            onChange={setTypeFilter} 
+            placeholder="Tipo de camión" 
           />
-          <Select 
-            value={regionFilter} onChange={e => setRegionFilter(e.target.value)}
-            options={regions.map(r => ({ value: r, label: r === 'Todas' ? 'Ubicación de camión' : r }))}
+          <MultiSelectDropdown 
+            options={regions.filter(r => r !== 'Todas')} 
+            selectedValues={regionFilter} 
+            onChange={setRegionFilter} 
+            placeholder="Ubicación de camión" 
+          />
+          <MultiSelectDropdown 
+            options={frios} 
+            selectedValues={frioFilter} 
+            onChange={setFrioFilter} 
+            placeholder="Sistema de frio" 
           />
         </div>
       </div>
