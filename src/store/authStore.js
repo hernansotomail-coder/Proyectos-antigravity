@@ -13,15 +13,26 @@ export const useAuthStore = create((set) => ({
         .eq('password', password)
         .single();
         
+      if (error) throw error;
+        
       if (data) {
         set({ isAuthenticated: true, user: data });
         return true;
       }
       return false;
     } catch(err) {
-      // Fallback in case table doesn't exist yet
+      console.log("Error de BD (probablemente falta la tabla o hay RLS), usando datos por defecto:", err);
+      // Fallback
       if (username === 'superadmin' && password === 'superadmin97') {
          set({ isAuthenticated: true, user: { username: 'superadmin', role: 'Administrador' } });
+         return true;
+      }
+      if (username === 'adminkey' && password === 'adminkey2026') {
+         set({ isAuthenticated: true, user: { username: 'adminkey', role: 'Administrativo' } });
+         return true;
+      }
+      if (username === 'visualkey' && password === 'visualkey2026') {
+         set({ isAuthenticated: true, user: { username: 'visualkey', role: 'Visualizador' } });
          return true;
       }
       return false;
