@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, LogOut, ChevronDown, ChevronRight, Truck, Key } from 'lucide-react';
+import { 
+  Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
+  LogOut, ChevronDown, ChevronRight, Truck, Key, Layers, FileText 
+} from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '../store/authStore';
 
 export default function Layout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isPlanificacionOpen, setIsPlanificacionOpen] = useState(true);
   const [isAsistenciaOpen, setIsAsistenciaOpen] = useState(true);
   const [isAsignacionOpen, setIsAsignacionOpen] = useState(true);
   const navigate = useNavigate();
@@ -16,6 +20,11 @@ export default function Layout() {
     logout();
     navigate('/');
   };
+
+  const planificacionItems = [
+    { name: 'Asignación diaria', path: '/daily-planning', icon: Layers },
+    { name: 'Briefing', path: '/briefing', icon: FileText },
+  ];
 
   let transporteItems = [
     { name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
@@ -38,6 +47,9 @@ export default function Layout() {
     administracionItems = administracionItems.filter(i => i.name === 'Dashboard');
   }
 
+  const isAnyPlanificacionActive = planificacionItems.some(
+    item => location.pathname === item.path || location.pathname === '/planning'
+  );
   const isAnyTransporteActive = transporteItems.some(item => location.pathname === item.path);
   const isAnyAdministracionActive = administracionItems.some(item => location.pathname === item.path);
 
@@ -54,22 +66,46 @@ export default function Layout() {
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
           {/* Menú Planificación */}
           {user?.role !== 'Visualizador' && (
-            <NavLink
-            to="/planning"
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                isActive
-                  ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`
-            }
-          >
-            <CalendarClock size={20} />
-            <span>Planificación</span>
-          </NavLink>
+            <div className="pt-1">
+              <button
+                onClick={() => setIsPlanificacionOpen(!isPlanificacionOpen)}
+                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all duration-200 ${
+                  isAnyPlanificacionActive && !isPlanificacionOpen
+                    ? 'bg-slate-50 text-blue-600 font-semibold'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <CalendarClock size={20} />
+                  <span>Planificación</span>
+                </div>
+                {isPlanificacionOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              </button>
+              
+              {isPlanificacionOpen && (
+                <div className="mt-1 ml-4 pl-4 border-l-2 border-slate-100 space-y-1">
+                  {planificacionItems.map((item) => (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 text-sm ${
+                          isActive
+                            ? 'bg-blue-50 text-blue-700 font-semibold shadow-sm'
+                            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                        }`
+                      }
+                    >
+                      <item.icon size={18} />
+                      <span>{item.name}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
-          {/* Menú Transporte (Antes Control Asignación) */}
+          {/* Menú Transporte */}
           <div className="pt-2">
             <button
               onClick={() => setIsAsignacionOpen(!isAsignacionOpen)}
@@ -108,7 +144,7 @@ export default function Layout() {
             )}
           </div>
 
-          {/* Menú Administración (Antes Asistencia) */}
+          {/* Menú Administración */}
           <div className="pt-2">
             <button
               onClick={() => setIsAsistenciaOpen(!isAsistenciaOpen)}
@@ -151,9 +187,9 @@ export default function Layout() {
           <div className="p-4 border-t border-slate-100">
             <button
               onClick={handleLogout}
-              className="flex w-full items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all"
+              className="flex w-full items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all text-sm font-medium"
             >
-              <LogOut size={20} />
+              <LogOut size={18} />
               <span>Cerrar Sesión</span>
             </button>
           </div>
@@ -172,24 +208,31 @@ export default function Layout() {
 
         {/* Mobile Menu Dropdown */}
         {isMobileMenuOpen && (
-          <nav className="md:hidden bg-white border-b border-slate-200 px-4 py-2 space-y-1 z-20 absolute w-full top-16 shadow-lg">
-            
+          <nav className="md:hidden bg-white border-b border-slate-200 px-4 py-2 space-y-1 z-20 absolute w-full top-16 shadow-lg max-h-[calc(100vh-4rem)] overflow-y-auto">
             {user?.role !== 'Visualizador' && (
-            <NavLink
-              to="/planning"
-              onClick={() => setIsMobileMenuOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 rounded-lg ${
-                  isActive ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600'
-                }`
-              }
-            >
-              <CalendarClock size={20} />
-              <span>Planificación</span>
-            </NavLink>
-          )}
+              <>
+                <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-2 pb-1">
+                  Planificación
+                </div>
+                {planificacionItems.map((item) => (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-4 py-2.5 rounded-lg pl-8 text-sm ${
+                        isActive ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600'
+                      }`
+                    }
+                  >
+                    <item.icon size={18} />
+                    <span>{item.name}</span>
+                  </NavLink>
+                ))}
+              </>
+            )}
 
-            <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-2 pb-2">
+            <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-3 pb-1">
               Transporte
             </div>
             {transporteItems.map((item) => (
@@ -198,7 +241,7 @@ export default function Layout() {
                 to={item.path}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg pl-8 ${
+                  `flex items-center gap-3 px-4 py-2.5 rounded-lg pl-8 text-sm ${
                     isActive ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600'
                   }`
                 }
@@ -208,7 +251,7 @@ export default function Layout() {
               </NavLink>
             ))}
             
-            <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-4 pb-2">
+            <div className="font-semibold text-xs text-slate-400 uppercase tracking-wider px-4 pt-3 pb-1">
               Administración
             </div>
             {administracionItems.map((item) => (
@@ -217,7 +260,7 @@ export default function Layout() {
                 to={item.path}
                 onClick={() => setIsMobileMenuOpen(false)}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg pl-8 ${
+                  `flex items-center gap-3 px-4 py-2.5 rounded-lg pl-8 text-sm ${
                     isActive ? 'bg-blue-50 text-blue-700 font-semibold' : 'text-slate-600'
                   }`
                 }
@@ -233,9 +276,9 @@ export default function Layout() {
                   handleLogout();
                   setIsMobileMenuOpen(false);
                 }}
-                className="flex w-full items-center gap-3 px-4 py-3 mt-4 border-t border-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600"
+                className="flex w-full items-center gap-3 px-4 py-3 mt-4 border-t border-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600 text-sm font-medium"
               >
-                <LogOut size={20} />
+                <LogOut size={18} />
                 <span>Cerrar Sesión</span>
               </button>
             )}
@@ -243,7 +286,7 @@ export default function Layout() {
         )}
 
         {/* Page Content */}
-        <div className="flex-1 overflow-auto bg-slate-50 flex flex-col">
+        <div className="flex-1 overflow-auto bg-slate-50 flex flex-col min-h-0">
           <Outlet />
         </div>
       </main>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import AddStaff from './components/AddStaff';
 import ManageStaff from './components/ManageStaff';
@@ -12,7 +12,8 @@ import AssignmentControl from './components/AssignmentControl';
 import AddFleet from './components/AddFleet';
 import ManageFleet from './components/ManageFleet';
 import FleetDashboard from './components/FleetDashboard';
-import Planning from './components/Planning';
+import DailyPlanning from './components/DailyPlanning';
+import Briefing from './components/Briefing';
 
 function App() {
   return (
@@ -24,7 +25,9 @@ function App() {
           <Route path="fleet-dashboard" element={<Login><FleetDashboard /></Login>} />
           <Route path="fleet" element={<Login><AddFleet /></Login>} />
           <Route path="manage-fleet" element={<Login><ManageFleet /></Login>} />
-          <Route path="planning" element={<Login><Planning /></Login>} />
+          <Route path="daily-planning" element={<Login><DailyPlanning /></Login>} />
+          <Route path="briefing" element={<Login><Briefing /></Login>} />
+          <Route path="planning" element={<Navigate to="/daily-planning" replace />} />
           <Route path="add-staff" element={<Login><AddStaff /></Login>} />
           <Route path="manage-staff" element={<Login><ManageStaff /></Login>} />
           <Route path="attendance" element={<Login><Attendance /></Login>} />
