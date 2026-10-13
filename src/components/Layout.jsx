@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
-  LogOut, ChevronDown, ChevronRight, Truck, Key, Layers, FileText, FileSpreadsheet 
+  LogOut, ChevronDown, ChevronRight, Truck, Key, Layers, FileText, FileSpreadsheet, History 
 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '../store/authStore';
@@ -30,6 +30,7 @@ export default function Layout() {
   let transporteItems = [
     { name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
     { name: 'Disponibilización', path: '/assignment', icon: Truck },
+    { name: 'Histórico disponibilización', path: '/historical-assignment', icon: History },
     { name: 'Agregar Flota', path: '/fleet', icon: Truck },
     { name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
   ];

@@ -4,7 +4,7 @@ import {
   Filter, Search, RefreshCw, User, Truck, MapPin, 
   ChevronUp, ChevronDown, CheckCircle2, Circle, Check,
   Calendar, Layers, Trash2, ArrowRight, UserCheck, Shield, Sparkles,
-  Save, Eye, Download, Send
+  Save, Eye, Download, Send, AlertTriangle, X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
@@ -35,6 +35,7 @@ export default function AssignmentControl() {
     batchUpdateRows,
     assignStaffToRows,
     assignTruckToRows,
+    assignRamplaToRows,
     clearSlotFromRows,
     saveDisponibilizacion
   } = usePlanningStore();
@@ -57,12 +58,16 @@ export default function AssignmentControl() {
     }
   }, [availableDates, selectedDisponibilizarDate, setSelectedDisponibilizarDate]);
 
-  // Estado UI
-  const [activeTab, setActiveTab] = useState('conductores');
+  // Tabs y estados
+  const [activeTabStaff, setActiveTabStaff] = useState('conductores'); // 'conductores' | 'auxiliares'
+  const [activeTabTrucks, setActiveTabTrucks] = useState('camiones'); // 'camiones' | 'tractos' | 'semirremolques'
+  
   const [sortVueltasAsc, setSortVueltasAsc] = useState(false);
   const [sortTrucksAsc, setSortTrucksAsc] = useState(false);
+  
   const [selectedStaffMember, setSelectedStaffMember] = useState(null);
   const [selectedTruckObject, setSelectedTruckObject] = useState(null);
+  
   const [staffSearch, setStaffSearch] = useState('');
   const [truckSearch, setTruckSearch] = useState('');
   
@@ -75,30 +80,57 @@ export default function AssignmentControl() {
   const [matrixFilterCliente, setMatrixFilterCliente] = useState('');
   const [matrixFilterEstado, setMatrixFilterEstado] = useState('Todos');
 
+  // Pop-up modal de confirmación al guardar
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [incompleteRoutesList, setIncompleteRoutesList] = useState([]);
+
+  // Filas expandidas en el Resumen inferior (por clave Conductor:::Vuelta)
+  const [expandedSummaryKeys, setExpandedSummaryKeys] = useState({});
+
   // Asignaciones actuales de la fecha activa
   const assignmentsForDate = useMemo(() => {
     return transmittedAssignments[activeDate] || [];
   }, [transmittedAssignments, activeDate]);
 
-  // Vueltas acumuladas por persona y camión
-  const vueltasPorPersona = useMemo(() => {
-    const counts = {};
+  // CÁLCULO DE VIAJES (Basado en la cantidad de "N° de vuelta" distintas asignadas)
+  const viajesPorPersona = useMemo(() => {
+    const map = {};
     assignmentsForDate.forEach(a => {
-      if (a.conductor_name) counts[a.conductor_name] = (counts[a.conductor_name] || 0) + 1;
-      if (a.aux1_name) counts[a.aux1_name] = (counts[a.aux1_name] || 0) + 1;
-      if (a.aux2_name) counts[a.aux2_name] = (counts[a.aux2_name] || 0) + 1;
+      const v = String(a.n_vuelta || '').trim();
+      const personList = [a.conductor_name, a.aux1_name, a.aux2_name].filter(Boolean);
+      personList.forEach(name => {
+        if (!map[name]) map[name] = new Set();
+        if (v) map[name].add(v);
+        else map[name].add(`v-fallback-${a.id}`);
+      });
     });
-    return counts;
+    const result = {};
+    Object.keys(map).forEach(name => {
+      result[name] = map[name].size;
+    });
+    return result;
   }, [assignmentsForDate]);
 
-  const vueltasPorCamion = useMemo(() => {
-    const counts = {};
+  const viajesPorCamion = useMemo(() => {
+    const map = {};
     assignmentsForDate.forEach(a => {
+      const v = String(a.n_vuelta || '').trim();
       if (a.camion) {
-        counts[a.camion] = (counts[a.camion] || 0) + 1;
+        if (!map[a.camion]) map[a.camion] = new Set();
+        if (v) map[a.camion].add(v);
+        else map[a.camion].add(`v-fallback-${a.id}`);
+      }
+      if (a.rampla) {
+        if (!map[a.rampla]) map[a.rampla] = new Set();
+        if (v) map[a.rampla].add(v);
+        else map[a.rampla].add(`v-fallback-${a.id}`);
       }
     });
-    return counts;
+    const result = {};
+    Object.keys(map).forEach(id => {
+      result[id] = map[id].size;
+    });
+    return result;
   }, [assignmentsForDate]);
 
   // Dotación activa
@@ -109,21 +141,21 @@ export default function AssignmentControl() {
     );
     
     const conds = activeStaff.filter(s => s.role.toLowerCase().includes('conductor')).map(c => ({
-      ...c, vueltas: vueltasPorPersona[c.name] || 0
+      ...c, viajes: viajesPorPersona[c.name] || 0
     }));
     const auxs = activeStaff.filter(s => s.role.toLowerCase().includes('auxiliar') || s.role.toLowerCase().includes('movilizador') || !s.role.toLowerCase().includes('conductor')).map(a => ({
-      ...a, vueltas: vueltasPorPersona[a.name] || 0
+      ...a, viajes: viajesPorPersona[a.name] || 0
     }));
 
-    const sortByVueltas = (a, b) => sortVueltasAsc ? a.vueltas - b.vueltas : b.vueltas - a.vueltas;
+    const sortByViajes = (a, b) => sortVueltasAsc ? a.viajes - b.viajes : b.viajes - a.viajes;
     return {
-      conductores: conds.sort(sortByVueltas),
-      auxiliares: auxs.sort(sortByVueltas)
+      conductores: conds.sort(sortByViajes),
+      auxiliares: auxs.sort(sortByViajes)
     };
-  }, [staffList, sortVueltasAsc, staffSearch, vueltasPorPersona]);
+  }, [staffList, sortVueltasAsc, staffSearch, viajesPorPersona]);
 
-  // Camiones activos
-  const sortedTrucks = useMemo(() => {
+  // Camiones clasificados en 3 categorías: Camión/Camioneta, Tracto, Semirremolque
+  const { camionesList, tractosList, semirremolquesList } = useMemo(() => {
     const activeTrucks = fleetList
       .filter(t => t.status === 'Activo' || !t.status)
       .filter(t => 
@@ -133,15 +165,36 @@ export default function AssignmentControl() {
       )
       .map(t => {
         const identifier = t.internal_number ? `${t.internal_number} (${t.plate})` : t.plate;
+        const vCount = viajesPorCamion[identifier] || viajesPorCamion[t.plate] || viajesPorCamion[t.internal_number] || 0;
         return {
           ...t,
           identifier,
-          vueltas: vueltasPorCamion[identifier] || vueltasPorCamion[t.plate] || 0
+          viajes: vCount
         };
       });
 
-    return activeTrucks.sort((a, b) => sortTrucksAsc ? a.vueltas - b.vueltas : b.vueltas - a.vueltas);
-  }, [fleetList, sortTrucksAsc, truckSearch, vueltasPorCamion]);
+    const camiones = [];
+    const tractos = [];
+    const semis = [];
+
+    activeTrucks.forEach(t => {
+      const typeLower = (t.type || '').toLowerCase();
+      if (typeLower.includes('semirremolque') || typeLower.includes('semiremolque') || typeLower.includes('rampla')) {
+        semis.push(t);
+      } else if (typeLower.includes('tracto')) {
+        tractos.push(t);
+      } else {
+        camiones.push(t);
+      }
+    });
+
+    const sortByViajes = (a, b) => sortTrucksAsc ? a.viajes - b.viajes : b.viajes - a.viajes;
+    return {
+      camionesList: camiones.sort(sortByViajes),
+      tractosList: tractos.sort(sortByViajes),
+      semirremolquesList: semis.sort(sortByViajes)
+    };
+  }, [fleetList, sortTrucksAsc, truckSearch, viajesPorCamion]);
 
   // Filas filtradas de la matriz
   const filteredAssignments = useMemo(() => {
@@ -156,7 +209,59 @@ export default function AssignmentControl() {
     });
   }, [assignmentsForDate, matrixFilterRuta, matrixFilterCliente, matrixFilterEstado]);
 
-  // Seleccionar todas las filas filtradas
+  // RESUMEN AGRUPADO POR CONDUCTOR + N° DE VUELTA
+  // "lo que no tienen 'Conductor' no debería aparecer en esta tabla resumen hasta que tenga"
+  const groupedSummary = useMemo(() => {
+    const map = new Map();
+
+    assignmentsForDate.forEach(row => {
+      if (!row.conductor_name || row.conductor_name.trim() === '') return;
+
+      const vueltaKey = row.n_vuelta ? `Vuelta ${row.n_vuelta}` : 'Sin Vuelta';
+      const groupKey = `${row.conductor_name}:::${vueltaKey}`;
+
+      if (!map.has(groupKey)) {
+        map.set(groupKey, {
+          groupKey,
+          conductor_name: row.conductor_name,
+          conductor_rut: row.conductor_rut || '',
+          n_vuelta: row.n_vuelta || '',
+          vueltaLabel: vueltaKey,
+          camion: row.camion || '',
+          auxiliares: [row.aux1_name, row.aux2_name].filter(Boolean),
+          totalM3: 0,
+          totalPeso: 0,
+          totalLocales: 0,
+          totalCajas: 0,
+          rutas: []
+        });
+      }
+
+      const g = map.get(groupKey);
+      g.totalM3 += parseFloat(row.m3) || 0;
+      g.totalPeso += parseFloat(row.peso) || 0;
+      g.totalLocales += parseInt(row.locales, 10) || 0;
+      g.totalCajas += parseInt(row.cantCJ, 10) || 0;
+      if (row.camion && !g.camion) g.camion = row.camion;
+
+      g.rutas.push(row);
+    });
+
+    return Array.from(map.values()).map(g => ({
+      ...g,
+      totalM3: Number(g.totalM3.toFixed(4)),
+      totalPeso: Number(g.totalPeso.toFixed(2))
+    }));
+  }, [assignmentsForDate]);
+
+  const toggleExpandSummary = (groupKey) => {
+    setExpandedSummaryKeys(prev => ({
+      ...prev,
+      [groupKey]: !prev[groupKey]
+    }));
+  };
+
+  // Seleccionar todas las filas
   const handleSelectAll = (e) => {
     if (e.target.checked) {
       setSelectedRowIds(filteredAssignments.map(a => a.id));
@@ -182,15 +287,25 @@ export default function AssignmentControl() {
     assignStaffToRows(activeDate, targetIds, staff, targetRole);
   };
 
-  // Helper para asignar Camión con autocompletado de tipo de equipo
+  // Helper para asignar Camión o Rampla
   const handleAssignTruck = (truck) => {
     if (!truck) return;
     const targetIds = selectedRowIds.length > 0 ? selectedRowIds : [];
     if (targetIds.length === 0) {
-      toast.warning('Marca las casillas de una o más filas en la tabla para asignar el camión.');
+      toast.warning('Marca las casillas de una o más filas en la tabla para asignar el vehículo.');
       return;
     }
     assignTruckToRows(activeDate, targetIds, truck);
+  };
+
+  const handleAssignRampla = (truck) => {
+    if (!truck) return;
+    const targetIds = selectedRowIds.length > 0 ? selectedRowIds : [];
+    if (targetIds.length === 0) {
+      toast.warning('Marca las casillas de una o más filas en la tabla para asignar la rampla.');
+      return;
+    }
+    assignRamplaToRows(activeDate, targetIds, truck);
   };
 
   // Asignar vuelta masiva a seleccionados
@@ -203,8 +318,19 @@ export default function AssignmentControl() {
     toast.success(`Vuelta ${vueltaNum} asignada a ${selectedRowIds.length} fila(s)`);
   };
 
-  // Guardar Disponibilización
-  const handleSave = () => {
+  // Guardar con Validación y Pop-up
+  const handlePreSave = () => {
+    const incomplete = assignmentsForDate.filter(r => !r.conductor_name || !r.camion);
+    if (incomplete.length > 0) {
+      setIncompleteRoutesList(incomplete);
+      setIsConfirmModalOpen(true);
+    } else {
+      executeSave();
+    }
+  };
+
+  const executeSave = () => {
+    setIsConfirmModalOpen(false);
     const ok = saveDisponibilizacion(activeDate);
     if (ok) {
       toast.success('¡Disponibilización guardada! Transmitida a Ruteo.', {
@@ -221,8 +347,8 @@ export default function AssignmentControl() {
     e.dataTransfer.setData('application/json', JSON.stringify({ type: 'staff', data: staff }));
   };
 
-  const handleDragStartTruck = (e, truck) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'truck', data: truck }));
+  const handleDragStartTruck = (e, truck, isRampla = false) => {
+    e.dataTransfer.setData('application/json', JSON.stringify({ type: isRampla ? 'rampla' : 'truck', data: truck }));
   };
 
   const handleDropOnRow = (e, rowId, slotPreference = 'conductor') => {
@@ -246,6 +372,8 @@ export default function AssignmentControl() {
         assignStaffToRows(activeDate, targetIds, staff, targetSlot);
       } else if (parsed.type === 'truck') {
         assignTruckToRows(activeDate, targetIds, parsed.data);
+      } else if (parsed.type === 'rampla') {
+        assignRamplaToRows(activeDate, targetIds, parsed.data);
       }
     } catch (err) {
       console.error(err);
@@ -262,14 +390,14 @@ export default function AssignmentControl() {
     <div className="flex flex-col h-full bg-slate-50 p-2 gap-2 overflow-hidden">
       
       {/* 1. BARRA SUPERIOR DE CONTROL */}
-      <header className="bg-white rounded-xl shadow-sm border border-slate-200 p-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+      <header className="bg-white rounded-xl shadow-sm border border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
         
         {/* Selector "Fecha a disponibilizar" */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-1 rounded-xl">
-            <Calendar size={18} className="text-blue-600 shrink-0" />
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-xl">
+            <Calendar size={16} className="text-blue-600 shrink-0" />
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-blue-800 uppercase tracking-wide">
+              <span className="text-[9px] font-bold text-blue-800 uppercase tracking-wide">
                 Fecha a disponibilizar
               </span>
               <select 
@@ -288,7 +416,7 @@ export default function AssignmentControl() {
             </div>
           </div>
 
-          <div className="hidden lg:flex items-center gap-2 text-xs text-slate-500">
+          <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500">
             <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-lg text-[11px]">
               {filteredAssignments.length} servicios
             </span>
@@ -302,26 +430,26 @@ export default function AssignmentControl() {
         </div>
 
         {/* Filtros rápidos + Botón Guardar Disponibilización */}
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <div className="relative">
-            <Search className="absolute left-2 top-1.5 text-slate-400" size={13} />
+            <Search className="absolute left-2 top-1.5 text-slate-400" size={12} />
             <input 
               type="text" 
               placeholder="Ruta..." 
               value={matrixFilterRuta}
               onChange={e => setMatrixFilterRuta(e.target.value)}
-              className="pl-7 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-24 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-20 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
           <div className="relative">
-            <Search className="absolute left-2 top-1.5 text-slate-400" size={13} />
+            <Search className="absolute left-2 top-1.5 text-slate-400" size={12} />
             <input 
               type="text" 
               placeholder="Cliente..." 
               value={matrixFilterCliente}
               onChange={e => setMatrixFilterCliente(e.target.value)}
-              className="pl-7 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-28 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-24 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
@@ -338,28 +466,28 @@ export default function AssignmentControl() {
           </select>
 
           <Button 
-            onClick={handleSave}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-8 px-3.5 flex items-center gap-1.5 shadow-sm rounded-xl"
-            title="Guarda y transmite los servicios a Ruteo"
+            onClick={handlePreSave}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl"
+            title="Guarda la disponibilización y valida si faltan asignaciones"
           >
-            <Save size={14} />
+            <Save size={13} />
             Guardar Disponibilización
           </Button>
 
           <Button 
             variant="outline" 
             onClick={() => navigate('/ruteo')}
-            className="text-xs h-8 px-2.5 text-slate-600 hover:text-blue-700 flex items-center gap-1 rounded-xl"
+            className="text-xs h-7.5 px-2 text-slate-600 hover:text-blue-700 flex items-center gap-1 rounded-xl"
           >
-            <Layers size={14} />
-            Ir a Ruteo
+            <Layers size={13} />
+            Ruteo
           </Button>
         </div>
       </header>
 
       {/* Floating Toolbar when rows are selected */}
       {selectedRowIds.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl shadow-md p-2 px-3 flex flex-wrap items-center justify-between gap-2 shrink-0 animate-in fade-in slide-in-from-top-2">
+        <div className="bg-gradient-to-r from-blue-700 to-indigo-800 text-white rounded-xl shadow-md p-2 px-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2">
             <CheckCircle2 size={16} className="text-emerald-400" />
             <span className="font-bold text-xs">
@@ -392,20 +520,20 @@ export default function AssignmentControl() {
               <>
                 <button
                   onClick={() => handleAssignStaff(selectedStaffMember, 'conductor')}
-                  className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-2 py-1 rounded-lg transition-colors shadow-sm flex items-center gap-1"
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-lg transition-colors shadow-sm flex items-center gap-1"
                 >
                   <User size={12} />
                   Chofer: {selectedStaffMember.name.split(' ')[0]}
                 </button>
                 <button
                   onClick={() => handleAssignStaff(selectedStaffMember, 'auxiliar')}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold px-2 py-1 rounded-lg transition-colors shadow-sm flex items-center gap-1"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-lg transition-colors shadow-sm flex items-center gap-1"
                 >
                   Aux 1
                 </button>
                 <button
                   onClick={() => handleAssignStaff(selectedStaffMember, 'auxiliar2')}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold px-2 py-1 rounded-lg transition-colors shadow-sm flex items-center gap-1"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-lg transition-colors shadow-sm flex items-center gap-1"
                 >
                   Aux 2
                 </button>
@@ -413,13 +541,22 @@ export default function AssignmentControl() {
             )}
 
             {selectedTruckObject && (
-              <button
-                onClick={() => handleAssignTruck(selectedTruckObject)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-2 py-1 rounded-lg transition-colors shadow-sm flex items-center gap-1"
-              >
-                <Truck size={12} />
-                Camión: {selectedTruckObject.internal_number || selectedTruckObject.plate}
-              </button>
+              <>
+                <button
+                  onClick={() => handleAssignTruck(selectedTruckObject)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-lg transition-colors shadow-sm flex items-center gap-1"
+                >
+                  <Truck size={12} />
+                  Camión: {selectedTruckObject.internal_number || selectedTruckObject.plate}
+                </button>
+                {/* Permite asignar Semirremolque a Rampla */}
+                <button
+                  onClick={() => handleAssignRampla(selectedTruckObject)}
+                  className="bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-lg transition-colors shadow-sm flex items-center gap-1"
+                >
+                  Rampla
+                </button>
+              </>
             )}
 
             <button
@@ -428,17 +565,18 @@ export default function AssignmentControl() {
                 clearSlotFromRows(activeDate, selectedRowIds, 'auxiliar');
                 clearSlotFromRows(activeDate, selectedRowIds, 'auxiliar2');
                 clearSlotFromRows(activeDate, selectedRowIds, 'camion');
+                clearSlotFromRows(activeDate, selectedRowIds, 'rampla');
                 clearSlotFromRows(activeDate, selectedRowIds, 'vuelta');
               }}
-              className="bg-white/10 hover:bg-red-500/80 text-white text-[11px] font-semibold px-2 py-1 rounded-lg transition-colors"
+              className="bg-white/10 hover:bg-red-500/80 text-white text-[11px] font-semibold px-2 py-0.5 rounded-lg transition-colors"
               title="Limpiar todas las asignaciones"
             >
-              <Trash2 size={13} />
+              <Trash2 size={12} />
             </button>
 
             <button
               onClick={() => setSelectedRowIds([])}
-              className="bg-white/20 hover:bg-white/30 text-white text-[11px] font-semibold px-2 py-1 rounded-lg transition-colors"
+              className="bg-white/20 hover:bg-white/30 text-white text-[11px] font-semibold px-2 py-0.5 rounded-lg transition-colors"
             >
               Deseleccionar
             </button>
@@ -452,48 +590,48 @@ export default function AssignmentControl() {
         {/* PANEL IZQUIERDO: Dotación (Reducido a 17%) */}
         <div className="w-[17%] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
           <div className="p-2 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <h2 className="font-bold text-slate-800 text-xs flex items-center gap-1">
-              <User size={14} className="text-blue-600" /> Dotación
+            <h2 className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
+              <User size={13} className="text-blue-600" /> Dotación
             </h2>
             <button 
               onClick={() => setSortVueltasAsc(!sortVueltasAsc)}
               className="p-1 hover:bg-slate-200 rounded text-slate-500"
-              title="Ordenar por vueltas"
+              title="Ordenar por viajes"
             >
-              {sortVueltasAsc ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {sortVueltasAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </button>
           </div>
           
           <div className="flex border-b border-slate-100 bg-slate-50/30">
             <button 
-              className={`flex-1 py-1 text-[11px] font-bold text-center transition-colors ${activeTab === 'conductores' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}
-              onClick={() => setActiveTab('conductores')}
+              className={`flex-1 py-1 text-[10px] font-bold text-center transition-colors ${activeTabStaff === 'conductores' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              onClick={() => setActiveTabStaff('conductores')}
             >
-              Choferes ({conductores.length})
+              Chofer ({conductores.length})
             </button>
             <button 
-              className={`flex-1 py-1 text-[11px] font-bold text-center transition-colors ${activeTab === 'auxiliares' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}
-              onClick={() => setActiveTab('auxiliares')}
+              className={`flex-1 py-1 text-[10px] font-bold text-center transition-colors ${activeTabStaff === 'auxiliares' ? 'border-b-2 border-blue-600 text-blue-600 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              onClick={() => setActiveTabStaff('auxiliares')}
             >
               Aux ({auxiliares.length})
             </button>
           </div>
 
-          <div className="p-1.5 border-b border-slate-100 bg-white">
+          <div className="p-1 border-b border-slate-100 bg-white">
             <div className="relative">
-              <Search className="absolute left-2 top-1.5 text-slate-400" size={12} />
+              <Search className="absolute left-2 top-1.5 text-slate-400" size={11} />
               <input 
                 type="text" 
-                placeholder="Nombre/RUT..." 
+                placeholder="Nombre o RUT..." 
                 value={staffSearch}
                 onChange={e => setStaffSearch(e.target.value)}
-                className="w-full pl-6 pr-1.5 py-1 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
+                className="w-full pl-5 pr-1.5 py-0.5 text-[10px] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
               />
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
-            {(activeTab === 'conductores' ? conductores : auxiliares).map(staff => {
+          <div className="flex-1 overflow-y-auto p-1 space-y-1">
+            {(activeTabStaff === 'conductores' ? conductores : auxiliares).map(staff => {
               const isSelected = selectedStaffMember?.id === staff.id;
               return (
                 <div 
@@ -512,14 +650,15 @@ export default function AssignmentControl() {
                       <p className="text-[11px] font-bold text-slate-800 truncate" title={staff.name}>
                         {staff.name}
                       </p>
-                      <p className="text-[10px] text-slate-400 font-mono">
+                      <p className="text-[9px] text-slate-400 font-mono">
                         {staff.rut || 'S/RUT'}
                       </p>
                     </div>
-                    <div className={`shrink-0 px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
-                      staff.vueltas > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                    {/* Badge de viajes basado en vueltas distintas */}
+                    <div className={`shrink-0 px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                      staff.viajes > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
                     }`}>
-                      {staff.vueltas}v
+                      {staff.viajes === 1 ? '1 viaje' : `${staff.viajes} viajes`}
                     </div>
                   </div>
 
@@ -528,7 +667,7 @@ export default function AssignmentControl() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleAssignStaff(staff, activeTab === 'conductores' ? 'conductor' : 'auxiliar');
+                          handleAssignStaff(staff, activeTabStaff === 'conductores' ? 'conductor' : 'auxiliar');
                         }}
                         className="text-[9px] font-bold bg-blue-600 hover:bg-blue-700 text-white px-1.5 py-0.5 rounded shadow-xs"
                       >
@@ -549,13 +688,13 @@ export default function AssignmentControl() {
           <div className="flex-[3] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
             <div className="p-2 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
               <div className="flex items-center gap-1.5">
-                <MapPin size={15} className="text-indigo-600" />
+                <MapPin size={14} className="text-indigo-600" />
                 <h2 className="font-bold text-slate-800 text-xs">
                   Disponibilización General — {activeDate}
                 </h2>
               </div>
               <span className="text-[11px] text-slate-500 font-medium">
-                Selecciona N° de vuelta (1-8) al lado de Fecha. Arrastra dotación o camiones.
+                "N° de vuelta" (1 al 8) al lado de Fecha. Arrastra dotación o camiones.
               </span>
             </div>
 
@@ -572,28 +711,28 @@ export default function AssignmentControl() {
                         title="Seleccionar todas"
                       />
                     </th>
-                    <th className="px-2 py-2">Fecha</th>
+                    <th className="px-2.5 py-2">Fecha</th>
                     
-                    {/* NUEVO: N° de vuelta ubicado al lado de Fecha, vacía inicialmente con lista 1 al 8 */}
-                    <th className="px-2 py-2 text-center bg-amber-50/70 text-amber-900 border-x border-amber-200">
+                    {/* N° de vuelta al lado de Fecha, vacía inicialmente con lista 1 al 8 */}
+                    <th className="px-2.5 py-2 text-center bg-amber-50/70 text-amber-900 border-x border-amber-200">
                       N° de vuelta
                     </th>
 
-                    <th className="px-2 py-2 text-blue-700 bg-blue-50/50">Conductor</th>
-                    <th className="px-2 py-2 text-blue-700 bg-blue-50/50">Rut Conductor</th>
-                    <th className="px-2 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar</th>
-                    <th className="px-2 py-2 text-indigo-700 bg-indigo-50/50">Rut Auxiliar</th>
-                    <th className="px-2 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar 2</th>
-                    <th className="px-2 py-2 text-indigo-700 bg-indigo-50/50">Rut Auxiliar 2</th>
-                    <th className="px-2 py-2 text-emerald-700 bg-emerald-50/50">Camión</th>
-                    <th className="px-2 py-2 text-emerald-700 bg-emerald-50/50">Tipo de equipo</th>
-                    <th className="px-2 py-2">Rampla</th>
-                    <th className="px-2 py-2">Tipo de servicio</th>
-                    <th className="px-2 py-2 font-black text-slate-800">N° de Ruta</th>
-                    <th className="px-2 py-2">Cliente</th>
-                    <th className="px-2 py-2">Referencia</th>
-                    <th className="px-2 py-2 text-center">Cantidad de Locales</th>
-                    <th className="px-2 py-2 text-right">Metros cúbicos</th>
+                    <th className="px-2.5 py-2 text-blue-700 bg-blue-50/50">Conductor</th>
+                    <th className="px-2.5 py-2 text-blue-700 bg-blue-50/50">Rut Conductor</th>
+                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar</th>
+                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Rut Auxiliar</th>
+                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar 2</th>
+                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Rut Auxiliar 2</th>
+                    <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Camión</th>
+                    <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Tipo de equipo</th>
+                    <th className="px-2.5 py-2 text-teal-700 bg-teal-50/40">Rampla</th>
+                    <th className="px-2.5 py-2">Tipo de servicio</th>
+                    <th className="px-2.5 py-2 font-black text-slate-800">N° de Ruta</th>
+                    <th className="px-2.5 py-2">Cliente</th>
+                    <th className="px-2.5 py-2">Referencia</th>
+                    <th className="px-2.5 py-2 text-center">Cantidad de Locales</th>
+                    <th className="px-2.5 py-2 text-right">Metros cúbicos</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -619,14 +758,14 @@ export default function AssignmentControl() {
                         </td>
 
                         {/* 1. Fecha */}
-                        <td className="px-2 py-2 font-semibold text-slate-600">{row.fecha}</td>
+                        <td className="px-2.5 py-2 font-semibold text-slate-600">{row.fecha}</td>
 
                         {/* 2. N° de vuelta (Ubicada al lado de Fecha, vacía inicialmente, lista 1 al 8) */}
                         <td className="px-2 py-2 text-center bg-amber-50/30 border-x border-amber-100">
                           <select
                             value={row.n_vuelta || ''}
                             onChange={(e) => updateAssignmentField(activeDate, row.id, 'n_vuelta', e.target.value)}
-                            className="text-xs font-black text-slate-800 border border-amber-300 rounded-lg px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
+                            className="text-xs font-black text-slate-800 border border-amber-300 rounded-lg px-2 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 cursor-pointer"
                           >
                             <option value="">—</option>
                             <option value="1">1</option>
@@ -642,7 +781,7 @@ export default function AssignmentControl() {
 
                         {/* 3. Conductor */}
                         <td 
-                          className="px-2 py-2 font-bold text-slate-800 max-w-[130px] truncate bg-blue-50/20"
+                          className="px-2.5 py-2 font-bold text-slate-800 max-w-[130px] truncate bg-blue-50/20"
                           title={row.conductor_name}
                           onDrop={(e) => handleDropOnRow(e, row.id, 'conductor')}
                         >
@@ -662,14 +801,14 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 4. Rut Conductor (Autocompletado) */}
-                        <td className="px-2 py-2 font-mono text-[11px] text-slate-600 bg-blue-50/20">
+                        {/* 4. Rut Conductor */}
+                        <td className="px-2.5 py-2 font-mono text-[11px] text-slate-600 bg-blue-50/20">
                           {row.conductor_rut || '-'}
                         </td>
 
                         {/* 5. Auxiliar */}
                         <td 
-                          className="px-2 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20"
+                          className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20"
                           title={row.aux1_name}
                           onDrop={(e) => handleDropOnRow(e, row.id, 'auxiliar')}
                         >
@@ -689,14 +828,14 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 6. Rut Auxiliar (Autocompletado) */}
-                        <td className="px-2 py-2 font-mono text-[11px] text-slate-600 bg-indigo-50/20">
+                        {/* 6. Rut Auxiliar */}
+                        <td className="px-2.5 py-2 font-mono text-[11px] text-slate-600 bg-indigo-50/20">
                           {row.aux1_rut || '-'}
                         </td>
 
                         {/* 7. Auxiliar 2 */}
                         <td 
-                          className="px-2 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20"
+                          className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20"
                           title={row.aux2_name}
                           onDrop={(e) => handleDropOnRow(e, row.id, 'auxiliar2')}
                         >
@@ -716,15 +855,15 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 8. Rut Auxiliar 2 (Autocompletado) */}
-                        <td className="px-2 py-2 font-mono text-[11px] text-slate-600 bg-indigo-50/20">
+                        {/* 8. Rut Auxiliar 2 */}
+                        <td className="px-2.5 py-2 font-mono text-[11px] text-slate-600 bg-indigo-50/20">
                           {row.aux2_rut || '-'}
                         </td>
 
                         {/* 9. Camión */}
                         <td 
-                          className="px-2 py-2 font-bold text-slate-800 bg-emerald-50/20"
-                          onDrop={(e) => handleDropOnRow(e, row.id)}
+                          className="px-2.5 py-2 font-bold text-slate-800 bg-emerald-50/20"
+                          onDrop={(e) => handleDropOnRow(e, row.id, 'camion')}
                         >
                           {row.camion ? (
                             <span className="flex items-center justify-between gap-1">
@@ -744,24 +883,27 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 10. Tipo de equipo (Autocompletado de camión) */}
-                        <td className="px-2 py-2 text-slate-600 bg-emerald-50/20">
+                        {/* 10. Tipo de equipo */}
+                        <td className="px-2.5 py-2 text-slate-600 bg-emerald-50/20">
                           {row.tipo_equipo || '-'}
                         </td>
 
-                        {/* 11. Rampla */}
-                        <td className="px-2 py-2">
+                        {/* 11. Rampla (Asignable por arrastrar semirremolque o texto) */}
+                        <td 
+                          className="px-2.5 py-2 bg-teal-50/20"
+                          onDrop={(e) => handleDropOnRow(e, row.id, 'rampla')}
+                        >
                           <input 
                             type="text" 
                             value={row.rampla || ''} 
                             onChange={(e) => updateAssignmentField(activeDate, row.id, 'rampla', e.target.value)}
                             placeholder="R-01"
-                            className="w-14 px-1 py-0.5 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 bg-transparent"
+                            className="w-16 px-1.5 py-0.5 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 bg-transparent"
                           />
                         </td>
 
                         {/* 12. Tipo de servicio */}
-                        <td className="px-2 py-2">
+                        <td className="px-2.5 py-2">
                           <select
                             value={row.tipo_servicio || 'Centralizado'}
                             onChange={(e) => updateAssignmentField(activeDate, row.id, 'tipo_servicio', e.target.value)}
@@ -780,17 +922,17 @@ export default function AssignmentControl() {
                         </td>
 
                         {/* 13. N° de Ruta */}
-                        <td className="px-2 py-2 font-black text-slate-800 text-sm">
+                        <td className="px-2.5 py-2 font-black text-slate-800 text-sm">
                           {row.ruta}
                         </td>
 
                         {/* 14. Cliente */}
-                        <td className="px-2 py-2 font-medium text-slate-700 max-w-[150px] truncate" title={row.cliente}>
+                        <td className="px-2.5 py-2 font-medium text-slate-700 max-w-[150px] truncate" title={row.cliente}>
                           {row.cliente}
                         </td>
 
                         {/* 15. Referencia */}
-                        <td className="px-2 py-2">
+                        <td className="px-2.5 py-2">
                           <input 
                             type="text" 
                             value={row.referencia || ''} 
@@ -801,14 +943,14 @@ export default function AssignmentControl() {
                         </td>
 
                         {/* 16. Cantidad de Locales */}
-                        <td className="px-2 py-2 text-center font-bold">
+                        <td className="px-2.5 py-2 text-center font-bold">
                           <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full text-xs">
                             {row.locales || 0}
                           </span>
                         </td>
 
                         {/* 17. Metros cubicos */}
-                        <td className="px-2 py-2 text-right font-mono font-bold text-emerald-700">
+                        <td className="px-2.5 py-2 text-right font-mono font-bold text-emerald-700">
                           {row.m3 || 0}
                         </td>
                       </tr>
@@ -827,143 +969,233 @@ export default function AssignmentControl() {
             </div>
           </div>
 
-          {/* TABLA INFERIOR: Resumen de Asignación por Ruta — Detalle completo con paradas */}
+          {/* TABLA INFERIOR: RESUMEN DE ASIGNACIÓN POR RUTA */}
+          {/* Formato: Conductor + Camión + N° de vuelta + resumen m³, Peso, Locales + acordeón expandible con desglose por N° de Ruta */}
           <div className="flex-[2] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
             <div className="p-2 border-b border-slate-100 bg-blue-50/50 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Layers size={15} className="text-blue-700" />
+              <div className="flex items-center gap-1.5">
+                <Layers size={14} className="text-blue-700" />
                 <h3 className="font-bold text-blue-900 text-xs">
-                  Resumen de Asignación por Ruta — {activeDate} (Detalle de Destinos)
+                  Resumen de Asignación por Ruta — {activeDate}
                 </h3>
               </div>
               <div className="flex items-center gap-3 text-xs">
-                <span>Vueltas: <strong className="text-slate-800">{totalVueltas}</strong></span>
+                <span>Viajes planificados: <strong className="text-slate-800">{groupedSummary.length}</strong></span>
                 <span>Locales: <strong className="text-indigo-700">{totalLocales}</strong></span>
                 <span>Peso: <strong className="text-amber-700">{totalPeso} kg</strong></span>
                 <span>Total m³: <strong className="text-emerald-700">{totalM3}</strong></span>
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-2 space-y-2">
-              {filteredAssignments.map((row) => {
-                const paradas = row.paradas || [];
+            <div className="flex-1 overflow-auto p-2 space-y-1.5">
+              {groupedSummary.map((group) => {
+                const isExpanded = !!expandedSummaryKeys[group.groupKey];
                 return (
-                  <div key={`detail-${row.id}`} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
-                    {/* Header de la Ruta Asignada */}
-                    <div className="bg-slate-50 px-3 py-1.5 border-b border-slate-200 flex flex-wrap items-center justify-between text-xs gap-2">
+                  <div key={group.groupKey} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
+                    
+                    {/* Fila Resumen Principal (Clickeable para desplegar todo lo asignado a esa vuelta) */}
+                    <div 
+                      onClick={() => toggleExpandSummary(group.groupKey)}
+                      className="bg-slate-50/80 hover:bg-blue-50/50 cursor-pointer px-3 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between text-xs gap-2 transition-colors select-none"
+                    >
                       <div className="flex items-center gap-2">
-                        <span className="bg-slate-800 text-white font-black px-2 py-0.5 rounded text-[11px]">
-                          Ruta {row.ruta}
+                        <span className="text-blue-600">
+                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         </span>
-                        {row.n_vuelta && (
-                          <span className="bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded text-[10px]">
-                            Vuelta {row.n_vuelta}
+                        
+                        {/* Dotación */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-black text-slate-800 text-sm">
+                            {group.conductor_name}
                           </span>
-                        )}
-                        <span className="font-bold text-slate-800">{row.cliente}</span>
-                      </div>
-
-                      <div className="flex items-center gap-3 text-[11px]">
-                        <span className="text-slate-600">
-                          Chofer: <strong className="text-slate-900">{row.conductor_name || 'Sin asignar'}</strong>
-                          {row.conductor_rut && <span className="text-slate-400 font-mono text-[10px] ml-1">({row.conductor_rut})</span>}
-                        </span>
-                        <span className="text-slate-600">
-                          Aux: <strong className="text-slate-900">{[row.aux1_name, row.aux2_name].filter(Boolean).join(', ') || 'Sin aux'}</strong>
-                        </span>
-                        <span className="text-slate-600">
-                          Camión: <strong className="text-emerald-700">{row.camion || 'Sin camión'}</strong>
-                        </span>
-                        <span className="text-slate-600 font-mono font-bold text-emerald-700">
-                          {row.m3} m³
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Tabla de Paradas / Destinos (Formato idéntico a la imagen) */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-[11px] whitespace-nowrap">
-                        <thead className="bg-slate-100/70 text-slate-600 font-semibold border-b border-slate-100">
-                          <tr>
-                            <th className="px-3 py-1 w-10">Sec</th>
-                            <th className="px-3 py-1">Destino</th>
-                            <th className="px-3 py-1">Dirección</th>
-                            <th className="px-3 py-1">Comuna</th>
-                            <th className="px-3 py-1">Horario</th>
-                            <th className="px-3 py-1 text-right">m³</th>
-                            <th className="px-3 py-1 text-right">Peso</th>
-                            <th className="px-3 py-1 text-right">CJ</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {paradas.map((p, pIdx) => (
-                            <tr key={pIdx} className="hover:bg-slate-50">
-                              <td className="px-3 py-1 text-slate-500 font-bold">{p.secuencia || pIdx + 1}</td>
-                              <td className="px-3 py-1 font-bold text-slate-800">{p.destino}</td>
-                              <td className="px-3 py-1 text-slate-500">{p.direccion}</td>
-                              <td className="px-3 py-1 text-slate-600">{p.comuna}</td>
-                              <td className="px-3 py-1 text-slate-500 font-mono">
-                                {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
-                              </td>
-                              <td className="px-3 py-1 text-right font-mono font-bold text-slate-700">{p.volumen}</td>
-                              <td className="px-3 py-1 text-right font-mono text-slate-600">{p.peso}</td>
-                              <td className="px-3 py-1 text-right font-mono text-slate-600">{p.cantCJ}</td>
-                            </tr>
-                          ))}
-                          {paradas.length === 0 && (
-                            <tr>
-                              <td colSpan="8" className="px-3 py-2 text-center text-slate-400 italic">
-                                Destino directo / Sin desglose individual de paradas.
-                              </td>
-                            </tr>
+                          {group.conductor_rut && (
+                            <span className="text-slate-400 font-mono text-[10px]">
+                              ({group.conductor_rut})
+                            </span>
                           )}
-                        </tbody>
-                      </table>
+                        </div>
+
+                        {/* Camión */}
+                        <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                          <Truck size={12} />
+                          {group.camion || 'Sin camión'}
+                        </span>
+
+                        {/* N° de vuelta */}
+                        <span className="bg-amber-100 text-amber-800 font-black px-2 py-0.5 rounded text-[11px]">
+                          {group.vueltaLabel}
+                        </span>
+
+                        {/* Rutas contenidas */}
+                        <span className="text-slate-400 text-[11px]">
+                          [{group.rutas.map(r => `Ruta ${r.ruta}`).join(', ')}]
+                        </span>
+                      </div>
+
+                      {/* Resumen al costado: m³, Peso, Locales */}
+                      <div className="flex items-center gap-4 text-xs">
+                        <span className="text-slate-600">
+                          Locales: <strong className="text-indigo-700">{group.totalLocales}</strong>
+                        </span>
+                        <span className="text-slate-600">
+                          Peso: <strong className="text-amber-700">{group.totalPeso} kg</strong>
+                        </span>
+                        <span className="text-slate-600 font-mono font-black text-emerald-700 text-sm">
+                          {group.totalM3} m³
+                        </span>
+                      </div>
                     </div>
+
+                    {/* DESGLOSE AL DESPLEGAR: Todo lo asignado en esa vuelta, separado por N° de Ruta */}
+                    {isExpanded && (
+                      <div className="p-3 bg-slate-50/30 space-y-3">
+                        {group.rutas.map(r => {
+                          const paradas = r.paradas || [];
+                          return (
+                            <div key={`subroute-${r.id}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                              {/* Sub-header de la ruta */}
+                              <div className="bg-slate-100/70 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-2">
+                                  <span className="bg-slate-800 text-white font-bold px-2 py-0.5 rounded text-[10px]">
+                                    N° de Ruta {r.ruta}
+                                  </span>
+                                  <span className="font-bold text-slate-800">{r.cliente}</span>
+                                </div>
+                                <div className="flex items-center gap-3 text-[11px]">
+                                  <span>{paradas.length} paradas</span>
+                                  <span>{r.locales} locales</span>
+                                  <span>{r.peso} kg</span>
+                                  <span className="font-mono font-bold text-emerald-700">{r.m3} m³</span>
+                                </div>
+                              </div>
+
+                              {/* Tabla de paradas / destinos idéntica a la imagen */}
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-left text-[11px] whitespace-nowrap">
+                                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100">
+                                    <tr>
+                                      <th className="px-3 py-1 w-10">Sec</th>
+                                      <th className="px-3 py-1">Destino</th>
+                                      <th className="px-3 py-1">Dirección</th>
+                                      <th className="px-3 py-1">Comuna</th>
+                                      <th className="px-3 py-1">Horario</th>
+                                      <th className="px-3 py-1 text-right">m³</th>
+                                      <th className="px-3 py-1 text-right">Peso</th>
+                                      <th className="px-3 py-1 text-right">CJ</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-100">
+                                    {paradas.map((p, pIdx) => (
+                                      <tr key={pIdx} className="hover:bg-slate-50">
+                                        <td className="px-3 py-1 text-slate-500 font-bold">{p.secuencia || pIdx + 1}</td>
+                                        <td className="px-3 py-1 font-bold text-slate-800">{p.destino}</td>
+                                        <td className="px-3 py-1 text-slate-500">{p.direccion}</td>
+                                        <td className="px-3 py-1 text-slate-600">{p.comuna}</td>
+                                        <td className="px-3 py-1 text-slate-500 font-mono">
+                                          {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
+                                        </td>
+                                        <td className="px-3 py-1 text-right font-mono font-bold text-slate-700">{p.volumen}</td>
+                                        <td className="px-3 py-1 text-right font-mono text-slate-600">{p.peso}</td>
+                                        <td className="px-3 py-1 text-right font-mono text-slate-600">{p.cantCJ}</td>
+                                      </tr>
+                                    ))}
+                                    {paradas.length === 0 && (
+                                      <tr>
+                                        <td colSpan="8" className="px-3 py-2 text-center text-slate-400 italic">
+                                          Destino directo sin paradas adicionales.
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
+
+              {groupedSummary.length === 0 && (
+                <div className="p-8 text-center text-slate-400 text-xs italic">
+                  Asigna un Conductor en la matriz superior para visualizar el resumen agrupado por vuelta y el detalle de paradas.
+                </div>
+              )}
             </div>
           </div>
 
         </div>
 
-        {/* PANEL DERECHO: Disponibilización de Camiones (Reducido a 17%) */}
+        {/* PANEL DERECHO: Camiones (Reducido a 17%, separado en 3 pestañas: Camión/Camioneta, Tracto, Semirremolque) */}
         <div className="w-[17%] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
           <div className="p-2 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <h2 className="font-bold text-slate-800 text-xs flex items-center gap-1">
-              <Truck size={14} className="text-emerald-600" /> Camiones
+            <h2 className="font-bold text-slate-800 text-[11px] flex items-center gap-1">
+              <Truck size={13} className="text-emerald-600" /> Camiones
             </h2>
             <button 
               onClick={() => setSortTrucksAsc(!sortTrucksAsc)}
               className="p-1 hover:bg-slate-200 rounded text-slate-500"
-              title="Ordenar por vueltas"
+              title="Ordenar por viajes"
             >
-              {sortTrucksAsc ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {sortTrucksAsc ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </button>
           </div>
           
-          <div className="p-1.5 border-b border-slate-100 bg-white">
+          {/* Pestañas de Camiones: Camión/Camioneta | Tracto | Semirremolque */}
+          <div className="flex border-b border-slate-100 bg-slate-50/30 text-[9px] font-bold">
+            <button 
+              className={`flex-1 py-1 text-center transition-colors truncate ${activeTabTrucks === 'camiones' ? 'border-b-2 border-emerald-600 text-emerald-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              onClick={() => setActiveTabTrucks('camiones')}
+              title="Camiones y Camionetas"
+            >
+              Camión ({camionesList.length})
+            </button>
+            <button 
+              className={`flex-1 py-1 text-center transition-colors truncate ${activeTabTrucks === 'tractos' ? 'border-b-2 border-emerald-600 text-emerald-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              onClick={() => setActiveTabTrucks('tractos')}
+              title="Tractos"
+            >
+              Tracto ({tractosList.length})
+            </button>
+            <button 
+              className={`flex-1 py-1 text-center transition-colors truncate ${activeTabTrucks === 'semirremolques' ? 'border-b-2 border-emerald-600 text-emerald-700 bg-white' : 'text-slate-500 hover:bg-slate-100'}`}
+              onClick={() => setActiveTabTrucks('semirremolques')}
+              title="Semirremolques / Ramplas"
+            >
+              Rampla ({semirremolquesList.length})
+            </button>
+          </div>
+
+          <div className="p-1 border-b border-slate-100 bg-white">
             <div className="relative">
-              <Search className="absolute left-2 top-1.5 text-slate-400" size={12} />
+              <Search className="absolute left-2 top-1.5 text-slate-400" size={11} />
               <input 
                 type="text" 
-                placeholder="Patente/N°..." 
+                placeholder="Patente o N°..." 
                 value={truckSearch}
                 onChange={e => setTruckSearch(e.target.value)}
-                className="w-full pl-6 pr-1.5 py-1 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
+                className="w-full pl-5 pr-1.5 py-0.5 text-[10px] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-50"
               />
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
-            {sortedTrucks.map(truck => {
+          <div className="flex-1 overflow-y-auto p-1 space-y-1">
+            {(
+              activeTabTrucks === 'camiones' 
+                ? camionesList 
+                : activeTabTrucks === 'tractos' 
+                  ? tractosList 
+                  : semirremolquesList
+            ).map(truck => {
               const isSelected = selectedTruckObject?.id === truck.id;
+              const isSemirremolque = activeTabTrucks === 'semirremolques';
               return (
                 <div 
                   key={truck.id}
                   draggable
-                  onDragStart={(e) => handleDragStartTruck(e, truck)}
+                  onDragStart={(e) => handleDragStartTruck(e, truck, isSemirremolque)}
                   onClick={() => setSelectedTruckObject(isSelected ? null : truck)}
                   className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${
                     isSelected 
@@ -980,27 +1212,34 @@ export default function AssignmentControl() {
                         {truck.plate}
                       </span>
                     </div>
-                    <div className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold ${
-                      truck.vueltas > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                    {/* Badge de viajes basado en vueltas distintas */}
+                    <div className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                      truck.viajes > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
                     }`}>
-                      {truck.vueltas}v
+                      {truck.viajes === 1 ? '1 viaje' : `${truck.viajes} viajes`}
                     </div>
                   </div>
 
-                  <div className="text-[10px] text-slate-500 truncate">
-                    {truck.brand || 'Camión'} • {truck.type || 'General'}
+                  <div className="text-[9px] text-slate-500 truncate">
+                    {truck.brand || 'Equipo'} • {truck.type || 'General'}
                   </div>
 
                   {selectedRowIds.length > 0 && (
-                    <div className="mt-1 pt-1 border-t border-slate-100 flex items-center justify-end">
+                    <div className="mt-1 pt-1 border-t border-slate-100 flex items-center justify-end gap-1">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleAssignTruck(truck);
+                          if (isSemirremolque) {
+                            handleAssignRampla(truck);
+                          } else {
+                            handleAssignTruck(truck);
+                          }
                         }}
-                        className="text-[9px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white px-1.5 py-0.5 rounded shadow-xs"
+                        className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded shadow-xs ${
+                          isSemirremolque ? 'bg-teal-600 hover:bg-teal-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                        }`}
                       >
-                        + Asignar ({selectedRowIds.length})
+                        {isSemirremolque ? '+ Rampla' : '+ Camión'} ({selectedRowIds.length})
                       </button>
                     </div>
                   )}
@@ -1011,6 +1250,55 @@ export default function AssignmentControl() {
         </div>
 
       </div>
+
+      {/* POP-UP MODAL DE ADVERTENCIA AL GUARDAR */}
+      {isConfirmModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-amber-600 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-800">
+                  ¿Está seguro que desea guardar esta información?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Existen {incompleteRoutesList.length} servicio(s) sin Conductor y/o Camión asignado.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 my-4 max-h-48 overflow-y-auto space-y-1.5">
+              {incompleteRoutesList.map(r => (
+                <div key={r.id} className="text-xs flex items-center justify-between text-slate-700 bg-white p-2 rounded border border-slate-100">
+                  <span className="font-bold">Ruta {r.ruta} - {r.cliente}</span>
+                  <span className="text-[10px] text-amber-700 font-semibold">
+                    {[!r.conductor_name && 'Sin Chofer', !r.camion && 'Sin Camión'].filter(Boolean).join(' / ')}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setIsConfirmModalOpen(false)}
+                className="text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={executeSave}
+                className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
+              >
+                Sí, Guardar de todas formas
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

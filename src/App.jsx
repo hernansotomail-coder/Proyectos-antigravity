@@ -9,6 +9,7 @@ import Login from './components/Login';
 import UsersManager from './components/UsersManager';
 
 import AssignmentControl from './components/AssignmentControl';
+import HistoricalAssignment from './components/HistoricalAssignment';
 import AddFleet from './components/AddFleet';
 import ManageFleet from './components/ManageFleet';
 import FleetDashboard from './components/FleetDashboard';
@@ -23,6 +24,7 @@ function App() {
         <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="assignment" element={<Login><AssignmentControl /></Login>} />
+          <Route path="historical-assignment" element={<Login><HistoricalAssignment /></Login>} />
           <Route path="fleet-dashboard" element={<Login><FleetDashboard /></Login>} />
           <Route path="fleet" element={<Login><AddFleet /></Login>} />
           <Route path="manage-fleet" element={<Login><ManageFleet /></Login>} />

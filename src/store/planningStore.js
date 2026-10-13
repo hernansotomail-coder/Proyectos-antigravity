@@ -64,16 +64,16 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
     {
       id: 'disp-sample-1401',
       fecha: '14-10-2026',
-      conductor_name: '',
-      conductor_rut: '',
+      conductor_name: 'AGUILERA BELTRAN SERGIO',
+      conductor_rut: '15.432.890-1',
       aux1_name: '',
       aux1_rut: '',
       aux2_name: '',
       aux2_rut: '',
-      camion: '',
-      tipo_equipo: '',
+      camion: 'C288 (GKPT12)',
+      tipo_equipo: 'Camión',
       rampla: '',
-      n_vuelta: '',
+      n_vuelta: '1',
       tipo_servicio: 'Centralizado',
       ruta: '1401',
       cliente: 'RUTA SBARRO COPEC 01',
@@ -87,16 +87,16 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
     {
       id: 'disp-sample-1611',
       fecha: '14-10-2026',
-      conductor_name: '',
-      conductor_rut: '',
+      conductor_name: 'AGUILERA BELTRAN SERGIO',
+      conductor_rut: '15.432.890-1',
       aux1_name: '',
       aux1_rut: '',
       aux2_name: '',
       aux2_rut: '',
-      camion: '',
-      tipo_equipo: '',
+      camion: 'C288 (GKPT12)',
+      tipo_equipo: 'Camión',
       rampla: '',
-      n_vuelta: '',
+      n_vuelta: '1',
       tipo_servicio: 'Distribución',
       ruta: '1611',
       cliente: 'RUTA CANTABRIA 02',
@@ -110,16 +110,16 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
     {
       id: 'disp-sample-1612',
       fecha: '14-10-2026',
-      conductor_name: '',
-      conductor_rut: '',
+      conductor_name: 'AGUILERA BELTRAN SERGIO',
+      conductor_rut: '15.432.890-1',
       aux1_name: '',
       aux1_rut: '',
       aux2_name: '',
       aux2_rut: '',
-      camion: '',
-      tipo_equipo: '',
+      camion: 'C288 (GKPT12)',
+      tipo_equipo: 'Camión',
       rampla: '',
-      n_vuelta: '',
+      n_vuelta: '2',
       tipo_servicio: 'Distribución',
       ruta: '1612',
       cliente: 'RUTA CANTABRIA 03',
@@ -133,7 +133,6 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
   ]
 };
 
-// Initial state from localStorage if available
 const loadPersistedAssignments = () => {
   try {
     const saved = localStorage.getItem('keylogistics_transmitted_assignments');
@@ -156,14 +155,13 @@ const persistAssignments = (data) => {
   }
 };
 
-// Initial state for saved ruteo
 const loadPersistedSavedRuteo = () => {
   try {
     const saved = localStorage.getItem('keylogistics_saved_ruteo');
-    return saved ? JSON.parse(saved) : {};
+    return saved ? JSON.parse(saved) : DEFAULT_SAMPLE_ASSIGNMENTS;
   } catch (e) {
     console.error('Error loading saved ruteo from localStorage:', e);
-    return {};
+    return DEFAULT_SAMPLE_ASSIGNMENTS;
   }
 };
 
@@ -172,6 +170,24 @@ const persistSavedRuteo = (data) => {
     localStorage.setItem('keylogistics_saved_ruteo', JSON.stringify(data));
   } catch (e) {
     console.error('Error saving ruteo to localStorage:', e);
+  }
+};
+
+const loadPersistedHistory = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_saved_history_list');
+    return saved ? JSON.parse(saved) : [];
+  } catch (e) {
+    console.error('Error loading history from localStorage:', e);
+    return [];
+  }
+};
+
+const persistHistory = (data) => {
+  try {
+    localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving history to localStorage:', e);
   }
 };
 
@@ -192,6 +208,9 @@ export const usePlanningStore = create((set, get) => ({
   // Guardados definitivos de Disponibilización transmitidos a Ruteo: { [fecha]: Array<AssignmentRow> }
   savedRuteoByDate: loadPersistedSavedRuteo(),
   selectedRuteoDate: '14-10-2026',
+
+  // Historial de guardados para "Histórico Disponibilización"
+  savedHistoryList: loadPersistedHistory(),
 
   // Set Raw Rows imported from Excel Sheet1
   setRawRows: (rows, name = '') => {
@@ -341,14 +360,14 @@ export const usePlanningStore = create((set, get) => ({
         rampla: '',
         n_vuelta: '', // Vacía inicialmente, seleccionable del 1 al 8
         tipo_servicio: 'Centralizado',
-        ruta: route.ruta, // N° de Ruta
-        cliente: route.nombreRuta, // Cliente viene de "Nombre Ruta"
+        ruta: route.ruta,
+        cliente: route.nombreRuta,
         referencia: '',
-        locales: route.recuentoDestino, // Recuento distinto de Destino
-        m3: route.sumaVolumen, // Suma de Volumen
+        locales: route.recuentoDestino,
+        m3: route.sumaVolumen,
         peso: route.sumaPeso || 0,
         cantCJ: route.sumaCantCJ || 0,
-        paradas: route.paradas || [] // Conservamos las paradas detalladas
+        paradas: route.paradas || []
       };
 
       if (existingIdx >= 0) {
@@ -448,6 +467,14 @@ export const usePlanningStore = create((set, get) => ({
     toast.success(`Camión ${truckIdentifier} asignado a ${rowIds.length} fila(s)`);
   },
 
+  // Assign semirremolque to Rampla column
+  assignRamplaToRows: (fecha, rowIds, truck) => {
+    if (!truck) return;
+    const ramplaIdentifier = truck.internal_number || truck.plate;
+    get().batchUpdateRows(fecha, rowIds, { rampla: ramplaIdentifier });
+    toast.success(`Rampla ${ramplaIdentifier} asignada a ${rowIds.length} fila(s)`);
+  },
+
   // Clear slot from selected rows
   clearSlotFromRows: (fecha, rowIds, slot) => {
     const updates = {};
@@ -463,6 +490,8 @@ export const usePlanningStore = create((set, get) => ({
     } else if (slot === 'camion') {
       updates.camion = '';
       updates.tipo_equipo = '';
+    } else if (slot === 'rampla') {
+      updates.rampla = '';
     } else if (slot === 'vuelta') {
       updates.n_vuelta = '';
     }
@@ -471,9 +500,9 @@ export const usePlanningStore = create((set, get) => ({
     toast.success(`Asignación limpiada en ${rowIds.length} fila(s)`);
   },
 
-  // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo"
+  // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo" y guarda en histórico
   saveDisponibilizacion: (fecha) => {
-    const { transmittedAssignments, savedRuteoByDate } = get();
+    const { transmittedAssignments, savedRuteoByDate, savedHistoryList } = get();
     const rows = transmittedAssignments[fecha] || [];
 
     if (rows.length === 0) {
@@ -481,16 +510,42 @@ export const usePlanningStore = create((set, get) => ({
       return false;
     }
 
-    // Clonamos las filas completas asegurando que cada una tenga sus paradas
+    const clonedRows = JSON.parse(JSON.stringify(rows));
+
     const updatedSaved = {
       ...savedRuteoByDate,
-      [fecha]: JSON.parse(JSON.stringify(rows))
+      [fecha]: clonedRows
     };
 
+    // Calculate totals for history
+    const totalServicios = clonedRows.length;
+    const totalM3 = clonedRows.reduce((acc, r) => acc + (parseFloat(r.m3) || 0), 0).toFixed(2);
+    const totalLocales = clonedRows.reduce((acc, r) => acc + (parseInt(r.locales, 10) || 0), 0);
+    const totalPeso = clonedRows.reduce((acc, r) => acc + (parseFloat(r.peso) || 0), 0).toFixed(2);
+    const totalCajas = clonedRows.reduce((acc, r) => acc + (parseInt(r.cantCJ, 10) || 0), 0);
+
+    const historyEntry = {
+      id: `hist-${Date.now()}`,
+      fecha,
+      savedAt: new Date().toLocaleString('es-CL'),
+      totalServicios,
+      totalM3,
+      totalLocales,
+      totalPeso,
+      totalCajas,
+      rows: clonedRows
+    };
+
+    // Replace if same fecha already exists in history or prepend
+    const filteredHistory = savedHistoryList.filter(h => h.fecha !== fecha);
+    const updatedHistory = [historyEntry, ...filteredHistory];
+
     persistSavedRuteo(updatedSaved);
+    persistHistory(updatedHistory);
 
     set({
       savedRuteoByDate: updatedSaved,
+      savedHistoryList: updatedHistory,
       selectedRuteoDate: fecha
     });
 
