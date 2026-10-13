@@ -136,12 +136,57 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
   ]
 };
 
+export const ensureRowTransportista = (row) => {
+  if (!row) return 'T300';
+  if (row.transportista && String(row.transportista).trim() !== '' && String(row.transportista).trim() !== 'Sin Transportista') {
+    return String(row.transportista).trim();
+  }
+  if (row.paradas && Array.isArray(row.paradas) && row.paradas.length > 0) {
+    const pTrans = row.paradas.find(p => p.transportista && String(p.transportista).trim() !== '');
+    if (pTrans) return String(pTrans.transportista).trim();
+  }
+  const ROUTE_TRANSP_MAP = {
+    '1401': 'T311',
+    '1611': 'T405',
+    '1612': 'T405',
+    '1613': 'T405',
+    '1614': 'T405',
+    '1615': 'T405',
+    '1616': 'T405',
+    '1702': 'T404',
+    '1703': 'T404',
+    '1704': 'T404',
+    '1831': 'T310',
+    '1832': 'T310',
+    '1833': 'T310',
+    '1834': 'T310',
+    '1835': 'T310'
+  };
+  const rKey = String(row.ruta || '').trim();
+  if (ROUTE_TRANSP_MAP[rKey]) {
+    return ROUTE_TRANSP_MAP[rKey];
+  }
+  if (row.camion) {
+    const match = String(row.camion).match(/C(\d+)/i);
+    if (match) return `T${match[1]}`;
+  }
+  return 'T300';
+};
+
 const loadPersistedAssignments = () => {
   try {
     const saved = localStorage.getItem('keylogistics_transmitted_assignments');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Object.keys(parsed).length > 0) return parsed;
+      if (Object.keys(parsed).length > 0) {
+        Object.keys(parsed).forEach(dateKey => {
+          parsed[dateKey] = parsed[dateKey].map(r => ({
+            ...r,
+            transportista: ensureRowTransportista(r)
+          }));
+        });
+        return parsed;
+      }
     }
     return DEFAULT_SAMPLE_ASSIGNMENTS;
   } catch (e) {
@@ -161,7 +206,17 @@ const persistAssignments = (data) => {
 const loadPersistedSavedRuteo = () => {
   try {
     const saved = localStorage.getItem('keylogistics_saved_ruteo');
-    return saved ? JSON.parse(saved) : DEFAULT_SAMPLE_ASSIGNMENTS;
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      Object.keys(parsed).forEach(dateKey => {
+        parsed[dateKey] = parsed[dateKey].map(r => ({
+          ...r,
+          transportista: ensureRowTransportista(r)
+        }));
+      });
+      return parsed;
+    }
+    return DEFAULT_SAMPLE_ASSIGNMENTS;
   } catch (e) {
     console.error('Error loading saved ruteo from localStorage:', e);
     return DEFAULT_SAMPLE_ASSIGNMENTS;
@@ -179,7 +234,17 @@ const persistSavedRuteo = (data) => {
 const loadPersistedHistory = () => {
   try {
     const saved = localStorage.getItem('keylogistics_saved_history_list');
-    return saved ? JSON.parse(saved) : [];
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return parsed.map(h => ({
+        ...h,
+        rows: (h.rows || []).map(r => ({
+          ...r,
+          transportista: ensureRowTransportista(r)
+        }))
+      }));
+    }
+    return [];
   } catch (e) {
     console.error('Error loading history from localStorage:', e);
     return [];
@@ -370,7 +435,7 @@ export const usePlanningStore = create((set, get) => ({
         tipo_servicio: 'Centralizado',
         ruta: route.ruta,
         cliente: route.nombreRuta,
-        transportista: route.transportista || '',
+        transportista: route.transportista || ensureRowTransportista(route),
         referencia: '',
         locales: route.recuentoDestino,
         m3: route.sumaVolumen,
@@ -388,7 +453,7 @@ export const usePlanningStore = create((set, get) => ({
           peso: route.sumaPeso || old.peso || 0,
           cantCJ: route.sumaCantCJ || old.cantCJ || 0,
           cliente: route.nombreRuta,
-          transportista: route.transportista || old.transportista || '',
+          transportista: route.transportista || old.transportista || ensureRowTransportista(route),
           paradas: route.paradas || old.paradas || []
         };
       } else {
@@ -520,7 +585,10 @@ export const usePlanningStore = create((set, get) => ({
       return false;
     }
 
-    const clonedRows = JSON.parse(JSON.stringify(rows));
+    const clonedRows = JSON.parse(JSON.stringify(rows)).map(r => ({
+      ...r,
+      transportista: ensureRowTransportista(r)
+    }));
 
     const updatedSaved = {
       ...savedRuteoByDate,

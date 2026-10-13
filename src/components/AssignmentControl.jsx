@@ -402,6 +402,8 @@ export default function AssignmentControl() {
       g.totalLocales += parseInt(row.locales, 10) || 0;
       g.totalCajas += parseInt(row.cantCJ, 10) || 0;
       if (row.camion && !g.camion) g.camion = row.camion;
+      if (row.aux1_name && !g.auxiliares.includes(row.aux1_name)) g.auxiliares.push(row.aux1_name);
+      if (row.aux2_name && !g.auxiliares.includes(row.aux2_name)) g.auxiliares.push(row.aux2_name);
 
       g.rutas.push(row);
     });
@@ -908,17 +910,18 @@ export default function AssignmentControl() {
                       N° de vuelta
                     </th>
 
+                    {/* N° de Ruta al lado de N° de vuelta */}
+                    <th className="px-2.5 py-2 font-black text-slate-800 bg-slate-200/60 border-r border-slate-300">
+                      N° de Ruta
+                    </th>
+
                     <th className="px-2.5 py-2 text-blue-700 bg-blue-50/50">Conductor</th>
-                    <th className="px-2.5 py-2 text-blue-700 bg-blue-50/50">Rut Conductor</th>
                     <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar</th>
-                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Rut Auxiliar</th>
                     <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar 2</th>
-                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Rut Auxiliar 2</th>
                     <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Camión</th>
                     <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Tipo de equipo</th>
                     <th className="px-2.5 py-2 text-teal-700 bg-teal-50/40">Rampla</th>
                     <th className="px-2.5 py-2">Tipo de servicio</th>
-                    <th className="px-2.5 py-2 font-black text-slate-800">N° de Ruta</th>
                     <th className="px-2.5 py-2">Cliente</th>
                     <th className="px-2.5 py-2">Referencia</th>
                     <th className="px-2.5 py-2 text-center">Cantidad de Locales</th>
@@ -969,7 +972,12 @@ export default function AssignmentControl() {
                           </select>
                         </td>
 
-                        {/* 3. Conductor */}
+                        {/* 3. N° de Ruta (Al lado de N° de vuelta) */}
+                        <td className="px-2.5 py-2 font-black text-slate-800 text-sm bg-slate-50/50 border-r border-slate-200">
+                          {row.ruta}
+                        </td>
+
+                        {/* 4. Conductor */}
                         <td 
                           className="px-2.5 py-2 font-bold text-slate-800 max-w-[130px] truncate bg-blue-50/20"
                           title={row.conductor_name}
@@ -989,11 +997,6 @@ export default function AssignmentControl() {
                           ) : (
                             <span className="text-slate-300 italic text-[11px]">— Vacío —</span>
                           )}
-                        </td>
-
-                        {/* 4. Rut Conductor */}
-                        <td className="px-2.5 py-2 font-mono text-[11px] text-slate-600 bg-blue-50/20">
-                          {row.conductor_rut || '-'}
                         </td>
 
                         {/* 5. Auxiliar */}
@@ -1018,12 +1021,7 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 6. Rut Auxiliar */}
-                        <td className="px-2.5 py-2 font-mono text-[11px] text-slate-600 bg-indigo-50/20">
-                          {row.aux1_rut || '-'}
-                        </td>
-
-                        {/* 7. Auxiliar 2 */}
+                        {/* 6. Auxiliar 2 */}
                         <td 
                           className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20"
                           title={row.aux2_name}
@@ -1045,12 +1043,7 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 8. Rut Auxiliar 2 */}
-                        <td className="px-2.5 py-2 font-mono text-[11px] text-slate-600 bg-indigo-50/20">
-                          {row.aux2_rut || '-'}
-                        </td>
-
-                        {/* 9. Camión */}
+                        {/* 7. Camión */}
                         <td 
                           className="px-2.5 py-2 font-bold text-slate-800 bg-emerald-50/20"
                           onDrop={(e) => handleDropOnRow(e, row.id, 'camion')}
@@ -1073,12 +1066,12 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 10. Tipo de equipo */}
+                        {/* 8. Tipo de equipo */}
                         <td className="px-2.5 py-2 text-slate-600 bg-emerald-50/20">
                           {row.tipo_equipo || '-'}
                         </td>
 
-                        {/* 11. Rampla (Asignable por arrastrar semirremolque o texto) */}
+                        {/* 9. Rampla (Asignable por arrastrar semirremolque o texto) */}
                         <td 
                           className="px-2.5 py-2 bg-teal-50/20"
                           onDrop={(e) => handleDropOnRow(e, row.id, 'rampla')}
@@ -1092,7 +1085,7 @@ export default function AssignmentControl() {
                           />
                         </td>
 
-                        {/* 12. Tipo de servicio */}
+                        {/* 10. Tipo de servicio */}
                         <td className="px-2.5 py-2">
                           <select
                             value={row.tipo_servicio || 'Centralizado'}
@@ -1111,17 +1104,12 @@ export default function AssignmentControl() {
                           </select>
                         </td>
 
-                        {/* 13. N° de Ruta */}
-                        <td className="px-2.5 py-2 font-black text-slate-800 text-sm">
-                          {row.ruta}
-                        </td>
-
-                        {/* 14. Cliente */}
+                        {/* 11. Cliente */}
                         <td className="px-2.5 py-2 font-medium text-slate-700 max-w-[150px] truncate" title={row.cliente}>
                           {row.cliente}
                         </td>
 
-                        {/* 15. Referencia */}
+                        {/* 12. Referencia */}
                         <td className="px-2.5 py-2">
                           <input 
                             type="text" 
@@ -1132,14 +1120,14 @@ export default function AssignmentControl() {
                           />
                         </td>
 
-                        {/* 16. Cantidad de Locales */}
+                        {/* 13. Cantidad de Locales */}
                         <td className="px-2.5 py-2 text-center font-bold">
                           <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full text-xs">
                             {row.locales || 0}
                           </span>
                         </td>
 
-                        {/* 17. Metros cubicos */}
+                        {/* 14. Metros cubicos */}
                         <td className="px-2.5 py-2 text-right font-mono font-bold text-emerald-700">
                           {row.m3 || 0}
                         </td>
@@ -1149,7 +1137,7 @@ export default function AssignmentControl() {
 
                   {filteredAssignments.length === 0 && (
                     <tr>
-                      <td colSpan="18" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="15" className="px-4 py-12 text-center text-slate-500">
                         No hay servicios para la fecha {activeDate}. Ve al menú <span className="font-bold text-blue-600">Planificación &gt; Asignación diaria</span> para cargar y transmitir la planilla de ruteo.
                       </td>
                     </tr>
@@ -1205,6 +1193,14 @@ export default function AssignmentControl() {
                           )}
                         </div>
 
+                        {/* Auxiliar al lado de Conductor */}
+                        {group.auxiliares && group.auxiliares.length > 0 && (
+                          <span className="bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                            <User size={11} className="text-indigo-600" />
+                            Aux: {group.auxiliares.join(', ')}
+                          </span>
+                        )}
+
                         {/* Camión */}
                         <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
                           <Truck size={12} />
@@ -1250,6 +1246,11 @@ export default function AssignmentControl() {
                                     N° de Ruta {r.ruta}
                                   </span>
                                   <span className="font-bold text-slate-800">{r.cliente}</span>
+                                  {(r.aux1_name || r.aux2_name) && (
+                                    <span className="bg-indigo-50 text-indigo-700 font-semibold px-2 py-0.5 rounded text-[10px]">
+                                      Aux: {[r.aux1_name, r.aux2_name].filter(Boolean).join(', ')}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="flex items-center gap-3 text-[11px]">
                                   <span>{paradas.length} paradas</span>

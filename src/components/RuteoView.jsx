@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight, ArrowUpDown, FileSpreadsheet, RefreshCw, X, Check
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { usePlanningStore } from '../store/planningStore';
+import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
 import { Button } from './ui/Button';
 
 // COMPONENTE MULTI-SELECT DROPDOWN REUTILIZABLE
@@ -180,19 +180,26 @@ export default function RuteoView() {
 
   const activeDate = selectedRuteoDate || availableDates[0] || '14-10-2026';
 
-  // Rutas de la fecha activa
+  // Rutas de la fecha activa (con fallback automático a ensureRowTransportista)
   const currentRoutes = useMemo(() => {
+    let routes = [];
     if (savedRuteoByDate && savedRuteoByDate[activeDate] && savedRuteoByDate[activeDate].length > 0) {
-      return savedRuteoByDate[activeDate];
+      routes = savedRuteoByDate[activeDate];
+    } else {
+      routes = transmittedAssignments[activeDate] || [];
     }
-    return transmittedAssignments[activeDate] || [];
+    return routes.map(r => ({
+      ...r,
+      transportista: r.transportista || ensureRowTransportista(r)
+    }));
   }, [savedRuteoByDate, transmittedAssignments, activeDate]);
 
-  // FILTROS MULTI-SELECCIÓN (Requisito 1: todos los filtros permiten seleccionar más de 1 opción)
+  // FILTROS MULTI-SELECCIÓN (Permiten seleccionar más de 1 opción)
   const [selectedTransportistas, setSelectedTransportistas] = useState([]);
   const [selectedClientes, setSelectedClientes] = useState([]);
   const [selectedRutas, setSelectedRutas] = useState([]);
   const [selectedConductores, setSelectedConductores] = useState([]);
+  const [selectedAuxiliares, setSelectedAuxiliares] = useState([]);
   const [selectedVueltas, setSelectedVueltas] = useState([]);
   
   const [expandedKeys, setExpandedKeys] = useState({});
@@ -220,6 +227,15 @@ export default function RuteoView() {
 
   const conductoresList = useMemo(() => {
     const set = new Set(currentRoutes.map(r => r.conductor_name || 'Sin Asignar').filter(Boolean));
+    return Array.from(set).sort();
+  }, [currentRoutes]);
+
+  const auxiliaresList = useMemo(() => {
+    const set = new Set();
+    currentRoutes.forEach(r => {
+      if (r.aux1_name) set.add(r.aux1_name);
+      if (r.aux2_name) set.add(r.aux2_name);
+    });
     return Array.from(set).sort();
   }, [currentRoutes]);
 
@@ -255,14 +271,20 @@ export default function RuteoView() {
         const condVal = r.conductor_name || 'Sin Asignar';
         if (!selectedConductores.includes(condVal)) return false;
       }
-      // 5. Filtro Vuelta
+      // 5. Filtro Auxiliar
+      if (selectedAuxiliares.length > 0) {
+        const hasAux = (r.aux1_name && selectedAuxiliares.includes(r.aux1_name)) ||
+                      (r.aux2_name && selectedAuxiliares.includes(r.aux2_name));
+        if (!hasAux) return false;
+      }
+      // 6. Filtro Vuelta
       if (selectedVueltas.length > 0) {
         const vLabel = r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta';
         if (!selectedVueltas.includes(vLabel)) return false;
       }
       return true;
     });
-  }, [currentRoutes, selectedTransportistas, selectedClientes, selectedRutas, selectedConductores, selectedVueltas]);
+  }, [currentRoutes, selectedTransportistas, selectedClientes, selectedRutas, selectedConductores, selectedAuxiliares, selectedVueltas]);
 
   // AGRUPACIÓN POR CONDUCTOR + N° DE VUELTA
   const groupedSummary = useMemo(() => {
@@ -300,6 +322,8 @@ export default function RuteoView() {
       g.totalCajas += parseInt(row.cantCJ, 10) || 0;
       if (row.camion && g.camion === 'Sin camión') g.camion = row.camion;
       if (row.transportista && !g.transportista) g.transportista = row.transportista;
+      if (row.aux1_name && !g.auxiliares.includes(row.aux1_name)) g.auxiliares.push(row.aux1_name);
+      if (row.aux2_name && !g.auxiliares.includes(row.aux2_name)) g.auxiliares.push(row.aux2_name);
 
       g.rutas.push(row);
     });
@@ -342,6 +366,7 @@ export default function RuteoView() {
     selectedClientes.length > 0 || 
     selectedRutas.length > 0 || 
     selectedConductores.length > 0 || 
+    selectedAuxiliares.length > 0 || 
     selectedVueltas.length > 0;
 
   const handleResetFilters = () => {
@@ -349,6 +374,7 @@ export default function RuteoView() {
     setSelectedClientes([]);
     setSelectedRutas([]);
     setSelectedConductores([]);
+    setSelectedAuxiliares([]);
     setSelectedVueltas([]);
   };
 
@@ -513,7 +539,16 @@ export default function RuteoView() {
             placeholder="Todos los Conductores"
           />
 
-          {/* 5. Multi-Filtro Vuelta */}
+          {/* 5. Multi-Filtro Auxiliar */}
+          <MultiSelectFilter
+            label="Auxiliar"
+            options={auxiliaresList}
+            selectedValues={selectedAuxiliares}
+            onChange={setSelectedAuxiliares}
+            placeholder="Todos los Auxiliares"
+          />
+
+          {/* 6. Multi-Filtro Vuelta */}
           <MultiSelectFilter
             label="N° de Vuelta"
             options={vueltasList}
@@ -616,6 +651,14 @@ export default function RuteoView() {
                     <span className="font-black text-slate-800 text-sm">{group.conductor}</span>
                     {group.conductor_rut && <span className="text-slate-400 font-mono text-[10px]">({group.conductor_rut})</span>}
 
+                    {/* Auxiliar al lado de Conductor */}
+                    {group.auxiliares && group.auxiliares.length > 0 && (
+                      <span className="bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
+                        <User size={11} className="text-indigo-600" />
+                        Aux: {group.auxiliares.join(', ')}
+                      </span>
+                    )}
+
                     <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
                       <Truck size={12} /> {group.camion}
                     </span>
@@ -661,6 +704,11 @@ export default function RuteoView() {
                                 N° de Ruta {r.ruta}
                               </span>
                               <span className="font-bold text-slate-800">{r.cliente}</span>
+                              {(r.aux1_name || r.aux2_name) && (
+                                <span className="bg-indigo-50 text-indigo-700 font-semibold px-2 py-0.5 rounded text-[10px]">
+                                  Aux: {[r.aux1_name, r.aux2_name].filter(Boolean).join(', ')}
+                                </span>
+                              )}
                               {r.transportista && (
                                 <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded text-[10px]">
                                   Transportista: {r.transportista}
