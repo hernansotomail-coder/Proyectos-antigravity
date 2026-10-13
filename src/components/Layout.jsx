@@ -205,7 +205,7 @@ export default function Layout() {
                 </div>
               )}
 
-              {/* 3. Menú Administración Flota (Requisito 5) */}
+              {/* 3. Menú Gestión de Flota */}
               <div className="pt-1">
                 <button
                   onClick={() => setIsAdminFlotaOpen(!isAdminFlotaOpen)}
@@ -217,7 +217,7 @@ export default function Layout() {
                 >
                   <div className="flex items-center gap-2.5">
                     <Shield size={18} className="text-indigo-600 shrink-0" />
-                    <span className="text-xs font-bold">Administración Flota</span>
+                    <span className="text-xs font-bold">Gestión de Flota</span>
                   </div>
                   {isAdminFlotaOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
@@ -244,7 +244,7 @@ export default function Layout() {
                 )}
               </div>
 
-              {/* 4. Menú Administración dotación (Requisito 5) */}
+              {/* 4. Menú Gestión de Dotación */}
               <div className="pt-1">
                 <button
                   onClick={() => setIsAdminDotacionOpen(!isAdminDotacionOpen)}
@@ -256,7 +256,7 @@ export default function Layout() {
                 >
                   <div className="flex items-center gap-2.5">
                     <Users size={18} className="text-amber-600 shrink-0" />
-                    <span className="text-xs font-bold">Administración dotación</span>
+                    <span className="text-xs font-bold">Gestión de Dotación</span>
                   </div>
                   {isAdminDotacionOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 </button>
@@ -473,7 +473,7 @@ export default function Layout() {
             )}
 
             <div className="font-bold text-[10px] text-slate-400 uppercase tracking-wider px-2 pt-2">
-              Administración Flota
+              Gestión de Flota
             </div>
             {adminFlotaItems.map((item) => (
               <NavLink
@@ -492,7 +492,7 @@ export default function Layout() {
             ))}
 
             <div className="font-bold text-[10px] text-slate-400 uppercase tracking-wider px-2 pt-2">
-              Administración dotación
+              Gestión de Dotación
             </div>
             {adminDotacionItems.map((item) => (
               <NavLink

@@ -218,6 +218,18 @@ export default function AssignmentControl() {
   // Filas expandidas en el Resumen inferior (por clave Conductor:::Vuelta)
   const [expandedSummaryKeys, setExpandedSummaryKeys] = useState({});
 
+  // Pop-up modal de advertencia al asignar dotación con novedad (Requisito 2)
+  const [warningStaffModal, setWarningStaffModal] = useState({
+    isOpen: false,
+    staff: null,
+    targetIds: [],
+    targetRole: 'conductor',
+    condition: ''
+  });
+
+  // Entidad enfocada (al pinchar en Dotación o Camión para ver solo sus rutas asignadas - Requisito 4)
+  const [focusedEntity, setFocusedEntity] = useState(null);
+
   // Asignaciones actuales de la fecha activa
   const assignmentsForDate = useMemo(() => {
     return transmittedAssignments[activeDate] || [];
@@ -355,9 +367,24 @@ export default function AssignmentControl() {
     };
   }, [fleetList, sortTrucksAsc, truckSearch, viajesPorCamion, truckDocFilter]);
 
-  // Filas filtradas de la matriz
+  // Filas filtradas de la matriz (Soporta filtro por focusedEntity - Requisito 4)
   const filteredAssignments = useMemo(() => {
     return assignmentsForDate.filter(a => {
+      // Filtro por entidad enfocada (si se pinchó en Dotación o Camión para ver solo sus rutas asignadas)
+      if (focusedEntity) {
+        if (focusedEntity.type === 'staff') {
+          const sName = focusedEntity.name;
+          const match = a.conductor_name === sName || a.aux1_name === sName || a.aux2_name === sName;
+          if (!match) return false;
+        } else if (focusedEntity.type === 'truck') {
+          const tId = focusedEntity.identifier;
+          const plate = focusedEntity.plate;
+          const matchCam = (a.camion && (a.camion === tId || a.camion.includes(tId) || (plate && a.camion.includes(plate)))) ||
+                           (a.rampla && (a.rampla === tId || a.rampla.includes(tId) || (plate && a.rampla.includes(plate))));
+          if (!matchCam) return false;
+        }
+      }
+
       if (matrixFilterRuta && !String(a.ruta).toLowerCase().includes(matrixFilterRuta.toLowerCase())) return false;
       if (matrixFilterCliente && !String(a.cliente).toLowerCase().includes(matrixFilterCliente.toLowerCase())) return false;
       if (matrixFilterEstado === 'Conductor asignado' && !a.conductor_name) return false;
@@ -366,7 +393,7 @@ export default function AssignmentControl() {
       if (matrixFilterEstado === 'Sin camion' && a.camion) return false;
       return true;
     });
-  }, [assignmentsForDate, matrixFilterRuta, matrixFilterCliente, matrixFilterEstado]);
+  }, [assignmentsForDate, matrixFilterRuta, matrixFilterCliente, matrixFilterEstado, focusedEntity]);
 
   // RESUMEN AGRUPADO POR CONDUCTOR + N° DE VUELTA
   // "lo que no tienen 'Conductor' no debería aparecer en esta tabla resumen hasta que tenga"
@@ -375,6 +402,21 @@ export default function AssignmentControl() {
 
     assignmentsForDate.forEach(row => {
       if (!row.conductor_name || row.conductor_name.trim() === '') return;
+
+      // Filtro por entidad enfocada (Requisito 4)
+      if (focusedEntity) {
+        if (focusedEntity.type === 'staff') {
+          const sName = focusedEntity.name;
+          const match = row.conductor_name === sName || row.aux1_name === sName || row.aux2_name === sName;
+          if (!match) return;
+        } else if (focusedEntity.type === 'truck') {
+          const tId = focusedEntity.identifier;
+          const plate = focusedEntity.plate;
+          const matchCam = (row.camion && (row.camion === tId || row.camion.includes(tId) || (plate && row.camion.includes(plate)))) ||
+                           (row.rampla && (row.rampla === tId || row.rampla.includes(tId) || (plate && row.rampla.includes(plate))));
+          if (!matchCam) return;
+        }
+      }
 
       const vueltaKey = row.n_vuelta ? `Vuelta ${row.n_vuelta}` : 'Sin Vuelta';
       const groupKey = `${row.conductor_name}:::${vueltaKey}`;
@@ -413,13 +455,71 @@ export default function AssignmentControl() {
       totalM3: Number(g.totalM3.toFixed(4)),
       totalPeso: Number(g.totalPeso.toFixed(2))
     }));
-  }, [assignmentsForDate]);
+  }, [assignmentsForDate, focusedEntity]);
 
   const toggleExpandSummary = (groupKey) => {
     setExpandedSummaryKeys(prev => ({
       ...prev,
       [groupKey]: !prev[groupKey]
     }));
+  };
+
+  // Toggle de enfoque para ver solo rutas de una Dotación o Camión (Requisito 4)
+  const handleToggleFocusStaff = (staff) => {
+    const sName = typeof staff === 'string' ? staff : staff?.name;
+    if (!sName) return;
+    if (focusedEntity?.type === 'staff' && focusedEntity?.name === sName) {
+      setFocusedEntity(null);
+      toast.info('Filtro removido. Mostrando todas las rutas.');
+    } else {
+      setFocusedEntity({
+        type: 'staff',
+        name: sName
+      });
+      // Expandir automáticamente el resumen
+      setExpandedSummaryKeys(prev => {
+        const next = { ...prev };
+        assignmentsForDate.forEach(r => {
+          if (r.conductor_name === sName || r.aux1_name === sName || r.aux2_name === sName) {
+            const vKey = r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta';
+            next[`${r.conductor_name}:::${vKey}`] = true;
+          }
+        });
+        return next;
+      });
+      toast.success(`Filtrando solo rutas de: ${sName}`);
+    }
+  };
+
+  const handleToggleFocusTruck = (truck) => {
+    const tId = typeof truck === 'string' 
+      ? truck 
+      : (truck?.identifier || (truck?.internal_number ? `${truck.internal_number} (${truck.plate})` : truck?.plate));
+    const plate = typeof truck === 'string' ? '' : (truck?.plate || '');
+    if (!tId) return;
+
+    if (focusedEntity?.type === 'truck' && focusedEntity?.identifier === tId) {
+      setFocusedEntity(null);
+      toast.info('Filtro removido. Mostrando todas las rutas.');
+    } else {
+      setFocusedEntity({
+        type: 'truck',
+        identifier: tId,
+        plate
+      });
+      // Expandir automáticamente el resumen
+      setExpandedSummaryKeys(prev => {
+        const next = { ...prev };
+        assignmentsForDate.forEach(r => {
+          if ((r.camion && (r.camion === tId || r.camion.includes(tId))) || (r.rampla && (r.rampla === tId || r.rampla.includes(tId)))) {
+            const vKey = r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta';
+            next[`${r.conductor_name}:::${vKey}`] = true;
+          }
+        });
+        return next;
+      });
+      toast.success(`Filtrando solo rutas del camión: ${tId}`);
+    }
   };
 
   // Seleccionar todas las filas
@@ -437,15 +537,65 @@ export default function AssignmentControl() {
     );
   };
 
-  // Helper para asignar con autocompletado de RUT
-  const handleAssignStaff = (staff, targetRole) => {
+  // Validación de advertencia de dotación (Vacaciones, Licencia Médica, Ausente, Permiso con goce, Permiso sin goce o Baja - Requisito 2)
+  const checkStaffWarningCondition = (staff) => {
+    if (!staff) return null;
+    const sStatus = String(staff.status || '').trim().toLowerCase();
+    if (sStatus === 'baja' || sStatus === 'inactivo' || sStatus === 'desvinculado' || sStatus === 'finiquitado') {
+      return 'Baja';
+    }
+    const att = attendanceMap[staff.id] || staff.attStatus;
+    if (att) {
+      const attLower = String(att).toLowerCase();
+      if (attLower.includes('vacaci')) return 'Vacaciones';
+      if (attLower.includes('licenc')) return 'Licencia Médica';
+      if (attLower.includes('ausent')) return 'Ausente';
+      if (attLower.includes('con goce')) return 'Permiso con goce';
+      if (attLower.includes('sin goce')) return 'Permiso sin goce';
+      if (attLower.includes('baja')) return 'Baja';
+      if (ATTENDANCE_STYLES[att]?.isAlert) return ATTENDANCE_STYLES[att].badge || att;
+    }
+    return null;
+  };
+
+  // Solicitar asignación de dotación con verificación de novedad (Requisito 2)
+  const handleRequestAssignStaff = (staff, targetRole, explicitTargetIds = null) => {
     if (!staff) return;
-    const targetIds = selectedRowIds.length > 0 ? selectedRowIds : [];
+    const targetIds = explicitTargetIds || (selectedRowIds.length > 0 ? selectedRowIds : []);
     if (targetIds.length === 0) {
       toast.warning('Marca las casillas de una o más filas en la tabla para asignar.');
       return;
     }
-    assignStaffToRows(activeDate, targetIds, staff, targetRole);
+
+    const condition = checkStaffWarningCondition(staff);
+    if (condition) {
+      setWarningStaffModal({
+        isOpen: true,
+        staff,
+        targetIds,
+        targetRole,
+        condition
+      });
+    } else {
+      assignStaffToRows(activeDate, targetIds, staff, targetRole);
+    }
+  };
+
+  const confirmAssignStaffWithWarning = () => {
+    if (warningStaffModal.staff && warningStaffModal.targetIds.length > 0) {
+      assignStaffToRows(
+        activeDate,
+        warningStaffModal.targetIds,
+        warningStaffModal.staff,
+        warningStaffModal.targetRole
+      );
+    }
+    setWarningStaffModal({ isOpen: false, staff: null, targetIds: [], targetRole: 'conductor', condition: '' });
+  };
+
+  // Helper para asignar con autocompletado de RUT
+  const handleAssignStaff = (staff, targetRole) => {
+    handleRequestAssignStaff(staff, targetRole);
   };
 
   // Helper para asignar Camión o Rampla
@@ -530,11 +680,14 @@ export default function AssignmentControl() {
         if (slotPreference === 'conductor' && (roleLower.includes('auxiliar') || roleLower.includes('movilizador'))) {
           targetSlot = 'auxiliar';
         }
-        assignStaffToRows(activeDate, targetIds, staff, targetSlot);
-      } else if (parsed.type === 'truck') {
-        assignTruckToRows(activeDate, targetIds, parsed.data);
-      } else if (parsed.type === 'rampla') {
-        assignRamplaToRows(activeDate, targetIds, parsed.data);
+        handleRequestAssignStaff(staff, targetSlot, targetIds);
+      } else if (parsed.type === 'truck' || parsed.type === 'rampla') {
+        // En la columna Rampla o Camión se pueden arrastrar camiones indistintamente (Requisito 5)
+        if (slotPreference === 'rampla') {
+          assignRamplaToRows(activeDate, targetIds, parsed.data);
+        } else {
+          assignTruckToRows(activeDate, targetIds, parsed.data);
+        }
       }
     } catch (err) {
       console.error(err);
@@ -805,10 +958,13 @@ export default function AssignmentControl() {
           <div className="flex-1 overflow-y-auto p-1 space-y-1">
             {(activeTabStaff === 'conductores' ? conductores : auxiliares).map(staff => {
               const isSelected = selectedStaffMember?.id === staff.id;
+              const isFocused = focusedEntity?.type === 'staff' && focusedEntity?.name === staff.name;
               const attStyle = staff.attStatus ? ATTENDANCE_STYLES[staff.attStatus] : null;
 
               let cardBgClass = 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50';
-              if (isSelected) {
+              if (isFocused) {
+                cardBgClass = 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 shadow-sm';
+              } else if (isSelected) {
                 cardBgClass = 'bg-blue-50 border-blue-400 ring-1 ring-blue-300 shadow-xs';
               } else if (attStyle) {
                 cardBgClass = attStyle.cardClass;
@@ -819,7 +975,12 @@ export default function AssignmentControl() {
                   key={staff.id} 
                   draggable
                   onDragStart={(e) => handleDragStartStaff(e, staff)}
-                  onClick={() => setSelectedStaffMember(isSelected ? null : staff)}
+                  onClick={() => {
+                    setSelectedStaffMember(isSelected ? null : staff);
+                    if (staff.viajes > 0) {
+                      handleToggleFocusStaff(staff);
+                    }
+                  }}
                   className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${cardBgClass}`}
                 >
                   <div className="flex items-center justify-between">
@@ -841,12 +1002,26 @@ export default function AssignmentControl() {
                         )}
                       </div>
                     </div>
-                    {/* Badge de viajes basado en vueltas distintas */}
-                    <div className={`shrink-0 px-1.5 py-0.2 rounded-full text-[9px] font-black ${
-                      staff.viajes > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
-                    }`}>
+                    {/* Badge de viajes - Clickeable para filtrar rutas asignadas (Requisito 4) */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (staff.viajes > 0) {
+                          handleToggleFocusStaff(staff);
+                        }
+                      }}
+                      title={staff.viajes > 0 ? "Haz clic para ver solo sus rutas asignadas" : "Sin rutas asignadas"}
+                      className={`shrink-0 px-1.5 py-0.2 rounded-full text-[9px] font-black transition-all ${
+                        isFocused 
+                          ? 'bg-blue-600 text-white shadow-xs' 
+                          : staff.viajes > 0 
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 cursor-pointer' 
+                            : 'bg-slate-100 text-slate-500 cursor-default'
+                      }`}
+                    >
                       {staff.viajes === 1 ? '1 viaje' : `${staff.viajes} viajes`}
-                    </div>
+                    </button>
                   </div>
 
                   {selectedRowIds.length > 0 && (
@@ -854,10 +1029,7 @@ export default function AssignmentControl() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (attStyle?.isAlert) {
-                            toast.warning(`Atención: ${staff.name} tiene registro de "${attStyle.badge}" en Asistencia.`);
-                          }
-                          handleAssignStaff(staff, activeTabStaff === 'conductores' ? 'conductor' : 'auxiliar');
+                          handleRequestAssignStaff(staff, activeTabStaff === 'conductores' ? 'conductor' : 'auxiliar');
                         }}
                         className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded shadow-xs ${
                           attStyle?.isAlert ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
@@ -875,6 +1047,27 @@ export default function AssignmentControl() {
 
         {/* PANEL CENTRAL: Matriz Disponibilización General (66%) */}
         <div className="flex-1 flex flex-col gap-2 min-w-0 overflow-hidden">
+          
+          {/* Banner de filtro por Dotación o Camión enfocado (Requisito 4) */}
+          {focusedEntity && (
+            <div className="bg-blue-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-xl flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-1.5">
+                <Filter size={13} className="text-blue-200" />
+                <span>
+                  Mostrando solo rutas asignadas a {focusedEntity.type === 'staff' ? 'la dotación' : 'el camión'}:{' '}
+                  <strong className="underline tracking-wide">{focusedEntity.name || focusedEntity.identifier}</strong>
+                </span>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setFocusedEntity(null)}
+                className="bg-white/20 hover:bg-white/30 text-white rounded-lg px-2 py-0.5 text-[10px] font-semibold flex items-center gap-1 transition-colors"
+                title="Quitar filtro y ver todas las rutas"
+              >
+                <X size={11} /> Ver todas las rutas
+              </button>
+            </div>
+          )}
           
           {/* Matriz Superior: Disponibilización General */}
           <div className="flex-[3] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
@@ -1071,18 +1264,34 @@ export default function AssignmentControl() {
                           {row.tipo_equipo || '-'}
                         </td>
 
-                        {/* 9. Rampla (Asignable por arrastrar semirremolque o texto) */}
+                        {/* 9. Rampla (Asignable por arrastrar camión, semirremolque o texto - Requisito 5) */}
                         <td 
                           className="px-2.5 py-2 bg-teal-50/20"
-                          onDrop={(e) => handleDropOnRow(e, row.id, 'rampla')}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            handleDropOnRow(e, row.id, 'rampla');
+                          }}
                         >
-                          <input 
-                            type="text" 
-                            value={row.rampla || ''} 
-                            onChange={(e) => updateAssignmentField(activeDate, row.id, 'rampla', e.target.value)}
-                            placeholder="R-01"
-                            className="w-16 px-1.5 py-0.5 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 bg-transparent"
-                          />
+                          <div className="flex items-center gap-1">
+                            <input 
+                              type="text" 
+                              value={row.rampla || ''} 
+                              onChange={(e) => updateAssignmentField(activeDate, row.id, 'rampla', e.target.value)}
+                              placeholder="Arrastrar..."
+                              className="w-20 px-1.5 py-0.5 border border-slate-200 rounded text-xs focus:ring-1 focus:ring-blue-500 bg-white"
+                            />
+                            {row.rampla && (
+                              <button
+                                type="button"
+                                onClick={() => updateAssignmentField(activeDate, row.id, 'rampla', '')}
+                                className="text-slate-400 hover:text-red-500 text-[10px]"
+                                title="Quitar rampla"
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
                         </td>
 
                         {/* 10. Tipo de servicio */}
@@ -1148,85 +1357,115 @@ export default function AssignmentControl() {
           </div>
 
           {/* TABLA INFERIOR: RESUMEN DE ASIGNACIÓN POR RUTA */}
-          {/* Formato: Conductor + Camión + N° de vuelta + resumen m³, Peso, Locales + acordeón expandible con desglose por N° de Ruta */}
+          {/* Formato compacto: Conductor + Camión + N° de vuelta + resumen m³, Peso, Locales + acordeón expandible */}
           <div className="flex-[2] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
-            <div className="p-2 border-b border-slate-100 bg-blue-50/50 flex flex-wrap items-center justify-between gap-2">
+            <div className="p-1.5 px-2 border-b border-slate-100 bg-blue-50/50 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1.5">
-                <Layers size={14} className="text-blue-700" />
+                <Layers size={13} className="text-blue-700" />
                 <h3 className="font-bold text-blue-900 text-xs">
                   Resumen de Asignación por Ruta — {activeDate}
                 </h3>
               </div>
-              <div className="flex items-center gap-3 text-xs">
+              <div className="flex items-center gap-3 text-[11px]">
                 <span>Viajes planificados: <strong className="text-slate-800">{groupedSummary.length}</strong></span>
                 <span>Locales: <strong className="text-indigo-700">{totalLocales}</strong></span>
                 <span>Peso: <strong className="text-amber-700">{totalPeso} kg</strong></span>
-                <span>Total m³: <strong className="text-emerald-700">{totalM3}</strong></span>
+                <span>Total m³: <strong className="text-emerald-700 font-mono font-bold">{totalM3}</strong></span>
               </div>
             </div>
 
-            <div className="flex-1 overflow-auto p-2 space-y-1.5">
+            <div className="flex-1 overflow-auto p-1.5 space-y-1">
               {groupedSummary.map((group) => {
                 const isExpanded = !!expandedSummaryKeys[group.groupKey];
+                const isFocusedGroup = focusedEntity && (
+                  (focusedEntity.type === 'staff' && (focusedEntity.name === group.conductor_name || group.auxiliares.includes(focusedEntity.name))) ||
+                  (focusedEntity.type === 'truck' && (focusedEntity.identifier === group.camion || group.camion.includes(focusedEntity.identifier)))
+                );
+
                 return (
-                  <div key={group.groupKey} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
+                  <div key={group.groupKey} className={`border rounded-lg overflow-hidden bg-white shadow-2xs transition-all ${
+                    isFocusedGroup ? 'border-blue-400 ring-1 ring-blue-300' : 'border-slate-200'
+                  }`}>
                     
-                    {/* Fila Resumen Principal (Clickeable para desplegar todo lo asignado a esa vuelta) */}
+                    {/* Fila Resumen Principal Compacta */}
                     <div 
                       onClick={() => toggleExpandSummary(group.groupKey)}
-                      className="bg-slate-50/80 hover:bg-blue-50/50 cursor-pointer px-3 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between text-xs gap-2 transition-colors select-none"
+                      className="bg-slate-50/80 hover:bg-blue-50/50 cursor-pointer px-2.5 py-1.5 border-b border-slate-200 flex flex-wrap items-center justify-between text-[11px] gap-2 transition-colors select-none"
                     >
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-blue-600">
-                          {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         </span>
                         
-                        {/* Dotación */}
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-black text-slate-800 text-sm">
+                        {/* Dotación (Clickeable para aislar solo sus rutas asignadas - Requisito 4) */}
+                        <div 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleFocusStaff(group.conductor_name);
+                          }}
+                          className="flex items-center gap-1 cursor-pointer hover:bg-blue-100/60 p-0.5 rounded transition-colors"
+                          title="Haz clic para ver solo las rutas asignadas a este conductor"
+                        >
+                          <span className="font-black text-slate-800 text-xs">
                             {group.conductor_name}
                           </span>
                           {group.conductor_rut && (
-                            <span className="text-slate-400 font-mono text-[10px]">
+                            <span className="text-slate-400 font-mono text-[9px]">
                               ({group.conductor_rut})
                             </span>
                           )}
                         </div>
 
-                        {/* Auxiliar al lado de Conductor */}
+                        {/* Auxiliar al lado de Conductor (Clickeable para aislar rutas - Requisito 4) */}
                         {group.auxiliares && group.auxiliares.length > 0 && (
-                          <span className="bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
-                            <User size={11} className="text-indigo-600" />
+                          <span 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleFocusStaff(group.auxiliares[0]);
+                            }}
+                            className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 font-semibold px-1.5 py-0.2 rounded text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Haz clic para ver solo las rutas asignadas a este auxiliar"
+                          >
+                            <User size={10} className="text-indigo-600" />
                             Aux: {group.auxiliares.join(', ')}
                           </span>
                         )}
 
-                        {/* Camión */}
-                        <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
-                          <Truck size={12} />
+                        {/* Camión (Clickeable para aislar rutas del camión - Requisito 4) */}
+                        <span 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (group.camion && group.camion !== 'Sin camión') {
+                              handleToggleFocusTruck(group.camion);
+                            }
+                          }}
+                          className="bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold px-1.5 py-0.2 rounded text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Haz clic para ver solo las rutas asignadas a este camión"
+                        >
+                          <Truck size={10} />
                           {group.camion || 'Sin camión'}
                         </span>
 
                         {/* N° de vuelta */}
-                        <span className="bg-amber-100 text-amber-800 font-black px-2 py-0.5 rounded text-[11px]">
+                        <span className="bg-amber-100 text-amber-800 font-black px-1.5 py-0.2 rounded text-[10px]">
                           {group.vueltaLabel}
                         </span>
 
                         {/* Rutas contenidas */}
-                        <span className="text-slate-400 text-[11px]">
+                        <span className="text-slate-400 text-[10px]">
                           [{group.rutas.map(r => `Ruta ${r.ruta}`).join(', ')}]
                         </span>
                       </div>
 
                       {/* Resumen al costado: m³, Peso, Locales */}
-                      <div className="flex items-center gap-4 text-xs">
+                      <div className="flex items-center gap-3 text-[11px]">
                         <span className="text-slate-600">
                           Locales: <strong className="text-indigo-700">{group.totalLocales}</strong>
                         </span>
                         <span className="text-slate-600">
                           Peso: <strong className="text-amber-700">{group.totalPeso} kg</strong>
                         </span>
-                        <span className="text-slate-600 font-mono font-black text-emerald-700 text-sm">
+                        <span className="text-slate-600 font-mono font-black text-emerald-700 text-xs">
                           {group.totalM3} m³
                         </span>
                       </div>
@@ -1234,25 +1473,25 @@ export default function AssignmentControl() {
 
                     {/* DESGLOSE AL DESPLEGAR: Todo lo asignado en esa vuelta, separado por N° de Ruta */}
                     {isExpanded && (
-                      <div className="p-3 bg-slate-50/30 space-y-3">
+                      <div className="p-2 bg-slate-50/30 space-y-2">
                         {group.rutas.map(r => {
                           const paradas = r.paradas || [];
                           return (
-                            <div key={`subroute-${r.id}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                              {/* Sub-header de la ruta */}
-                              <div className="bg-slate-100/70 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between text-xs">
-                                <div className="flex items-center gap-2">
-                                  <span className="bg-slate-800 text-white font-bold px-2 py-0.5 rounded text-[10px]">
+                            <div key={`subroute-${r.id}`} className="bg-white border border-slate-200 rounded-lg overflow-hidden shadow-2xs">
+                              {/* Sub-header compacto de la ruta */}
+                              <div className="bg-slate-100/70 px-2.5 py-1 border-b border-slate-200 flex items-center justify-between text-[11px] flex-wrap gap-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="bg-slate-800 text-white font-bold px-1.5 py-0.2 rounded text-[9px]">
                                     N° de Ruta {r.ruta}
                                   </span>
-                                  <span className="font-bold text-slate-800">{r.cliente}</span>
+                                  <span className="font-bold text-slate-800 text-xs">{r.cliente}</span>
                                   {(r.aux1_name || r.aux2_name) && (
-                                    <span className="bg-indigo-50 text-indigo-700 font-semibold px-2 py-0.5 rounded text-[10px]">
+                                    <span className="bg-indigo-50 text-indigo-700 font-semibold px-1.5 py-0.2 rounded text-[9px]">
                                       Aux: {[r.aux1_name, r.aux2_name].filter(Boolean).join(', ')}
                                     </span>
                                   )}
                                 </div>
-                                <div className="flex items-center gap-3 text-[11px]">
+                                <div className="flex items-center gap-2.5 text-[10px]">
                                   <span>{paradas.length} paradas</span>
                                   <span>{r.locales} locales</span>
                                   <span>{r.peso} kg</span>
@@ -1260,39 +1499,39 @@ export default function AssignmentControl() {
                                 </div>
                               </div>
 
-                              {/* Tabla de paradas / destinos idéntica a la imagen */}
+                              {/* Tabla compacta de paradas / destinos */}
                               <div className="overflow-x-auto">
-                                <table className="w-full text-left text-[11px] whitespace-nowrap">
-                                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100">
+                                <table className="w-full text-left text-[10px] whitespace-nowrap">
+                                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100 text-[9px]">
                                     <tr>
-                                      <th className="px-3 py-1 w-10">Sec</th>
-                                      <th className="px-3 py-1">Destino</th>
-                                      <th className="px-3 py-1">Dirección</th>
-                                      <th className="px-3 py-1">Comuna</th>
-                                      <th className="px-3 py-1">Horario</th>
-                                      <th className="px-3 py-1 text-right">m³</th>
-                                      <th className="px-3 py-1 text-right">Peso</th>
-                                      <th className="px-3 py-1 text-right">CJ</th>
+                                      <th className="px-2 py-0.5 w-8">Sec</th>
+                                      <th className="px-2 py-0.5">Destino</th>
+                                      <th className="px-2 py-0.5">Dirección</th>
+                                      <th className="px-2 py-0.5">Comuna</th>
+                                      <th className="px-2 py-0.5">Horario</th>
+                                      <th className="px-2 py-0.5 text-right">m³</th>
+                                      <th className="px-2 py-0.5 text-right">Peso</th>
+                                      <th className="px-2 py-0.5 text-right">CJ</th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-slate-100">
                                     {paradas.map((p, pIdx) => (
                                       <tr key={pIdx} className="hover:bg-slate-50">
-                                        <td className="px-3 py-1 text-slate-500 font-bold">{p.secuencia || pIdx + 1}</td>
-                                        <td className="px-3 py-1 font-bold text-slate-800">{p.destino}</td>
-                                        <td className="px-3 py-1 text-slate-500">{p.direccion}</td>
-                                        <td className="px-3 py-1 text-slate-600">{p.comuna}</td>
-                                        <td className="px-3 py-1 text-slate-500 font-mono">
+                                        <td className="px-2 py-0.5 text-slate-500 font-bold">{p.secuencia || pIdx + 1}</td>
+                                        <td className="px-2 py-0.5 font-bold text-slate-800">{p.destino}</td>
+                                        <td className="px-2 py-0.5 text-slate-500">{p.direccion}</td>
+                                        <td className="px-2 py-0.5 text-slate-600">{p.comuna}</td>
+                                        <td className="px-2 py-0.5 text-slate-500 font-mono">
                                           {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
                                         </td>
-                                        <td className="px-3 py-1 text-right font-mono font-bold text-slate-700">{p.volumen}</td>
-                                        <td className="px-3 py-1 text-right font-mono text-slate-600">{p.peso}</td>
-                                        <td className="px-3 py-1 text-right font-mono text-slate-600">{p.cantCJ}</td>
+                                        <td className="px-2 py-0.5 text-right font-mono font-bold text-slate-700">{p.volumen}</td>
+                                        <td className="px-2 py-0.5 text-right font-mono text-slate-600">{p.peso}</td>
+                                        <td className="px-2 py-0.5 text-right font-mono text-slate-600">{p.cantCJ}</td>
                                       </tr>
                                     ))}
                                     {paradas.length === 0 && (
                                       <tr>
-                                        <td colSpan="8" className="px-3 py-2 text-center text-slate-400 italic">
+                                        <td colSpan="8" className="px-2 py-1.5 text-center text-slate-400 italic">
                                           Destino directo sin paradas adicionales.
                                         </td>
                                       </tr>
@@ -1393,10 +1632,17 @@ export default function AssignmentControl() {
             ).map(truck => {
               const isSelected = selectedTruckObject?.id === truck.id;
               const isSemirremolque = activeTabTrucks === 'semirremolques';
+              const isFocused = focusedEntity?.type === 'truck' && (
+                focusedEntity.identifier === truck.identifier ||
+                focusedEntity.identifier === truck.plate ||
+                (focusedEntity.plate && (focusedEntity.plate === truck.plate || truck.identifier.includes(focusedEntity.plate)))
+              );
               
               // Color de la tarjeta de acuerdo al estado documental (Requisito 3)
               let cardBgClass = 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50';
-              if (isSelected) {
+              if (isFocused) {
+                cardBgClass = 'bg-emerald-100/90 border-emerald-500 ring-2 ring-emerald-500 shadow-sm';
+              } else if (isSelected) {
                 cardBgClass = 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300 shadow-xs';
               } else if (truck.health?.worst === 'red') {
                 cardBgClass = 'bg-red-50/80 border-red-300 ring-1 ring-red-400/50 hover:bg-red-100/70';
@@ -1411,7 +1657,12 @@ export default function AssignmentControl() {
                   key={truck.id} 
                   draggable
                   onDragStart={(e) => handleDragStartTruck(e, truck, isSemirremolque)}
-                  onClick={() => setSelectedTruckObject(isSelected ? null : truck)}
+                  onClick={() => {
+                    setSelectedTruckObject(isSelected ? null : truck);
+                    if (truck.viajes > 0) {
+                      handleToggleFocusTruck(truck);
+                    }
+                  }}
                   className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${cardBgClass}`}
                 >
                   <div className="flex items-center justify-between mb-0.5">
@@ -1423,12 +1674,26 @@ export default function AssignmentControl() {
                         {truck.plate}
                       </span>
                     </div>
-                    {/* Badge de viajes basado en vueltas distintas */}
-                    <div className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
-                      truck.viajes > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
-                    }`}>
+                    {/* Badge de viajes basado en vueltas distintas - clickeable para filtrar (Requisito 4) */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (truck.viajes > 0) {
+                          handleToggleFocusTruck(truck);
+                        }
+                      }}
+                      title={truck.viajes > 0 ? (isFocused ? "Quitar filtro de rutas" : "Haz clic para ver solo sus rutas asignadas") : "Sin rutas asignadas"}
+                      className={`shrink-0 px-1.5 py-0.2 rounded-full text-[9px] font-black transition-all ${
+                        isFocused
+                          ? 'bg-emerald-700 text-white shadow-xs'
+                          : truck.viajes > 0 
+                            ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 cursor-pointer' 
+                            : 'bg-slate-100 text-slate-500 cursor-default'
+                      }`}
+                    >
                       {truck.viajes === 1 ? '1 viaje' : `${truck.viajes} viajes`}
-                    </div>
+                    </button>
                   </div>
 
                   <div className="text-[9px] text-slate-500 truncate">
@@ -1525,6 +1790,71 @@ export default function AssignmentControl() {
                 className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
               >
                 Sí, Guardar de todas formas
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL DE ADVERTENCIA AL ASIGNAR DOTACIÓN CON NOVEDAD O BAJA (Requisito 2) */}
+      {warningStaffModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-red-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-red-600 mb-3">
+              <div className="w-11 h-11 rounded-2xl bg-red-100 flex items-center justify-center shrink-0">
+                <AlertTriangle size={26} className="text-red-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base text-slate-900 leading-tight">
+                  ¿Está seguro que desea asignar a esta dotación?
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  El trabajador presenta una novedad de asistencia o estado no disponible.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 my-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Trabajador:</span>
+                <span className="text-xs font-black text-slate-900 text-right">{warningStaffModal.staff?.name}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">RUT:</span>
+                <span className="text-xs font-mono font-bold text-slate-700">{warningStaffModal.staff?.rut || 'S/RUT'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">Condición / Estado:</span>
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-black bg-red-100 text-red-800 border border-red-300">
+                  {warningStaffModal.condition}
+                </span>
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200">
+                <span className="text-xs font-semibold text-slate-500">Filas / Rol a asignar:</span>
+                <span className="text-xs font-bold text-blue-700">
+                  {warningStaffModal.targetIds?.length || 1} servicio(s) como {warningStaffModal.targetRole}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+              El trabajador figura con novedad <strong className="text-red-700 font-bold">{warningStaffModal.condition}</strong> en Asistencia o Dotación. 
+              Si confirma, quedará asignado a las rutas seleccionadas.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button 
+                variant="outline" 
+                onClick={() => setWarningStaffModal({ isOpen: false, staff: null, targetIds: [], targetRole: 'conductor', condition: '' })}
+                className="text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={confirmAssignStaffWithWarning}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-sm"
+              >
+                Sí, asignar de todas formas
               </Button>
             </div>
           </div>
