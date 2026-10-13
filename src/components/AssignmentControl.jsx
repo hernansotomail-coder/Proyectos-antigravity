@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Filter, Search, RefreshCw, User, Truck, MapPin, 
-  ChevronUp, ChevronDown, CheckCircle2, Circle, Check,
+  ChevronUp, ChevronDown, ChevronRight, CheckCircle2, Circle, Check,
   Calendar, Layers, Trash2, ArrowRight, UserCheck, Shield, Sparkles,
   Save, Eye, Download, Send, AlertTriangle, X
 } from 'lucide-react';
@@ -135,16 +135,23 @@ export default function AssignmentControl() {
 
   // Dotación activa
   const { conductores, auxiliares } = useMemo(() => {
-    const activeStaff = staffList.filter(s => 
-      s.status === 'Activo' && 
-      (s.name.toLowerCase().includes(staffSearch.toLowerCase()) || (s.rut || '').includes(staffSearch))
-    );
+    const activeStaff = (staffList || []).filter(s => {
+      if (!s) return false;
+      const isActive = s.status === 'Activo' || !s.status;
+      const sName = (s.name || '').toLowerCase();
+      const sRut = (s.rut || '').toLowerCase();
+      const search = (staffSearch || '').toLowerCase();
+      return isActive && (sName.includes(search) || sRut.includes(search));
+    });
     
-    const conds = activeStaff.filter(s => s.role.toLowerCase().includes('conductor')).map(c => ({
-      ...c, viajes: viajesPorPersona[c.name] || 0
+    const conds = activeStaff.filter(s => (s.role || '').toLowerCase().includes('conductor')).map(c => ({
+      ...c, viajes: (c.name ? viajesPorPersona[c.name] : 0) || 0
     }));
-    const auxs = activeStaff.filter(s => s.role.toLowerCase().includes('auxiliar') || s.role.toLowerCase().includes('movilizador') || !s.role.toLowerCase().includes('conductor')).map(a => ({
-      ...a, viajes: viajesPorPersona[a.name] || 0
+    const auxs = activeStaff.filter(s => {
+      const r = (s.role || '').toLowerCase();
+      return r.includes('auxiliar') || r.includes('movilizador') || !r.includes('conductor');
+    }).map(a => ({
+      ...a, viajes: (a.name ? viajesPorPersona[a.name] : 0) || 0
     }));
 
     const sortByViajes = (a, b) => sortVueltasAsc ? a.viajes - b.viajes : b.viajes - a.viajes;
@@ -523,7 +530,7 @@ export default function AssignmentControl() {
                   className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-2 py-0.5 rounded-lg transition-colors shadow-sm flex items-center gap-1"
                 >
                   <User size={12} />
-                  Chofer: {selectedStaffMember.name.split(' ')[0]}
+                  Chofer: {(selectedStaffMember?.name || '').split(' ')[0] || 'Asignado'}
                 </button>
                 <button
                   onClick={() => handleAssignStaff(selectedStaffMember, 'auxiliar')}
