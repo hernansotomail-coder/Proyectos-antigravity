@@ -1,13 +1,165 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   Download, Calendar, Search, Filter, Layers, 
   MapPin, User, Truck, Package, Weight, CheckCircle2,
-  ChevronDown, ChevronRight, ArrowUpDown, FileSpreadsheet, RefreshCw
+  ChevronDown, ChevronRight, ArrowUpDown, FileSpreadsheet, RefreshCw, X, Check
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlanningStore } from '../store/planningStore';
 import { Button } from './ui/Button';
+
+// COMPONENTE MULTI-SELECT DROPDOWN REUTILIZABLE
+function MultiSelectFilter({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm) return options;
+    return options.filter(opt => String(opt).toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [options, searchTerm]);
+
+  const toggleOption = (opt) => {
+    if (selectedValues.includes(opt)) {
+      onChange(selectedValues.filter(v => v !== opt));
+    } else {
+      onChange([...selectedValues, opt]);
+    }
+  };
+
+  const handleSelectAll = () => {
+    onChange([...options]);
+  };
+
+  const handleClearAll = () => {
+    onChange([]);
+  };
+
+  const buttonText = useMemo(() => {
+    if (selectedValues.length === 0) return placeholder;
+    if (selectedValues.length === options.length && options.length > 0) return `Todos (${options.length})`;
+    if (selectedValues.length === 1) return selectedValues[0];
+    return `${selectedValues.length} seleccionados`;
+  }, [selectedValues, options, placeholder]);
+
+  return (
+    <div className="flex flex-col gap-0.5 relative" ref={dropdownRef}>
+      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+        {label}
+      </span>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center justify-between gap-1.5 px-2.5 py-1.5 text-xs rounded-xl border transition-all text-left min-w-[140px] max-w-[210px] ${
+          selectedValues.length > 0 
+            ? 'bg-blue-50/80 border-blue-300 text-blue-900 font-semibold shadow-xs' 
+            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-slate-300'
+        }`}
+      >
+        <span className="truncate">{buttonText}</span>
+        <div className="flex items-center gap-1 shrink-0">
+          {selectedValues.length > 0 && (
+            <span className="bg-blue-600 text-white rounded-full px-1.5 py-0.2 text-[9px] font-bold">
+              {selectedValues.length}
+            </span>
+          )}
+          <ChevronDown size={14} className={`text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 top-full mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 animate-in fade-in zoom-in-95">
+          {/* Header con acciones */}
+          <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 text-[11px]">
+            <span className="font-bold text-slate-700">{label}</span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                className="text-blue-600 hover:text-blue-800 font-semibold hover:underline"
+              >
+                Todos
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="text-slate-500 hover:text-red-600 font-semibold hover:underline"
+              >
+                Limpiar
+              </button>
+            </div>
+          </div>
+
+          {/* Buscador interno si hay más de 5 opciones */}
+          {options.length > 5 && (
+            <div className="relative mb-1.5">
+              <Search className="absolute left-2 top-2 text-slate-400" size={12} />
+              <input
+                type="text"
+                placeholder={`Buscar en ${label.toLowerCase()}...`}
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
+              />
+            </div>
+          )}
+
+          {/* Lista de opciones seleccionables */}
+          <div className="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
+            {filteredOptions.map((opt) => {
+              const isChecked = selectedValues.includes(opt);
+              return (
+                <label
+                  key={opt}
+                  className={`flex items-center gap-2 px-2 py-1 rounded-lg text-xs cursor-pointer select-none transition-colors ${
+                    isChecked ? 'bg-blue-50 text-blue-900 font-semibold' : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleOption(opt)}
+                    className="rounded text-blue-600 focus:ring-blue-500 shrink-0"
+                  />
+                  <span className="truncate">{opt}</span>
+                </label>
+              );
+            })}
+
+            {filteredOptions.length === 0 && (
+              <div className="py-3 text-center text-slate-400 text-xs italic">
+                Sin coincidencias
+              </div>
+            )}
+          </div>
+
+          <div className="pt-1.5 mt-1 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400">
+            <span>{selectedValues.length} de {options.length} marcados</span>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function RuteoView() {
   const { 
@@ -36,36 +188,83 @@ export default function RuteoView() {
     return transmittedAssignments[activeDate] || [];
   }, [savedRuteoByDate, transmittedAssignments, activeDate]);
 
-  // Filtros dinámicos seleccionables
-  const [filterCliente, setFilterCliente] = useState('Todos');
-  const [filterRuta, setFilterRuta] = useState('');
-  const [filterConductor, setFilterConductor] = useState('Todos');
-  const [filterVuelta, setFilterVuelta] = useState('Todas');
+  // FILTROS MULTI-SELECCIÓN (Requisito 1: todos los filtros permiten seleccionar más de 1 opción)
+  const [selectedTransportistas, setSelectedTransportistas] = useState([]);
+  const [selectedClientes, setSelectedClientes] = useState([]);
+  const [selectedRutas, setSelectedRutas] = useState([]);
+  const [selectedConductores, setSelectedConductores] = useState([]);
+  const [selectedVueltas, setSelectedVueltas] = useState([]);
+  
   const [expandedKeys, setExpandedKeys] = useState({});
 
-  // Listas únicas para opciones de dropdown
-  const clientesList = useMemo(() => {
-    const set = new Set(currentRoutes.map(r => r.cliente).filter(Boolean));
+  // Listas únicas de opciones para los filtros multi-selección
+  const transportistasList = useMemo(() => {
+    const set = new Set(currentRoutes.map(r => r.transportista || 'Sin Transportista').filter(Boolean));
     return Array.from(set).sort();
+  }, [currentRoutes]);
+
+  const clientesList = useMemo(() => {
+    const set = new Set(currentRoutes.map(r => r.cliente || 'Sin Cliente').filter(Boolean));
+    return Array.from(set).sort();
+  }, [currentRoutes]);
+
+  const rutasList = useMemo(() => {
+    const set = new Set(currentRoutes.map(r => String(r.ruta || '')).filter(Boolean));
+    return Array.from(set).sort((a, b) => {
+      const numA = parseInt(a, 10);
+      const numB = parseInt(b, 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b);
+    });
   }, [currentRoutes]);
 
   const conductoresList = useMemo(() => {
-    const set = new Set(currentRoutes.map(r => r.conductor_name).filter(Boolean));
+    const set = new Set(currentRoutes.map(r => r.conductor_name || 'Sin Asignar').filter(Boolean));
     return Array.from(set).sort();
   }, [currentRoutes]);
 
-  // Rutas filtradas
+  const vueltasList = useMemo(() => {
+    const set = new Set();
+    currentRoutes.forEach(r => {
+      if (r.n_vuelta) set.add(`Vuelta ${r.n_vuelta}`);
+      else set.add('Sin Vuelta');
+    });
+    return Array.from(set).sort();
+  }, [currentRoutes]);
+
+  // Rutas filtradas aplicando todos los filtros multi-select
   const filteredRoutes = useMemo(() => {
     return currentRoutes.filter(r => {
-      if (filterRuta && !String(r.ruta || '').toLowerCase().includes(filterRuta.toLowerCase())) return false;
-      if (filterCliente !== 'Todos' && r.cliente !== filterCliente) return false;
-      if (filterConductor !== 'Todos' && r.conductor_name !== filterConductor) return false;
-      if (filterVuelta !== 'Todas' && String(r.n_vuelta || '') !== filterVuelta) return false;
+      // 1. Filtro Transportista
+      if (selectedTransportistas.length > 0) {
+        const tVal = r.transportista || 'Sin Transportista';
+        if (!selectedTransportistas.includes(tVal)) return false;
+      }
+      // 2. Filtro Cliente
+      if (selectedClientes.length > 0) {
+        const cVal = r.cliente || 'Sin Cliente';
+        if (!selectedClientes.includes(cVal)) return false;
+      }
+      // 3. Filtro Ruta
+      if (selectedRutas.length > 0) {
+        const rVal = String(r.ruta || '');
+        if (!selectedRutas.includes(rVal)) return false;
+      }
+      // 4. Filtro Conductor
+      if (selectedConductores.length > 0) {
+        const condVal = r.conductor_name || 'Sin Asignar';
+        if (!selectedConductores.includes(condVal)) return false;
+      }
+      // 5. Filtro Vuelta
+      if (selectedVueltas.length > 0) {
+        const vLabel = r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta';
+        if (!selectedVueltas.includes(vLabel)) return false;
+      }
       return true;
     });
-  }, [currentRoutes, filterRuta, filterCliente, filterConductor, filterVuelta]);
+  }, [currentRoutes, selectedTransportistas, selectedClientes, selectedRutas, selectedConductores, selectedVueltas]);
 
-  // AGRUPACIÓN POR CONDUCTOR + N° DE VUELTA (Formato idéntico a Resumen de Asignación)
+  // AGRUPACIÓN POR CONDUCTOR + N° DE VUELTA
   const groupedSummary = useMemo(() => {
     const map = new Map();
 
@@ -84,6 +283,7 @@ export default function RuteoView() {
           camion: row.camion || 'Sin camión',
           tipo_equipo: row.tipo_equipo || '',
           rampla: row.rampla || '',
+          transportista: row.transportista || '',
           auxiliares: [row.aux1_name, row.aux2_name].filter(Boolean),
           totalM3: 0,
           totalPeso: 0,
@@ -99,6 +299,7 @@ export default function RuteoView() {
       g.totalLocales += parseInt(row.locales, 10) || 0;
       g.totalCajas += parseInt(row.cantCJ, 10) || 0;
       if (row.camion && g.camion === 'Sin camión') g.camion = row.camion;
+      if (row.transportista && !g.transportista) g.transportista = row.transportista;
 
       g.rutas.push(row);
     });
@@ -114,7 +315,7 @@ export default function RuteoView() {
     setExpandedKeys(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // TOTALES SUMADOS REQUERIDOS: m³, Locales y Suma de Peso (kg)
+  // TOTALES DINÁMICOS: m³, Locales, Suma de Peso (kg), Cajas (CJ)
   const totalM3 = useMemo(() => {
     return filteredRoutes.reduce((acc, r) => acc + (parseFloat(r.m3) || 0), 0).toFixed(4);
   }, [filteredRoutes]);
@@ -137,7 +338,21 @@ export default function RuteoView() {
     }, 0);
   }, [filteredRoutes]);
 
-  // Exportar a Excel según los filtros seleccionados
+  const hasActiveFilters = selectedTransportistas.length > 0 || 
+    selectedClientes.length > 0 || 
+    selectedRutas.length > 0 || 
+    selectedConductores.length > 0 || 
+    selectedVueltas.length > 0;
+
+  const handleResetFilters = () => {
+    setSelectedTransportistas([]);
+    setSelectedClientes([]);
+    setSelectedRutas([]);
+    setSelectedConductores([]);
+    setSelectedVueltas([]);
+  };
+
+  // EXPORTAR A EXCEL (con columna Transportista incluida)
   const handleExportExcel = () => {
     if (filteredRoutes.length === 0) {
       toast.error('No hay datos en la tabla para exportar.');
@@ -153,7 +368,8 @@ export default function RuteoView() {
           paradas.forEach(p => {
             exportRows.push({
               'Fecha': r.fecha,
-              'N° de Vuelta': r.n_vuelta || '1',
+              'Transportista': r.transportista || p.transportista || 'Sin Transportista',
+              'N° de Vuelta': r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta',
               'N° de Ruta': r.ruta,
               'Cliente / Nombre Ruta': r.cliente,
               'Conductor': r.conductor_name || 'Sin asignar',
@@ -178,7 +394,8 @@ export default function RuteoView() {
         } else {
           exportRows.push({
             'Fecha': r.fecha,
-            'N° de Vuelta': r.n_vuelta || '1',
+            'Transportista': r.transportista || 'Sin Transportista',
+            'N° de Vuelta': r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta',
             'N° de Ruta': r.ruta,
             'Cliente / Nombre Ruta': r.cliente,
             'Conductor': r.conductor_name || 'Sin asignar',
@@ -196,9 +413,9 @@ export default function RuteoView() {
       const ws = XLSX.utils.json_to_sheet(exportRows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Ruteo Filtrado');
-      XLSX.writeFile(wb, `Ruteo_Operacional_${activeDate}.xlsx`);
+      XLSX.writeFile(wb, `Reporte_Ruteo_${activeDate}.xlsx`);
 
-      toast.success(`Archivo Excel exportado exitosamente (${exportRows.length} registros).`);
+      toast.success(`Reporte Excel generado con éxito (${exportRows.length} filas exportadas).`);
     } catch (err) {
       console.error(err);
       toast.error('Error al generar archivo Excel.');
@@ -218,26 +435,26 @@ export default function RuteoView() {
             <h1 className="text-xl font-bold text-slate-800">Ruteo</h1>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Arma tu tabla con filtros de Conductor, Cliente y Ruta, y descarga el reporte en Excel.
+            Arma tu reporte personalizado con filtros de Transportista, Cliente, Conductor y Ruta con multi-selección, y descárgalo en Excel.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <Button 
             onClick={handleExportExcel}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm"
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm transition-all"
           >
             <Download size={15} />
-            Descargar en Excel
+            Exportar Reporte Excel
           </Button>
         </div>
       </div>
 
-      {/* 2. Barra de Filtros Dinámicos */}
+      {/* 2. Barra de Filtros Dinámicos Multi-Selección */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
         
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Fecha */}
+          {/* Selector Fecha */}
           <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-xl">
             <Calendar size={18} className="text-blue-600 shrink-0" />
             <div className="flex flex-col">
@@ -260,85 +477,68 @@ export default function RuteoView() {
             </div>
           </div>
 
-          {/* Filtro Conductor */}
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Conductor</span>
-            <select
-              value={filterConductor}
-              onChange={e => setFilterConductor(e.target.value)}
-              className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-44"
-            >
-              <option value="Todos">Todos los Conductores</option>
-              {conductoresList.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          </div>
+          {/* 1. Multi-Filtro Transportista (Requisito 1) */}
+          <MultiSelectFilter
+            label="Transportista"
+            options={transportistasList}
+            selectedValues={selectedTransportistas}
+            onChange={setSelectedTransportistas}
+            placeholder="Todos los Transportistas"
+          />
 
-          {/* Filtro Cliente */}
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Cliente</span>
-            <select
-              value={filterCliente}
-              onChange={e => setFilterCliente(e.target.value)}
-              className="text-xs border border-slate-200 rounded-xl px-2.5 py-1.5 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-48"
-            >
-              <option value="Todos">Todos los Clientes</option>
-              {clientesList.map(cl => (
-                <option key={cl} value={cl}>{cl}</option>
-              ))}
-            </select>
-          </div>
+          {/* 2. Multi-Filtro Cliente */}
+          <MultiSelectFilter
+            label="Cliente"
+            options={clientesList}
+            selectedValues={selectedClientes}
+            onChange={setSelectedClientes}
+            placeholder="Todos los Clientes"
+          />
 
-          {/* Filtro N° de Ruta */}
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">N° de Ruta</span>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-2 text-slate-400" size={12} />
-              <input 
-                type="text" 
-                placeholder="Buscar ruta..." 
-                value={filterRuta}
-                onChange={e => setFilterRuta(e.target.value)}
-                className="pl-7 pr-2.5 py-1.5 text-xs border border-slate-200 rounded-xl w-32 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-            </div>
-          </div>
+          {/* 3. Multi-Filtro N° de Ruta */}
+          <MultiSelectFilter
+            label="N° de Ruta"
+            options={rutasList}
+            selectedValues={selectedRutas}
+            onChange={setSelectedRutas}
+            placeholder="Todas las Rutas"
+          />
 
-          {/* Filtro N° de Vuelta */}
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Vuelta</span>
-            <select
-              value={filterVuelta}
-              onChange={e => setFilterVuelta(e.target.value)}
-              className="text-xs border border-slate-200 rounded-xl px-2 py-1.5 bg-slate-50 focus:bg-white focus:outline-none w-24"
-            >
-              <option value="Todas">Todas</option>
-              {[1, 2, 3, 4, 5, 6, 7, 8].map(v => (
-                <option key={v} value={String(v)}>Vuelta {v}</option>
-              ))}
-            </select>
-          </div>
+          {/* 4. Multi-Filtro Conductor */}
+          <MultiSelectFilter
+            label="Conductor"
+            options={conductoresList}
+            selectedValues={selectedConductores}
+            onChange={setSelectedConductores}
+            placeholder="Todos los Conductores"
+          />
 
-          {(filterRuta || filterCliente !== 'Todos' || filterConductor !== 'Todos' || filterVuelta !== 'Todas') && (
+          {/* 5. Multi-Filtro Vuelta */}
+          <MultiSelectFilter
+            label="N° de Vuelta"
+            options={vueltasList}
+            selectedValues={selectedVueltas}
+            onChange={setSelectedVueltas}
+            placeholder="Todas las Vueltas"
+          />
+
+          {hasActiveFilters && (
             <Button 
               variant="outline" 
-              onClick={() => {
-                setFilterRuta('');
-                setFilterCliente('Todos');
-                setFilterConductor('Todos');
-                setFilterVuelta('Todas');
-              }}
-              className="text-xs h-8 px-2.5 self-end"
+              onClick={handleResetFilters}
+              className="text-xs h-8 px-2.5 self-end flex items-center gap-1 text-slate-600 hover:text-red-600 border-dashed"
             >
+              <X size={13} />
               Limpiar Filtros
             </Button>
           )}
         </div>
 
-        <span className="text-xs text-slate-500 font-medium">
-          {filteredRoutes.length} rutas filtradas ({groupedSummary.length} viajes)
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-600 font-bold bg-slate-100 px-2.5 py-1 rounded-xl">
+            {filteredRoutes.length} rutas filtradas ({groupedSummary.length} viajes)
+          </span>
+        </div>
       </div>
 
       {/* 3. Tarjetas de Totales Solicitadas: m³, Locales, Suma de Peso (kg), Cajas */}
@@ -394,7 +594,7 @@ export default function RuteoView() {
             </h3>
           </div>
           <span className="text-[11px] text-slate-500 font-medium">
-            Pulsa en cualquier conductor para ver el desglose de paradas y destinos.
+            Pulsa en cualquier conductor para ver el desglose de paradas, destinos y transportista.
           </span>
         </div>
 
@@ -408,7 +608,7 @@ export default function RuteoView() {
                   onClick={() => toggleExpand(group.key)}
                   className="bg-slate-50/80 hover:bg-blue-50/50 cursor-pointer px-3.5 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between text-xs gap-2 transition-colors select-none"
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-blue-600">
                       {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </span>
@@ -430,6 +630,12 @@ export default function RuteoView() {
                       {group.vueltaLabel}
                     </span>
 
+                    {group.transportista && (
+                      <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded text-[11px]">
+                        Transp: {group.transportista}
+                      </span>
+                    )}
+
                     <span className="text-slate-400 text-[11px]">
                       [{group.rutas.map(r => `Ruta ${r.ruta}`).join(', ')}]
                     </span>
@@ -449,12 +655,17 @@ export default function RuteoView() {
                       const paradas = r.paradas || [];
                       return (
                         <div key={`ruteo-route-${r.id}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                          <div className="bg-slate-100/70 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between text-xs">
+                          <div className="bg-slate-100/70 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between text-xs flex-wrap gap-2">
                             <div className="flex items-center gap-2">
                               <span className="bg-slate-800 text-white font-bold px-2 py-0.5 rounded text-[10px]">
                                 N° de Ruta {r.ruta}
                               </span>
                               <span className="font-bold text-slate-800">{r.cliente}</span>
+                              {r.transportista && (
+                                <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded text-[10px]">
+                                  Transportista: {r.transportista}
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-3 text-[11px]">
                               <span>{paradas.length} paradas</span>
@@ -472,6 +683,7 @@ export default function RuteoView() {
                                   <th className="px-3 py-1">Destino</th>
                                   <th className="px-3 py-1">Dirección</th>
                                   <th className="px-3 py-1">Comuna</th>
+                                  <th className="px-3 py-1">Transportista</th>
                                   <th className="px-3 py-1">Horario</th>
                                   <th className="px-3 py-1 text-right">m³</th>
                                   <th className="px-3 py-1 text-right">Peso</th>
@@ -485,6 +697,7 @@ export default function RuteoView() {
                                     <td className="px-3 py-1 font-bold text-slate-800">{p.destino}</td>
                                     <td className="px-3 py-1 text-slate-500">{p.direccion}</td>
                                     <td className="px-3 py-1 text-slate-600">{p.comuna}</td>
+                                    <td className="px-3 py-1 text-purple-700 font-semibold">{p.transportista || r.transportista || '-'}</td>
                                     <td className="px-3 py-1 text-slate-500 font-mono">
                                       {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
                                     </td>
@@ -495,7 +708,7 @@ export default function RuteoView() {
                                 ))}
                                 {paradas.length === 0 && (
                                   <tr>
-                                    <td colSpan="8" className="px-3 py-2 text-center text-slate-400 italic">
+                                    <td colSpan="9" className="px-3 py-2 text-center text-slate-400 italic">
                                       Sin paradas detalladas.
                                     </td>
                                   </tr>

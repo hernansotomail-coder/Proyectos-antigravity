@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore } from '../store/fleetStore';
 import { usePlanningStore } from '../store/planningStore';
+import { useAttendanceStore } from '../store/attendanceStore';
 import { Button } from './ui/Button';
 
 // Colores para tipos de servicio
@@ -23,10 +24,101 @@ const SERVICE_COLORS = {
   'Distribución': 'bg-sky-100 text-sky-700 border-sky-200'
 };
 
+// Configuración de colores y estilos de Asistencia para Dotación (Requisito 2)
+const ATTENDANCE_STYLES = {
+  'Vacaciones': {
+    badge: 'Vacaciones',
+    cardClass: 'bg-yellow-50/90 border-yellow-300 ring-1 ring-yellow-400/50',
+    badgeClass: 'bg-yellow-100 text-yellow-800 border border-yellow-300 font-bold',
+    isAlert: true
+  },
+  'Licencia': {
+    badge: 'Licencia Médica',
+    cardClass: 'bg-orange-50/90 border-orange-300 ring-1 ring-orange-400/50',
+    badgeClass: 'bg-orange-100 text-orange-800 border border-orange-300 font-bold',
+    isAlert: true
+  },
+  'Licencia Médica': {
+    badge: 'Licencia Médica',
+    cardClass: 'bg-orange-50/90 border-orange-300 ring-1 ring-orange-400/50',
+    badgeClass: 'bg-orange-100 text-orange-800 border border-orange-300 font-bold',
+    isAlert: true
+  },
+  'Ausente': {
+    badge: 'Ausente',
+    cardClass: 'bg-red-50/90 border-red-300 ring-1 ring-red-400/50',
+    badgeClass: 'bg-red-100 text-red-800 border border-red-300 font-bold',
+    isAlert: true
+  },
+  'Permiso con goce': {
+    badge: 'Permiso C/G',
+    cardClass: 'bg-purple-50/90 border-purple-300 ring-1 ring-purple-400/50',
+    badgeClass: 'bg-purple-100 text-purple-800 border border-purple-300 font-bold',
+    isAlert: true
+  },
+  'Permiso sin goce': {
+    badge: 'Permiso S/G',
+    cardClass: 'bg-pink-50/90 border-pink-300 ring-1 ring-pink-400/50',
+    badgeClass: 'bg-pink-100 text-pink-800 border border-pink-300 font-bold',
+    isAlert: true
+  },
+  'Baja': {
+    badge: 'Baja',
+    cardClass: 'bg-slate-100 border-slate-300 opacity-60',
+    badgeClass: 'bg-slate-200 text-slate-700',
+    isAlert: true
+  }
+};
+
+// Cálculo de vencimientos y colores de documentos de Flota (Requisito 3)
+const getDaysDiff = (dateStr) => {
+  if (!dateStr) return null;
+  const targetDate = new Date(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  targetDate.setHours(0, 0, 0, 0);
+  const diffTime = targetDate - today;
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+};
+
+const getDocumentStatus = (days) => {
+  if (days === null) return 'N/A';
+  if (days < 0) return 'red'; // Vencido
+  if (days <= 15) return 'orange'; // 0 a 15 dias
+  if (days <= 30) return 'yellow'; // 16 a 30 dias
+  return 'green'; // > 30 dias
+};
+
+const getTruckDocumentHealth = (truck) => {
+  const rtDays = getDaysDiff(truck.rt_date);
+  const gasesDays = getDaysDiff(truck.gases_date);
+  const pcDays = getDaysDiff(truck.pc_date);
+  const soapDays = getDaysDiff(truck.soap_date);
+  const carnesDays = getDaysDiff(truck.carnes_date);
+
+  const docs = [
+    { name: 'REV. TÉC.', status: getDocumentStatus(rtDays), days: rtDays },
+    { name: 'GASES', status: getDocumentStatus(gasesDays), days: gasesDays },
+    { name: 'PC', status: getDocumentStatus(pcDays), days: pcDays },
+    { name: 'SOAP', status: getDocumentStatus(soapDays), days: soapDays },
+    { name: 'CARNES', status: getDocumentStatus(carnesDays), days: carnesDays }
+  ];
+
+  const alertDocs = docs.filter(d => d.status === 'red' || d.status === 'orange' || d.status === 'yellow');
+  
+  let worst = 'green';
+  if (docs.some(d => d.status === 'red')) worst = 'red';
+  else if (docs.some(d => d.status === 'orange')) worst = 'orange';
+  else if (docs.some(d => d.status === 'yellow')) worst = 'yellow';
+
+  return { worst, alertDocs, docs };
+};
+
 export default function AssignmentControl() {
   const navigate = useNavigate();
   const { staffList, fetchStaff } = useStaffStore();
   const { fleetList, fetchFleet } = useFleetStore();
+  const { attendanceList, fetchAttendanceByDateRange } = useAttendanceStore();
   const { 
     transmittedAssignments, 
     selectedDisponibilizarDate, 
@@ -47,10 +139,31 @@ export default function AssignmentControl() {
 
   const activeDate = selectedDisponibilizarDate || availableDates[0] || '14-10-2026';
 
+  // Fecha en formato YYYY-MM-DD para consultar en tabla attendance
+  const isoActiveDate = useMemo(() => {
+    if (!activeDate) return '';
+    const parts = activeDate.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return activeDate;
+  }, [activeDate]);
+
   useEffect(() => {
     fetchStaff();
     fetchFleet();
   }, [fetchStaff, fetchFleet]);
+
+  useEffect(() => {
+    if (isoActiveDate && isoActiveDate.includes('-')) {
+      const parts = isoActiveDate.split('-');
+      if (parts.length === 3) {
+        const startOfMonth = `${parts[0]}-${parts[1]}-01`;
+        const endOfMonth = `${parts[0]}-${parts[1]}-31`;
+        fetchAttendanceByDateRange(startOfMonth, endOfMonth);
+      }
+    }
+  }, [isoActiveDate, fetchAttendanceByDateRange]);
 
   useEffect(() => {
     if (!selectedDisponibilizarDate && availableDates.length > 0) {
@@ -58,10 +171,28 @@ export default function AssignmentControl() {
     }
   }, [availableDates, selectedDisponibilizarDate, setSelectedDisponibilizarDate]);
 
+  // Mapa de estado de asistencia para la fecha activa (staff_id -> service_type)
+  const attendanceMap = useMemo(() => {
+    const map = {};
+    if (!attendanceList || attendanceList.length === 0 || !isoActiveDate) return map;
+    attendanceList.forEach(rec => {
+      if (rec.date === isoActiveDate) {
+        map[rec.staff_id] = rec.service_type;
+      }
+    });
+    return map;
+  }, [attendanceList, isoActiveDate]);
+
   // Tabs y estados
   const [activeTabStaff, setActiveTabStaff] = useState('conductores'); // 'conductores' | 'auxiliares'
   const [activeTabTrucks, setActiveTabTrucks] = useState('camiones'); // 'camiones' | 'tractos' | 'semirremolques'
   
+  // Filtro de estado de asistencia para dotación (Requisito 2)
+  const [staffAttendanceFilter, setStaffAttendanceFilter] = useState('todos'); // 'todos' | 'disponibles' | 'novedades'
+
+  // Filtro de estado documental para camiones (Requisito 3)
+  const [truckDocFilter, setTruckDocFilter] = useState('todos'); // 'todos' | 'al_dia' | 'alertas'
+
   const [sortVueltasAsc, setSortVueltasAsc] = useState(false);
   const [sortTrucksAsc, setSortTrucksAsc] = useState(false);
   
@@ -133,7 +264,7 @@ export default function AssignmentControl() {
     return result;
   }, [assignmentsForDate]);
 
-  // Dotación activa
+  // Dotación activa filtrada y clasificada con Asistencia (Requisito 2)
   const { conductores, auxiliares } = useMemo(() => {
     const activeStaff = (staffList || []).filter(s => {
       if (!s) return false;
@@ -141,17 +272,29 @@ export default function AssignmentControl() {
       const sName = (s.name || '').toLowerCase();
       const sRut = (s.rut || '').toLowerCase();
       const search = (staffSearch || '').toLowerCase();
-      return isActive && (sName.includes(search) || sRut.includes(search));
+      if (!isActive || (!sName.includes(search) && !sRut.includes(search))) return false;
+
+      // Filtro de condición de asistencia para descartar no disponibles
+      const att = attendanceMap[s.id];
+      const isUnavailable = att && ATTENDANCE_STYLES[att]?.isAlert;
+      if (staffAttendanceFilter === 'disponibles' && isUnavailable) return false;
+      if (staffAttendanceFilter === 'novedades' && !isUnavailable) return false;
+
+      return true;
     });
     
     const conds = activeStaff.filter(s => (s.role || '').toLowerCase().includes('conductor')).map(c => ({
-      ...c, viajes: (c.name ? viajesPorPersona[c.name] : 0) || 0
+      ...c, 
+      viajes: (c.name ? viajesPorPersona[c.name] : 0) || 0,
+      attStatus: attendanceMap[c.id] || null
     }));
     const auxs = activeStaff.filter(s => {
       const r = (s.role || '').toLowerCase();
       return r.includes('auxiliar') || r.includes('movilizador') || !r.includes('conductor');
     }).map(a => ({
-      ...a, viajes: (a.name ? viajesPorPersona[a.name] : 0) || 0
+      ...a, 
+      viajes: (a.name ? viajesPorPersona[a.name] : 0) || 0,
+      attStatus: attendanceMap[a.id] || null
     }));
 
     const sortByViajes = (a, b) => sortVueltasAsc ? a.viajes - b.viajes : b.viajes - a.viajes;
@@ -159,24 +302,33 @@ export default function AssignmentControl() {
       conductores: conds.sort(sortByViajes),
       auxiliares: auxs.sort(sortByViajes)
     };
-  }, [staffList, sortVueltasAsc, staffSearch, viajesPorPersona]);
+  }, [staffList, sortVueltasAsc, staffSearch, viajesPorPersona, attendanceMap, staffAttendanceFilter]);
 
-  // Camiones clasificados en 3 categorías: Camión/Camioneta, Tracto, Semirremolque
+  // Camiones clasificados en 3 categorías con evaluación de salud documental (Requisito 3)
   const { camionesList, tractosList, semirremolquesList } = useMemo(() => {
-    const activeTrucks = fleetList
-      .filter(t => t.status === 'Activo' || !t.status)
-      .filter(t => 
-        (t.internal_number || '').toLowerCase().includes(truckSearch.toLowerCase()) || 
-        (t.plate || '').toLowerCase().includes(truckSearch.toLowerCase()) ||
-        (t.brand || '').toLowerCase().includes(truckSearch.toLowerCase())
-      )
+    const activeTrucks = (fleetList || [])
+      .filter(t => t && (t.status === 'Activo' || !t.status))
+      .filter(t => {
+        const search = (truckSearch || '').toLowerCase();
+        const matches = (t.internal_number || '').toLowerCase().includes(search) || 
+               (t.plate || '').toLowerCase().includes(search) ||
+               (t.brand || '').toLowerCase().includes(search);
+        if (!matches) return false;
+
+        const health = getTruckDocumentHealth(t);
+        if (truckDocFilter === 'al_dia' && health.worst !== 'green') return false;
+        if (truckDocFilter === 'alertas' && health.worst === 'green') return false;
+        return true;
+      })
       .map(t => {
         const identifier = t.internal_number ? `${t.internal_number} (${t.plate})` : t.plate;
         const vCount = viajesPorCamion[identifier] || viajesPorCamion[t.plate] || viajesPorCamion[t.internal_number] || 0;
+        const health = getTruckDocumentHealth(t);
         return {
           ...t,
           identifier,
-          viajes: vCount
+          viajes: vCount,
+          health
         };
       });
 
@@ -201,7 +353,7 @@ export default function AssignmentControl() {
       tractosList: tractos.sort(sortByViajes),
       semirremolquesList: semis.sort(sortByViajes)
     };
-  }, [fleetList, sortTrucksAsc, truckSearch, viajesPorCamion]);
+  }, [fleetList, sortTrucksAsc, truckSearch, viajesPorCamion, truckDocFilter]);
 
   // Filas filtradas de la matriz
   const filteredAssignments = useMemo(() => {
@@ -624,7 +776,7 @@ export default function AssignmentControl() {
             </button>
           </div>
 
-          <div className="p-1 border-b border-slate-100 bg-white">
+          <div className="p-1 border-b border-slate-100 bg-white space-y-1">
             <div className="relative">
               <Search className="absolute left-2 top-1.5 text-slate-400" size={11} />
               <input 
@@ -635,31 +787,57 @@ export default function AssignmentControl() {
                 className="w-full pl-5 pr-1.5 py-0.5 text-[10px] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
               />
             </div>
+            {/* Filtro por condición de asistencia (Requisito 2) */}
+            <select
+              value={staffAttendanceFilter}
+              onChange={e => setStaffAttendanceFilter(e.target.value)}
+              className="w-full text-[9px] font-bold border border-slate-200 rounded p-1 bg-slate-50 text-slate-700 focus:outline-none"
+              title="Filtrar por condición de asistencia"
+            >
+              <option value="todos">Todos los trabajadores</option>
+              <option value="disponibles">Solo disponibles / aptos</option>
+              <option value="novedades">Con novedades (Vac/Lic/Aus)</option>
+            </select>
           </div>
 
           <div className="flex-1 overflow-y-auto p-1 space-y-1">
             {(activeTabStaff === 'conductores' ? conductores : auxiliares).map(staff => {
               const isSelected = selectedStaffMember?.id === staff.id;
+              const attStyle = staff.attStatus ? ATTENDANCE_STYLES[staff.attStatus] : null;
+
+              let cardBgClass = 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50';
+              if (isSelected) {
+                cardBgClass = 'bg-blue-50 border-blue-400 ring-1 ring-blue-300 shadow-xs';
+              } else if (attStyle) {
+                cardBgClass = attStyle.cardClass;
+              }
+
               return (
                 <div 
                   key={staff.id} 
                   draggable
                   onDragStart={(e) => handleDragStartStaff(e, staff)}
                   onClick={() => setSelectedStaffMember(isSelected ? null : staff)}
-                  className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${
-                    isSelected 
-                      ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-300 shadow-xs' 
-                      : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
+                  className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${cardBgClass}`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="min-w-0 pr-1">
                       <p className="text-[11px] font-bold text-slate-800 truncate" title={staff.name}>
                         {staff.name}
                       </p>
-                      <p className="text-[9px] text-slate-400 font-mono">
-                        {staff.rut || 'S/RUT'}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[9px] text-slate-400 font-mono">
+                          {staff.rut || 'S/RUT'}
+                        </span>
+                        {attStyle && (
+                          <span 
+                            className={`px-1 py-0.2 rounded text-[8px] font-black ${attStyle.badgeClass}`}
+                            title={`Asistencia: ${attStyle.badge}`}
+                          >
+                            {attStyle.badge}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     {/* Badge de viajes basado en vueltas distintas */}
                     <div className={`shrink-0 px-1.5 py-0.2 rounded-full text-[9px] font-black ${
@@ -674,9 +852,14 @@ export default function AssignmentControl() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (attStyle?.isAlert) {
+                            toast.warning(`Atención: ${staff.name} tiene registro de "${attStyle.badge}" en Asistencia.`);
+                          }
                           handleAssignStaff(staff, activeTabStaff === 'conductores' ? 'conductor' : 'auxiliar');
                         }}
-                        className="text-[9px] font-bold bg-blue-600 hover:bg-blue-700 text-white px-1.5 py-0.5 rounded shadow-xs"
+                        className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded shadow-xs ${
+                          attStyle?.isAlert ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+                        }`}
                       >
                         + Asignar ({selectedRowIds.length})
                       </button>
@@ -1175,7 +1358,7 @@ export default function AssignmentControl() {
             </button>
           </div>
 
-          <div className="p-1 border-b border-slate-100 bg-white">
+          <div className="p-1 border-b border-slate-100 bg-white space-y-1">
             <div className="relative">
               <Search className="absolute left-2 top-1.5 text-slate-400" size={11} />
               <input 
@@ -1186,6 +1369,17 @@ export default function AssignmentControl() {
                 className="w-full pl-5 pr-1.5 py-0.5 text-[10px] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-50"
               />
             </div>
+            {/* Filtro por estado documental (Requisito 3) */}
+            <select
+              value={truckDocFilter}
+              onChange={e => setTruckDocFilter(e.target.value)}
+              className="w-full text-[9px] font-bold border border-slate-200 rounded p-1 bg-slate-50 text-slate-700 focus:outline-none"
+              title="Filtrar por estado documental (REV. TÉC., GASES, PC, SOAP, CARNES)"
+            >
+              <option value="todos">Todos los equipos</option>
+              <option value="al_dia">Al día (Sin alertas)</option>
+              <option value="alertas">Con alertas o vencidos</option>
+            </select>
           </div>
 
           <div className="flex-1 overflow-y-auto p-1 space-y-1">
@@ -1198,17 +1392,26 @@ export default function AssignmentControl() {
             ).map(truck => {
               const isSelected = selectedTruckObject?.id === truck.id;
               const isSemirremolque = activeTabTrucks === 'semirremolques';
+              
+              // Color de la tarjeta de acuerdo al estado documental (Requisito 3)
+              let cardBgClass = 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50';
+              if (isSelected) {
+                cardBgClass = 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300 shadow-xs';
+              } else if (truck.health?.worst === 'red') {
+                cardBgClass = 'bg-red-50/80 border-red-300 ring-1 ring-red-400/50 hover:bg-red-100/70';
+              } else if (truck.health?.worst === 'orange') {
+                cardBgClass = 'bg-orange-50/80 border-orange-300 ring-1 ring-orange-400/50 hover:bg-orange-100/70';
+              } else if (truck.health?.worst === 'yellow') {
+                cardBgClass = 'bg-yellow-50/80 border-yellow-300 ring-1 ring-yellow-400/50 hover:bg-yellow-100/70';
+              }
+
               return (
                 <div 
-                  key={truck.id}
+                  key={truck.id} 
                   draggable
                   onDragStart={(e) => handleDragStartTruck(e, truck, isSemirremolque)}
                   onClick={() => setSelectedTruckObject(isSelected ? null : truck)}
-                  className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${
-                    isSelected 
-                      ? 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300 shadow-xs' 
-                      : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-                  }`}
+                  className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${cardBgClass}`}
                 >
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1">
@@ -1230,6 +1433,27 @@ export default function AssignmentControl() {
                   <div className="text-[9px] text-slate-500 truncate">
                     {truck.brand || 'Equipo'} • {truck.type || 'General'}
                   </div>
+
+                  {/* Etiquetas de alerta de documentos (REV. TÉC., GASES, PC, SOAP, CARNES) */}
+                  {truck.health?.alertDocs?.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-slate-200/60">
+                      {truck.health.alertDocs.map(d => (
+                        <span 
+                          key={d.name}
+                          className={`text-[8px] font-black px-1 py-0.2 rounded border ${
+                            d.status === 'red' 
+                              ? 'bg-red-100 text-red-800 border-red-200' 
+                              : d.status === 'orange' 
+                                ? 'bg-orange-100 text-orange-800 border-orange-200' 
+                                : 'bg-yellow-100 text-yellow-800 border-yellow-200'
+                          }`}
+                          title={`${d.name}: ${d.status === 'red' ? 'VENCIDO' : `Vence en ${d.days} días`}`}
+                        >
+                          {d.name} {d.status === 'red' ? 'VENC' : `${d.days}d`}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {selectedRowIds.length > 0 && (
                     <div className="mt-1 pt-1 border-t border-slate-100 flex items-center justify-end gap-1">

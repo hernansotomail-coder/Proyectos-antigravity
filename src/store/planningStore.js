@@ -82,6 +82,7 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
       m3: 0.345,
       peso: 145,
       cantCJ: 16,
+      transportista: 'T288',
       paradas: SAMPLE_PARADAS_1401
     },
     {
@@ -105,6 +106,7 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
       m3: 3.0401,
       peso: 1527.26,
       cantCJ: 323,
+      transportista: 'T306',
       paradas: SAMPLE_PARADAS_1611
     },
     {
@@ -128,6 +130,7 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
       m3: 3.5664,
       peso: 1464.83,
       cantCJ: 400,
+      transportista: 'T312',
       paradas: SAMPLE_PARADAS_1612
     }
   ]
@@ -253,6 +256,7 @@ export const usePlanningStore = create((set, get) => ({
         const horaIni = row.HoraIni || row.hora_ini || '';
         const horaFin = row.HoraFin || row.hora_fin || '';
 
+        const transportista = String(row.Transportista || row.transportista || row.Transp || row.transport || '').trim();
         const groupKey = `${ruta}:::${nombreRuta || 'Sin Nombre'}`;
 
         if (!groups.has(groupKey)) {
@@ -260,6 +264,7 @@ export const usePlanningStore = create((set, get) => ({
             ruta,
             nombreRuta: nombreRuta || `Ruta ${ruta}`,
             fecha: fecha || 'Sin Fecha',
+            transportistasSet: new Set(),
             destinosSet: new Set(),
             sumaVolumen: 0,
             sumaPeso: 0,
@@ -270,6 +275,7 @@ export const usePlanningStore = create((set, get) => ({
 
         const g = groups.get(groupKey);
         if (destino) g.destinosSet.add(destino);
+        if (transportista) g.transportistasSet.add(transportista);
         g.sumaVolumen += volumen;
         g.sumaPeso += peso;
         g.sumaCantCJ += cantCJ;
@@ -287,7 +293,8 @@ export const usePlanningStore = create((set, get) => ({
           horaFin,
           cantCJ,
           peso,
-          volumen
+          volumen,
+          transportista
         });
       });
 
@@ -296,6 +303,7 @@ export const usePlanningStore = create((set, get) => ({
         ruta: g.ruta,
         nombreRuta: g.nombreRuta,
         fecha: g.fecha,
+        transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
         recuentoDestino: g.destinosSet.size,
         sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
         sumaPeso: Number(g.sumaPeso.toFixed(2)),
@@ -362,6 +370,7 @@ export const usePlanningStore = create((set, get) => ({
         tipo_servicio: 'Centralizado',
         ruta: route.ruta,
         cliente: route.nombreRuta,
+        transportista: route.transportista || '',
         referencia: '',
         locales: route.recuentoDestino,
         m3: route.sumaVolumen,
@@ -379,6 +388,7 @@ export const usePlanningStore = create((set, get) => ({
           peso: route.sumaPeso || old.peso || 0,
           cantCJ: route.sumaCantCJ || old.cantCJ || 0,
           cliente: route.nombreRuta,
+          transportista: route.transportista || old.transportista || '',
           paradas: route.paradas || old.paradas || []
         };
       } else {
