@@ -6,19 +6,16 @@ export const normalizeDate = (rawDate) => {
   if (!rawDate) return '';
   if (typeof rawDate === 'string') {
     const trimmed = rawDate.trim();
-    // Case: YYYY-MM-DD
     if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
       const parts = trimmed.split('T')[0].split(' ')[0].split('-');
       return `${parts[2]}-${parts[1]}-${parts[0]}`;
     }
-    // Case: DD-MM-YYYY or DD/MM/YYYY
     if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(trimmed)) {
       const parts = trimmed.split(' ')[0].split(/[-/]/);
       return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
     }
     return trimmed;
   }
-  // Case: Excel serial number
   if (typeof rawDate === 'number') {
     const dateObj = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
     const day = String(dateObj.getUTCDate()).padStart(2, '0');
@@ -35,14 +32,119 @@ export const normalizeDate = (rawDate) => {
   return String(rawDate);
 };
 
+// Paradas de muestra basadas en los datos reales del usuario
+const SAMPLE_PARADAS_1401 = [
+  { secuencia: 1, destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.1922, peso: 94.2, cantCJ: 6 },
+  { secuencia: 1, destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.1278, peso: 45.8, cantCJ: 5 },
+  { secuencia: 1, destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.025, peso: 5, cantCJ: 5 }
+];
+
+const SAMPLE_PARADAS_1611 = [
+  { secuencia: 1, destino: 'BRESLER PLAZA SUR 2', direccion: 'AV. PRESIDENTE JORGE ALESSANDR', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1100', volumen: 0.4397, peso: 257.328, cantCJ: 49 },
+  { secuencia: 2, destino: 'BRESLER 1 (PASEO SAN BERNARDO)', direccion: 'EYZAGUIRRE 650 LOCAL T 16', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1130', volumen: 0.4017, peso: 229.075, cantCJ: 45 },
+  { secuencia: 2, destino: 'BRESLER 2 (PASEO SAN BERNARDO)', direccion: 'EYZAGUIRRE 650 LOCAL P 8', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1130', volumen: 0.514, peso: 219.573, cantCJ: 44 },
+  { secuencia: 3, destino: 'SALA DE VENTAS SAN BERNARDO', direccion: 'AV LAS ACACIAS 1100', comuna: 'SAN BERNARDO', horaIni: '1000', horaFin: '1600', volumen: 0.2253, peso: 37.365, cantCJ: 24 },
+  { secuencia: 4, destino: 'BRESLER PLAZA TOBALABA', direccion: 'AV CAMILO HENRIQUEZ 3692', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '2000', volumen: 0.6263, peso: 358.275, cantCJ: 72 },
+  { secuencia: 5, destino: 'BRESLER PLAZA TOBALABA 2', direccion: 'AV. CAMILO HENRIQUEZ 3692 FC-2', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '1100', volumen: 0.3212, peso: 168.899, cantCJ: 33 },
+  { secuencia: 5, destino: 'SAN FRANCISCO PLAZA TOBALABA', direccion: 'AV. CAMILO HENRIQUEZ 3692 C-11', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '1100', volumen: 0.5119, peso: 256.747, cantCJ: 56 }
+];
+
+const SAMPLE_PARADAS_1612 = [
+  { secuencia: 1, destino: 'PAL MALL SPORT', direccion: 'LAS CONDES 13451 LOCAL AC11', comuna: 'LAS CONDES', horaIni: '800', horaFin: '1000', volumen: 0.2294, peso: 56.104, cantCJ: 36 },
+  { secuencia: 2, destino: 'SAN FRANCISCO PLAZA NORTE', direccion: 'AVENIDA AMÉRICA VESPUCIO N° 17', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1100', volumen: 0.6462, peso: 337.407, cantCJ: 74 },
+  { secuencia: 2, destino: 'SAN FRANCISCO PLAZA NORTE 2', direccion: 'AVENIDA AMÉRICA VESPUCIO N° 17', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1100', volumen: 0.9739, peso: 465.423, cantCJ: 94 },
+  { secuencia: 3, destino: 'BRESLER 1 (PLAZA NORTE)', direccion: 'AMERICO VESPUCIO 1737', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1200', volumen: 0.3253, peso: 191.808, cantCJ: 36 },
+  { secuencia: 4, destino: 'PAL PLAZA NORTE', direccion: 'VESPUCIO 1737 LOCAL MP1038', comuna: 'HUECHURABA', horaIni: '800', horaFin: '1330', volumen: 0.4236, peso: 121.462, cantCJ: 63 },
+  { secuencia: 5, destino: 'ELR PLAZA NORTE', direccion: 'AV AMERICO VESPUCIO 1737', comuna: 'HUECHURABA', horaIni: '1100', horaFin: '1500', volumen: 0.8076, peso: 254.234, cantCJ: 81 },
+  { secuencia: 6, destino: 'CORY PANORAMICO', direccion: 'GUARDIA VIEJA 116 LOCAL 138', comuna: 'PROVIDENCIA', horaIni: '1000', horaFin: '1400', volumen: 0.1604, peso: 38.39, cantCJ: 16 }
+];
+
+const DEFAULT_SAMPLE_ASSIGNMENTS = {
+  '14-10-2026': [
+    {
+      id: 'disp-sample-1401',
+      fecha: '14-10-2026',
+      conductor_name: '',
+      conductor_rut: '',
+      aux1_name: '',
+      aux1_rut: '',
+      aux2_name: '',
+      aux2_rut: '',
+      camion: '',
+      tipo_equipo: '',
+      rampla: '',
+      n_vuelta: '',
+      tipo_servicio: 'Centralizado',
+      ruta: '1401',
+      cliente: 'RUTA SBARRO COPEC 01',
+      referencia: '',
+      locales: 1,
+      m3: 0.345,
+      peso: 145,
+      cantCJ: 16,
+      paradas: SAMPLE_PARADAS_1401
+    },
+    {
+      id: 'disp-sample-1611',
+      fecha: '14-10-2026',
+      conductor_name: '',
+      conductor_rut: '',
+      aux1_name: '',
+      aux1_rut: '',
+      aux2_name: '',
+      aux2_rut: '',
+      camion: '',
+      tipo_equipo: '',
+      rampla: '',
+      n_vuelta: '',
+      tipo_servicio: 'Distribución',
+      ruta: '1611',
+      cliente: 'RUTA CANTABRIA 02',
+      referencia: '',
+      locales: 7,
+      m3: 3.0401,
+      peso: 1527.26,
+      cantCJ: 323,
+      paradas: SAMPLE_PARADAS_1611
+    },
+    {
+      id: 'disp-sample-1612',
+      fecha: '14-10-2026',
+      conductor_name: '',
+      conductor_rut: '',
+      aux1_name: '',
+      aux1_rut: '',
+      aux2_name: '',
+      aux2_rut: '',
+      camion: '',
+      tipo_equipo: '',
+      rampla: '',
+      n_vuelta: '',
+      tipo_servicio: 'Distribución',
+      ruta: '1612',
+      cliente: 'RUTA CANTABRIA 03',
+      referencia: '',
+      locales: 7,
+      m3: 3.5664,
+      peso: 1464.83,
+      cantCJ: 400,
+      paradas: SAMPLE_PARADAS_1612
+    }
+  ]
+};
+
 // Initial state from localStorage if available
 const loadPersistedAssignments = () => {
   try {
     const saved = localStorage.getItem('keylogistics_transmitted_assignments');
-    return saved ? JSON.parse(saved) : {};
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Object.keys(parsed).length > 0) return parsed;
+    }
+    return DEFAULT_SAMPLE_ASSIGNMENTS;
   } catch (e) {
     console.error('Error loading transmitted assignments from localStorage:', e);
-    return {};
+    return DEFAULT_SAMPLE_ASSIGNMENTS;
   }
 };
 
@@ -51,6 +153,25 @@ const persistAssignments = (data) => {
     localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(data));
   } catch (e) {
     console.error('Error saving transmitted assignments to localStorage:', e);
+  }
+};
+
+// Initial state for saved ruteo
+const loadPersistedSavedRuteo = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_saved_ruteo');
+    return saved ? JSON.parse(saved) : {};
+  } catch (e) {
+    console.error('Error loading saved ruteo from localStorage:', e);
+    return {};
+  }
+};
+
+const persistSavedRuteo = (data) => {
+  try {
+    localStorage.setItem('keylogistics_saved_ruteo', JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving ruteo to localStorage:', e);
   }
 };
 
@@ -66,7 +187,11 @@ export const usePlanningStore = create((set, get) => ({
 
   // Transmitted data into Disponibilización: { [fecha]: Array<AssignmentRow> }
   transmittedAssignments: loadPersistedAssignments(),
-  selectedDisponibilizarDate: '',
+  selectedDisponibilizarDate: '14-10-2026',
+
+  // Guardados definitivos de Disponibilización transmitidos a Ruteo: { [fecha]: Array<AssignmentRow> }
+  savedRuteoByDate: loadPersistedSavedRuteo(),
+  selectedRuteoDate: '14-10-2026',
 
   // Set Raw Rows imported from Excel Sheet1
   setRawRows: (rows, name = '') => {
@@ -91,7 +216,6 @@ export const usePlanningStore = create((set, get) => ({
       const groups = new Map();
 
       rawRows.forEach((row, idx) => {
-        // Try multiple possible column casings
         const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
         const ruta = String(rutaRaw).trim();
         if (!ruta) return;
@@ -160,7 +284,6 @@ export const usePlanningStore = create((set, get) => ({
         paradas: g.paradas
       }));
 
-      // Sort naturally by ruta
       transformed.sort((a, b) => {
         const numA = parseInt(a.ruta, 10);
         const numB = parseInt(b.ruta, 10);
@@ -194,14 +317,12 @@ export const usePlanningStore = create((set, get) => ({
     const newAssignmentsByDate = { ...transmittedAssignments };
     let totalTransmitted = 0;
 
-    // Group transformed routes by Fecha
     transformedRoutes.forEach((route) => {
       const fecha = route.fecha || 'Sin Fecha';
       if (!newAssignmentsByDate[fecha]) {
         newAssignmentsByDate[fecha] = [];
       }
 
-      // Check if this route already exists for this date, if so update/keep existing assignments
       const existingIdx = newAssignmentsByDate[fecha].findIndex(
         (a) => a.ruta === route.ruta && a.cliente === route.nombreRuta
       );
@@ -218,24 +339,28 @@ export const usePlanningStore = create((set, get) => ({
         camion: '',
         tipo_equipo: '',
         rampla: '',
-        n_vuelta: route.ruta, // N° de vuelta viene de "Ruta" de Hoja1
+        n_vuelta: '', // Vacía inicialmente, seleccionable del 1 al 8
         tipo_servicio: 'Centralizado',
         ruta: route.ruta, // N° de Ruta
         cliente: route.nombreRuta, // Cliente viene de "Nombre Ruta"
         referencia: '',
         locales: route.recuentoDestino, // Recuento distinto de Destino
-        m3: route.sumaVolumen // Suma de Volumen
+        m3: route.sumaVolumen, // Suma de Volumen
+        peso: route.sumaPeso || 0,
+        cantCJ: route.sumaCantCJ || 0,
+        paradas: route.paradas || [] // Conservamos las paradas detalladas
       };
 
       if (existingIdx >= 0) {
-        // Keep existing conductor/aux/camion if already assigned
         const old = newAssignmentsByDate[fecha][existingIdx];
         newAssignmentsByDate[fecha][existingIdx] = {
           ...old,
           locales: route.recuentoDestino,
           m3: route.sumaVolumen,
-          n_vuelta: route.ruta,
-          cliente: route.nombreRuta
+          peso: route.sumaPeso || old.peso || 0,
+          cantCJ: route.sumaCantCJ || old.cantCJ || 0,
+          cliente: route.nombreRuta,
+          paradas: route.paradas || old.paradas || []
         };
       } else {
         newAssignmentsByDate[fecha].push(assignmentRow);
@@ -244,10 +369,8 @@ export const usePlanningStore = create((set, get) => ({
       totalTransmitted++;
     });
 
-    // Save and persist
     persistAssignments(newAssignmentsByDate);
 
-    // Pick first available date as default selected
     const dates = Object.keys(newAssignmentsByDate);
     const targetDate = transformedRoutes[0]?.fecha || dates[0] || '';
 
@@ -265,6 +388,11 @@ export const usePlanningStore = create((set, get) => ({
     set({ selectedDisponibilizarDate: date });
   },
 
+  // Set selected date for Ruteo final view
+  setSelectedRuteoDate: (date) => {
+    set({ selectedRuteoDate: date });
+  },
+
   // Update a single field in an assignment row
   updateAssignmentField: (fecha, rowId, field, value) => {
     set((state) => {
@@ -276,7 +404,7 @@ export const usePlanningStore = create((set, get) => ({
     });
   },
 
-  // Batch update fields on multiple rows (e.g. multi-selection assignment)
+  // Batch update fields on multiple rows
   batchUpdateRows: (fecha, rowIds, updates) => {
     set((state) => {
       const rows = state.transmittedAssignments[fecha] || [];
@@ -288,7 +416,7 @@ export const usePlanningStore = create((set, get) => ({
     });
   },
 
-  // Assign staff to selected rows with automatic RUT autocomplete
+  // Assign staff with automatic RUT autocomplete
   assignStaffToRows: (fecha, rowIds, staffMember, targetRole = 'conductor') => {
     if (!staffMember) return;
     const updates = {};
@@ -307,7 +435,7 @@ export const usePlanningStore = create((set, get) => ({
     toast.success(`Asignado ${staffMember.name} a ${rowIds.length} fila(s)`);
   },
 
-  // Assign truck to selected rows with automatic tipo_equipo autocomplete
+  // Assign truck with automatic tipo_equipo autocomplete
   assignTruckToRows: (fecha, rowIds, truck) => {
     if (!truck) return;
     const truckIdentifier = truck.internal_number ? `${truck.internal_number} (${truck.plate})` : truck.plate;
@@ -320,7 +448,7 @@ export const usePlanningStore = create((set, get) => ({
     toast.success(`Camión ${truckIdentifier} asignado a ${rowIds.length} fila(s)`);
   },
 
-  // Clear specific assignment slot from selected rows
+  // Clear slot from selected rows
   clearSlotFromRows: (fecha, rowIds, slot) => {
     const updates = {};
     if (slot === 'conductor') {
@@ -335,9 +463,38 @@ export const usePlanningStore = create((set, get) => ({
     } else if (slot === 'camion') {
       updates.camion = '';
       updates.tipo_equipo = '';
+    } else if (slot === 'vuelta') {
+      updates.n_vuelta = '';
     }
 
     get().batchUpdateRows(fecha, rowIds, updates);
     toast.success(`Asignación limpiada en ${rowIds.length} fila(s)`);
+  },
+
+  // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo"
+  saveDisponibilizacion: (fecha) => {
+    const { transmittedAssignments, savedRuteoByDate } = get();
+    const rows = transmittedAssignments[fecha] || [];
+
+    if (rows.length === 0) {
+      toast.warning(`No hay datos en la fecha ${fecha} para guardar.`);
+      return false;
+    }
+
+    // Clonamos las filas completas asegurando que cada una tenga sus paradas
+    const updatedSaved = {
+      ...savedRuteoByDate,
+      [fecha]: JSON.parse(JSON.stringify(rows))
+    };
+
+    persistSavedRuteo(updatedSaved);
+
+    set({
+      savedRuteoByDate: updatedSaved,
+      selectedRuteoDate: fecha
+    });
+
+    toast.success(`¡Disponibilización del ${fecha} guardada y transmitida a Ruteo!`);
+    return true;
   }
 }));

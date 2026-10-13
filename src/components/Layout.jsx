@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
-  LogOut, ChevronDown, ChevronRight, Truck, Key, Layers, FileText 
+  LogOut, ChevronDown, ChevronRight, Truck, Key, Layers, FileText, FileSpreadsheet 
 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '../store/authStore';
@@ -23,6 +23,7 @@ export default function Layout() {
 
   const planificacionItems = [
     { name: 'Asignación diaria', path: '/daily-planning', icon: Layers },
+    { name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
     { name: 'Briefing', path: '/briefing', icon: FileText },
   ];
 
