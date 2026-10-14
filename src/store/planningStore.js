@@ -32,31 +32,30 @@ export const normalizeDate = (rawDate) => {
   return String(rawDate);
 };
 
-// Paradas de muestra basadas en los datos reales del usuario
+// Paradas de muestra basadas en los datos reales del usuario (Consolidadas por Sec + Ambiente)
 const SAMPLE_PARADAS_1401 = [
-  { secuencia: 1, destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.1922, peso: 94.2, cantCJ: 6 },
-  { secuencia: 1, destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.1278, peso: 45.8, cantCJ: 5 },
-  { secuencia: 1, destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.025, peso: 5, cantCJ: 5 }
+  { secuencia: 1, ambiente: 'C', destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.32, peso: 140, cantCJ: 11 },
+  { secuencia: 1, ambiente: 'R', destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.025, peso: 5, cantCJ: 5 }
 ];
 
 const SAMPLE_PARADAS_1611 = [
-  { secuencia: 1, destino: 'BRESLER PLAZA SUR 2', direccion: 'AV. PRESIDENTE JORGE ALESSANDR', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1100', volumen: 0.4397, peso: 257.328, cantCJ: 49 },
-  { secuencia: 2, destino: 'BRESLER 1 (PASEO SAN BERNARDO)', direccion: 'EYZAGUIRRE 650 LOCAL T 16', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1130', volumen: 0.4017, peso: 229.075, cantCJ: 45 },
-  { secuencia: 2, destino: 'BRESLER 2 (PASEO SAN BERNARDO)', direccion: 'EYZAGUIRRE 650 LOCAL P 8', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1130', volumen: 0.514, peso: 219.573, cantCJ: 44 },
-  { secuencia: 3, destino: 'SALA DE VENTAS SAN BERNARDO', direccion: 'AV LAS ACACIAS 1100', comuna: 'SAN BERNARDO', horaIni: '1000', horaFin: '1600', volumen: 0.2253, peso: 37.365, cantCJ: 24 },
-  { secuencia: 4, destino: 'BRESLER PLAZA TOBALABA', direccion: 'AV CAMILO HENRIQUEZ 3692', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '2000', volumen: 0.6263, peso: 358.275, cantCJ: 72 },
-  { secuencia: 5, destino: 'BRESLER PLAZA TOBALABA 2', direccion: 'AV. CAMILO HENRIQUEZ 3692 FC-2', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '1100', volumen: 0.3212, peso: 168.899, cantCJ: 33 },
-  { secuencia: 5, destino: 'SAN FRANCISCO PLAZA TOBALABA', direccion: 'AV. CAMILO HENRIQUEZ 3692 C-11', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '1100', volumen: 0.5119, peso: 256.747, cantCJ: 56 }
+  { secuencia: 1, ambiente: 'C', destino: 'BRESLER PLAZA SUR 2', direccion: 'AV. PRESIDENTE JORGE ALESSANDR', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1100', volumen: 0.4397, peso: 257.328, cantCJ: 49 },
+  { secuencia: 2, ambiente: 'C', destino: 'BRESLER 1 (PASEO SAN BERNARDO)', direccion: 'EYZAGUIRRE 650 LOCAL T 16', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1130', volumen: 0.4017, peso: 229.075, cantCJ: 45 },
+  { secuencia: 2, ambiente: 'R', destino: 'BRESLER 2 (PASEO SAN BERNARDO)', direccion: 'EYZAGUIRRE 650 LOCAL P 8', comuna: 'SAN BERNARDO', horaIni: '900', horaFin: '1130', volumen: 0.514, peso: 219.573, cantCJ: 44 },
+  { secuencia: 3, ambiente: 'S', destino: 'SALA DE VENTAS SAN BERNARDO', direccion: 'AV LAS ACACIAS 1100', comuna: 'SAN BERNARDO', horaIni: '1000', horaFin: '1600', volumen: 0.2253, peso: 37.365, cantCJ: 24 },
+  { secuencia: 4, ambiente: 'C', destino: 'BRESLER PLAZA TOBALABA', direccion: 'AV CAMILO HENRIQUEZ 3692', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '2000', volumen: 0.6263, peso: 358.275, cantCJ: 72 },
+  { secuencia: 5, ambiente: 'C', destino: 'BRESLER PLAZA TOBALABA 2', direccion: 'AV. CAMILO HENRIQUEZ 3692 FC-2', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '1100', volumen: 0.3212, peso: 168.899, cantCJ: 33 },
+  { secuencia: 5, ambiente: 'R', destino: 'SAN FRANCISCO PLAZA TOBALABA', direccion: 'AV. CAMILO HENRIQUEZ 3692 C-11', comuna: 'PUENTE ALTO', horaIni: '900', horaFin: '1100', volumen: 0.5119, peso: 256.747, cantCJ: 56 }
 ];
 
 const SAMPLE_PARADAS_1612 = [
-  { secuencia: 1, destino: 'PAL MALL SPORT', direccion: 'LAS CONDES 13451 LOCAL AC11', comuna: 'LAS CONDES', horaIni: '800', horaFin: '1000', volumen: 0.2294, peso: 56.104, cantCJ: 36 },
-  { secuencia: 2, destino: 'SAN FRANCISCO PLAZA NORTE', direccion: 'AVENIDA AMÉRICA VESPUCIO N° 17', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1100', volumen: 0.6462, peso: 337.407, cantCJ: 74 },
-  { secuencia: 2, destino: 'SAN FRANCISCO PLAZA NORTE 2', direccion: 'AVENIDA AMÉRICA VESPUCIO N° 17', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1100', volumen: 0.9739, peso: 465.423, cantCJ: 94 },
-  { secuencia: 3, destino: 'BRESLER 1 (PLAZA NORTE)', direccion: 'AMERICO VESPUCIO 1737', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1200', volumen: 0.3253, peso: 191.808, cantCJ: 36 },
-  { secuencia: 4, destino: 'PAL PLAZA NORTE', direccion: 'VESPUCIO 1737 LOCAL MP1038', comuna: 'HUECHURABA', horaIni: '800', horaFin: '1330', volumen: 0.4236, peso: 121.462, cantCJ: 63 },
-  { secuencia: 5, destino: 'ELR PLAZA NORTE', direccion: 'AV AMERICO VESPUCIO 1737', comuna: 'HUECHURABA', horaIni: '1100', horaFin: '1500', volumen: 0.8076, peso: 254.234, cantCJ: 81 },
-  { secuencia: 6, destino: 'CORY PANORAMICO', direccion: 'GUARDIA VIEJA 116 LOCAL 138', comuna: 'PROVIDENCIA', horaIni: '1000', horaFin: '1400', volumen: 0.1604, peso: 38.39, cantCJ: 16 }
+  { secuencia: 1, ambiente: 'C', destino: 'PAL MALL SPORT', direccion: 'LAS CONDES 13451 LOCAL AC11', comuna: 'LAS CONDES', horaIni: '800', horaFin: '1000', volumen: 0.2294, peso: 56.104, cantCJ: 36 },
+  { secuencia: 2, ambiente: 'C', destino: 'SAN FRANCISCO PLAZA NORTE', direccion: 'AVENIDA AMÉRICA VESPUCIO N° 17', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1100', volumen: 0.6462, peso: 337.407, cantCJ: 74 },
+  { secuencia: 2, ambiente: 'R', destino: 'SAN FRANCISCO PLAZA NORTE 2', direccion: 'AVENIDA AMÉRICA VESPUCIO N° 17', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1100', volumen: 0.9739, peso: 465.423, cantCJ: 94 },
+  { secuencia: 3, ambiente: 'C', destino: 'BRESLER 1 (PLAZA NORTE)', direccion: 'AMERICO VESPUCIO 1737', comuna: 'HUECHURABA', horaIni: '900', horaFin: '1200', volumen: 0.3253, peso: 191.808, cantCJ: 36 },
+  { secuencia: 4, ambiente: 'S', destino: 'PAL PLAZA NORTE', direccion: 'VESPUCIO 1737 LOCAL MP1038', comuna: 'HUECHURABA', horaIni: '800', horaFin: '1330', volumen: 0.4236, peso: 121.462, cantCJ: 63 },
+  { secuencia: 5, ambiente: 'R', destino: 'ELR PLAZA NORTE', direccion: 'AV AMERICO VESPUCIO 1737', comuna: 'HUECHURABA', horaIni: '1100', horaFin: '1500', volumen: 0.8076, peso: 254.234, cantCJ: 81 },
+  { secuencia: 6, ambiente: 'C', destino: 'CORY PANORAMICO', direccion: 'GUARDIA VIEJA 116 LOCAL 138', comuna: 'PROVIDENCIA', horaIni: '1000', horaFin: '1400', volumen: 0.1604, peso: 38.39, cantCJ: 16 }
 ];
 
 const DEFAULT_SAMPLE_ASSIGNMENTS = {
@@ -182,7 +181,11 @@ const loadPersistedAssignments = () => {
         Object.keys(parsed).forEach(dateKey => {
           parsed[dateKey] = parsed[dateKey].map(r => ({
             ...r,
-            transportista: ensureRowTransportista(r)
+            transportista: ensureRowTransportista(r),
+            paradas: (r.paradas || []).map(p => ({
+              ...p,
+              ambiente: p.ambiente || (r.ruta === '1401' ? 'C' : 'S')
+            }))
           }));
         });
         return parsed;
@@ -300,7 +303,7 @@ const createInitialTransformedRoutes = () => {
 
 export const loadPersistedTransformedRoutes = () => {
   try {
-    const saved = localStorage.getItem('keylogistics_transformed_routes');
+    const saved = localStorage.getItem('keylogistics_transformed_routes_v2');
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -314,7 +317,7 @@ export const loadPersistedTransformedRoutes = () => {
 
 export const persistTransformedRoutes = (data) => {
   try {
-    localStorage.setItem('keylogistics_transformed_routes', JSON.stringify(data));
+    localStorage.setItem('keylogistics_transformed_routes_v2', JSON.stringify(data));
   } catch (e) {
     console.error('Error saving transformed routes to localStorage:', e);
   }
@@ -379,6 +382,7 @@ export const usePlanningStore = create((set, get) => ({
         const peso = parseFloat(String(row.Peso || row.peso || 0).replace(',', '.')) || 0;
         const cantCJ = parseFloat(String(row.cantCJ || row.cantcj || row.CantCJ || row.Cajas || 0).replace(',', '.')) || 0;
         const secuencia = row.Secuencia || row.secuencia || idx + 1;
+        const ambiente = String(row.Ambiente || row.ambiente || row.Amb || 'S').trim().toUpperCase() || 'S';
         const horaIni = row.HoraIni || row.hora_ini || '';
         const horaFin = row.HoraFin || row.hora_fin || '';
 
@@ -395,7 +399,7 @@ export const usePlanningStore = create((set, get) => ({
             sumaVolumen: 0,
             sumaPeso: 0,
             sumaCantCJ: 0,
-            paradas: []
+            paradasMap: new Map()
           });
         }
 
@@ -409,33 +413,64 @@ export const usePlanningStore = create((set, get) => ({
           if (fecha) g.fecha = fecha;
         }
 
-        g.paradas.push({
-          id: `${ruta}-${idx}`,
-          secuencia,
-          destino,
-          direccion,
-          comuna,
-          horaIni,
-          horaFin,
-          cantCJ,
-          peso,
-          volumen,
-          transportista
-        });
+        // Consolidación de paradas por Secuencia + Ambiente (Requisitos 2 y 3):
+        // Si el número de Sec se repite con el mismo Ambiente, se consolida sumando m³, peso y cj.
+        // Si tienen diferente Ambiente (ej: C vs R vs S), se mantienen como filas distintas.
+        const paradaKey = `${secuencia}:::${ambiente}`;
+
+        if (g.paradasMap.has(paradaKey)) {
+          const p = g.paradasMap.get(paradaKey);
+          p.volumen = Number((p.volumen + volumen).toFixed(4));
+          p.peso = Number((p.peso + peso).toFixed(2));
+          p.cantCJ = Math.round(p.cantCJ + cantCJ);
+          if (!p.destino && destino) p.destino = destino;
+          if (!p.direccion && direccion) p.direccion = direccion;
+          if (!p.comuna && comuna) p.comuna = comuna;
+          if (!p.horaIni && horaIni) p.horaIni = horaIni;
+          if (!p.horaFin && horaFin) p.horaFin = horaFin;
+          if (!p.transportista && transportista) p.transportista = transportista;
+        } else {
+          g.paradasMap.set(paradaKey, {
+            id: `${ruta}-s${secuencia}-${ambiente}-${g.paradasMap.size}`,
+            secuencia,
+            ambiente,
+            destino,
+            direccion,
+            comuna,
+            horaIni,
+            horaFin,
+            cantCJ: Math.round(cantCJ),
+            peso: Number(peso.toFixed(2)),
+            volumen: Number(volumen.toFixed(4)),
+            transportista
+          });
+        }
       });
 
-      const transformed = Array.from(groups.values()).map((g, index) => ({
-        id: `trans-${g.ruta}-${index}`,
-        ruta: g.ruta,
-        nombreRuta: g.nombreRuta,
-        fecha: g.fecha,
-        transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
-        recuentoDestino: g.destinosSet.size,
-        sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
-        sumaPeso: Number(g.sumaPeso.toFixed(2)),
-        sumaCantCJ: Math.round(g.sumaCantCJ),
-        paradas: g.paradas
-      }));
+      const transformed = Array.from(groups.values()).map((g, index) => {
+        const sortedParadas = Array.from(g.paradasMap.values()).sort((a, b) => {
+          const numA = parseInt(a.secuencia, 10);
+          const numB = parseInt(b.secuencia, 10);
+          if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+          return String(a.ambiente).localeCompare(String(b.ambiente));
+        });
+
+        const ambientesSet = new Set(sortedParadas.map(p => p.ambiente));
+
+        return {
+          id: `trans-${g.ruta}-${index}`,
+          ruta: g.ruta,
+          nombreRuta: g.nombreRuta,
+          fecha: g.fecha,
+          transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
+          ambientes: Array.from(ambientesSet),
+          recuentoDestino: g.destinosSet.size,
+          sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
+          sumaPeso: Number(g.sumaPeso.toFixed(2)),
+          sumaCantCJ: Math.round(g.sumaCantCJ),
+          paradas: sortedParadas
+        };
+      });
 
       transformed.sort((a, b) => {
         const numA = parseInt(a.ruta, 10);
@@ -541,7 +576,7 @@ export const usePlanningStore = create((set, get) => ({
   },
 
   // APERTURAR RUTA: Permite tomar paradas/filas completas de una ruta y moverlas a una nueva ruta con nueva numeración
-  aperturarRuta: (sourceRouteId, newRouteNumber, newRouteName, newTransportista, selectedParadaIds) => {
+  aperturarRuta: (sourceRouteId, newRouteNumber, newRouteName, newTransportista, selectedParadaIds, selectedAmbientes = []) => {
     const { transformedRoutes } = get();
     const cleanNewNumber = String(newRouteNumber || '').trim();
     if (!cleanNewNumber) {
@@ -559,16 +594,14 @@ export const usePlanningStore = create((set, get) => ({
     const sourceParadas = source.paradas || [];
     const idSet = new Set(selectedParadaIds.map(x => String(x)));
 
-    // Separar paradas a mover y paradas que quedan
+    // Separar paradas a mover y paradas que quedan usando ID único
     const movedParadas = [];
     const remainingParadas = [];
 
     sourceParadas.forEach((p, idx) => {
       const matchId = String(p.id || `${source.ruta}-${idx}`);
-      const matchSec = String(p.secuencia);
-      const matchDestino = String(p.destino);
 
-      if (idSet.has(matchId) || idSet.has(matchSec) || idSet.has(matchDestino)) {
+      if (idSet.has(matchId)) {
         movedParadas.push(p);
       } else {
         remainingParadas.push(p);
@@ -584,6 +617,7 @@ export const usePlanningStore = create((set, get) => ({
     const updatedSource = {
       ...source,
       paradas: remainingParadas,
+      ambientes: Array.from(new Set(remainingParadas.map(p => p.ambiente))),
       recuentoDestino: new Set(remainingParadas.map(p => p.destino)).size,
       sumaVolumen: Number(remainingParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0).toFixed(4)),
       sumaPeso: Number(remainingParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0).toFixed(2)),
@@ -592,12 +626,17 @@ export const usePlanningStore = create((set, get) => ({
     };
 
     // Crear la nueva ruta aperturada
+    const routeAmbientes = selectedAmbientes && selectedAmbientes.length > 0 
+      ? selectedAmbientes 
+      : Array.from(new Set(movedParadas.map(p => p.ambiente)));
+
     const newRoute = {
       id: `trans-aperturada-${cleanNewNumber}-${Date.now()}`,
       ruta: cleanNewNumber,
       nombreRuta: String(newRouteName || '').trim() || `${source.nombreRuta} (Aperturada)`,
       fecha: source.fecha || '14-10-2026',
       transportista: String(newTransportista || '').trim() || source.transportista || 'T300',
+      ambientes: routeAmbientes,
       recuentoDestino: new Set(movedParadas.map(p => p.destino)).size,
       sumaVolumen: Number(movedParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0).toFixed(4)),
       sumaPeso: Number(movedParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0).toFixed(2)),
@@ -605,7 +644,7 @@ export const usePlanningStore = create((set, get) => ({
       paradas: movedParadas.map((p, pIdx) => ({
         ...p,
         id: `p-${cleanNewNumber}-${pIdx + 1}`,
-        secuencia: pIdx + 1
+        secuencia: p.secuencia || pIdx + 1
       })),
       isModified: true,
       isAperturada: true,

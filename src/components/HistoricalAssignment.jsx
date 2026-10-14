@@ -8,6 +8,7 @@ import {
 import { toast } from 'sonner';
 import { usePlanningStore } from '../store/planningStore';
 import { Button } from './ui/Button';
+import { AmbienteBadge } from './DailyPlanning';
 
 // COMPONENTE MULTI-SELECT DROPDOWN REUTILIZABLE
 function MultiSelectFilter({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
@@ -562,163 +563,247 @@ export default function HistoricalAssignment() {
         </div>
       </div>
 
-      {/* 3. Listado de Servicios Guardados */}
+      {/* 3. Listado de Servicios Guardados en Formato Tabla (Requisito 1) */}
       <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
         <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <History size={16} className="text-blue-600" />
             <h3 className="font-bold text-slate-800 text-xs">
-              Detalle de Disponibilizaciones — {selectedDate}
+              Histórico de Disponibilización — {selectedDate}
             </h3>
           </div>
           <span className="text-[11px] text-slate-500 font-medium">
-            Haz clic en cualquier viaje para ver el desglose de paradas y destinos.
+            Haz clic en cualquier fila para desplegar el detalle de paradas.
           </span>
         </div>
 
-        <div className="flex-1 overflow-auto p-3 space-y-2.5">
-          {groupedHistory.map(group => {
-            const isExpanded = !!expandedKeys[group.key];
-            return (
-              <div key={group.key} className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-xs">
-                {/* Header Viaje */}
-                <div 
-                  onClick={() => toggleExpand(group.key)}
-                  className="bg-slate-50/80 hover:bg-blue-50/50 cursor-pointer px-3 py-2 border-b border-slate-200 flex flex-wrap items-center justify-between text-xs gap-2 transition-colors select-none"
-                >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-blue-600">
-                      {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </span>
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-left text-xs whitespace-nowrap">
+            <thead className="bg-slate-100/90 text-slate-700 font-bold sticky top-0 z-10 shadow-xs text-xs border-b border-slate-200">
+              <tr>
+                <th className="px-2 py-2.5 w-8 text-center"></th>
+                <th className="px-3 py-2.5 text-blue-700">Conductor</th>
+                <th className="px-3 py-2.5 text-indigo-700">Auxiliar</th>
+                <th className="px-3 py-2.5 text-emerald-700">Camión</th>
+                <th className="px-2.5 py-2.5 text-teal-700">Rampla</th>
+                <th className="px-2.5 py-2.5 text-center text-amber-800">N° Vuelta</th>
+                <th className="px-3 py-2.5 font-black text-slate-900 bg-slate-200/50">N° Ruta</th>
+                <th className="px-3 py-2.5">Cliente</th>
+                <th className="px-2.5 py-2.5 text-center">Locales</th>
+                <th className="px-3 py-2.5 text-right font-mono">m³</th>
+                <th className="px-3 py-2.5 text-right font-mono">Peso (kg)</th>
+                <th className="px-2.5 py-2.5 text-right font-mono">CJ</th>
+                <th className="px-3 py-2.5 text-purple-700">Transportista</th>
+                <th className="px-2.5 py-2.5">Tipo Servicio</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {filteredRecords.map((r, rIdx) => {
+                const rowKey = r.id || `${r.fecha}-${r.ruta}-${rIdx}`;
+                const isExpanded = !!expandedKeys[rowKey];
+                const paradas = r.paradas || [];
 
-                    {/* Conductor */}
-                    <span className="font-black text-slate-800 text-sm">{group.conductor}</span>
-                    {group.conductor_rut && <span className="text-slate-400 font-mono text-[10px]">({group.conductor_rut})</span>}
-                    
-                    {/* Auxiliar al lado del Conductor (Requisito 4) */}
-                    {group.auxiliares && group.auxiliares.length > 0 && (
-                      <span className="bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
-                        <User size={11} className="text-indigo-600" />
-                        Aux: {group.auxiliares.join(', ')}
-                      </span>
-                    )}
+                return (
+                  <React.Fragment key={rowKey}>
+                    <tr 
+                      onClick={() => toggleExpand(rowKey)}
+                      className={`hover:bg-blue-50/40 cursor-pointer transition-colors ${
+                        isExpanded ? 'bg-blue-50/30' : ''
+                      }`}
+                    >
+                      <td className="px-2 py-2 text-center text-slate-400">
+                        {paradas.length > 0 ? (
+                          isExpanded ? <ChevronDown size={14} className="text-blue-600 inline" /> : <ChevronRight size={14} className="inline" />
+                        ) : (
+                          <span className="text-slate-300 text-[10px]">—</span>
+                        )}
+                      </td>
 
-                    {/* Camión */}
-                    <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] flex items-center gap-1">
-                      <Truck size={12} /> {group.camion}
-                    </span>
-
-                    {/* Rampla si existe */}
-                    {group.rampla && (
-                      <span className="bg-teal-100 text-teal-800 font-bold px-2 py-0.5 rounded text-[11px]">
-                        Rampla: {group.rampla}
-                      </span>
-                    )}
-
-                    {/* N° de vuelta */}
-                    <span className="bg-amber-100 text-amber-800 font-black px-2 py-0.5 rounded text-[11px]">
-                      {group.vuelta}
-                    </span>
-
-                    {/* Rutas */}
-                    <span className="text-slate-400 text-[11px]">
-                      [{group.rutas.map(r => `Ruta ${r.ruta}`).join(', ')}]
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-4 text-xs">
-                    <span className="text-slate-600">Locales: <strong className="text-indigo-700">{group.totalLocales}</strong></span>
-                    <span className="text-slate-600">Peso: <strong className="text-amber-700">{group.totalPeso} kg</strong></span>
-                    <span className="text-slate-600 font-mono font-black text-emerald-700 text-sm">{group.totalM3} m³</span>
-                  </div>
-                </div>
-
-                {/* Desglose de Paradas al expandir */}
-                {isExpanded && (
-                  <div className="p-3 bg-slate-50/30 space-y-3">
-                    {group.rutas.map(r => {
-                      const paradas = r.paradas || [];
-                      return (
-                        <div key={`hist-sub-${r.id}`} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                          <div className="bg-slate-100/70 px-3 py-1.5 border-b border-slate-200 flex items-center justify-between text-xs flex-wrap gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className="bg-slate-800 text-white font-bold px-2 py-0.5 rounded text-[10px]">
-                                Ruta {r.ruta}
-                              </span>
-                              <span className="font-bold text-slate-800">
-                                {r.cliente}
-                              </span>
-                              {(r.aux1_name || r.aux2_name) && (
-                                <span className="bg-indigo-50 text-indigo-700 font-semibold px-2 py-0.5 rounded text-[10px]">
-                                  Aux: {[r.aux1_name, r.aux2_name].filter(Boolean).join(', ')}
-                                </span>
-                              )}
-                              {r.tipo_servicio && (
-                                <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full font-medium">
-                                  {r.tipo_servicio}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3 text-[11px]">
-                              <span>{paradas.length} paradas</span>
-                              <span>{r.peso} kg</span>
-                              <span className="font-mono font-bold text-emerald-700">{r.m3} m³</span>
-                            </div>
-                          </div>
-
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-left text-[11px] whitespace-nowrap">
-                              <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100">
-                                <tr>
-                                  <th className="px-3 py-1 w-10">Sec</th>
-                                  <th className="px-3 py-1">Destino</th>
-                                  <th className="px-3 py-1">Dirección</th>
-                                  <th className="px-3 py-1">Comuna</th>
-                                  <th className="px-3 py-1">Horario</th>
-                                  <th className="px-3 py-1 text-right">m³</th>
-                                  <th className="px-3 py-1 text-right">Peso</th>
-                                  <th className="px-3 py-1 text-right">CJ</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-100">
-                                {paradas.map((p, idx) => (
-                                  <tr key={idx} className="hover:bg-slate-50">
-                                    <td className="px-3 py-1 text-slate-500 font-bold">{p.secuencia || idx + 1}</td>
-                                    <td className="px-3 py-1 font-bold text-slate-800">{p.destino}</td>
-                                    <td className="px-3 py-1 text-slate-500">{p.direccion}</td>
-                                    <td className="px-3 py-1 text-slate-600">{p.comuna}</td>
-                                    <td className="px-3 py-1 text-slate-500 font-mono">
-                                      {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
-                                    </td>
-                                    <td className="px-3 py-1 text-right font-mono font-bold text-slate-700">{p.volumen}</td>
-                                    <td className="px-3 py-1 text-right font-mono text-slate-600">{p.peso}</td>
-                                    <td className="px-3 py-1 text-right font-mono text-slate-600">{p.cantCJ}</td>
-                                  </tr>
-                                ))}
-                                {paradas.length === 0 && (
-                                  <tr>
-                                    <td colSpan="8" className="px-3 py-2 text-center text-slate-400 italic">
-                                      Sin paradas registradas.
-                                    </td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
+                      {/* Conductor */}
+                      <td className="px-3 py-2">
+                        <div className="font-bold text-slate-800 text-xs">
+                          {r.conductor_name || <span className="text-slate-300 font-normal italic">Sin Conductor</span>}
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                        {r.conductor_rut && (
+                          <div className="text-[10px] text-slate-400 font-mono">{r.conductor_rut}</div>
+                        )}
+                      </td>
 
-          {groupedHistory.length === 0 && (
-            <div className="p-12 text-center text-slate-400 text-xs italic">
-              No hay registros históricos encontrados para los filtros seleccionados en {selectedDate}.
-            </div>
-          )}
+                      {/* Auxiliar */}
+                      <td className="px-3 py-2">
+                        {r.aux1_name || r.aux2_name ? (
+                          <div>
+                            <span className="font-semibold text-slate-700 text-xs">
+                              {[r.aux1_name, r.aux2_name].filter(Boolean).join(', ')}
+                            </span>
+                            {(r.aux1_rut || r.aux2_rut) && (
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                {[r.aux1_rut, r.aux2_rut].filter(Boolean).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-300 italic text-[11px]">Sin Auxiliar</span>
+                        )}
+                      </td>
+
+                      {/* Camión */}
+                      <td className="px-3 py-2">
+                        {r.camion ? (
+                          <div className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-black text-xs" title={r.tipo_equipo ? `Tipo: ${r.tipo_equipo}` : ''}>
+                            <Truck size={11} />
+                            {r.camion}
+                          </div>
+                        ) : (
+                          <span className="text-slate-300 italic text-[11px]">Sin Camión</span>
+                        )}
+                        {r.tipo_equipo && (
+                          <div className="text-[10px] text-slate-400">{r.tipo_equipo}</div>
+                        )}
+                      </td>
+
+                      {/* Rampla */}
+                      <td className="px-2.5 py-2 font-medium text-slate-600">
+                        {r.rampla ? (
+                          <span className="bg-teal-50 text-teal-800 px-1.5 py-0.5 rounded border border-teal-200 font-bold text-[11px]">
+                            {r.rampla}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 text-[11px]">—</span>
+                        )}
+                      </td>
+
+                      {/* N° Vuelta */}
+                      <td className="px-2.5 py-2 text-center">
+                        {r.n_vuelta ? (
+                          <span className="bg-amber-100 text-amber-800 font-black px-2 py-0.5 rounded text-xs inline-block">
+                            Vuelta {r.n_vuelta}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 text-xs">—</span>
+                        )}
+                      </td>
+
+                      {/* N° Ruta */}
+                      <td className="px-3 py-2 font-black text-slate-900 bg-slate-50/50 text-sm">
+                        {r.ruta}
+                      </td>
+
+                      {/* Cliente */}
+                      <td className="px-3 py-2 font-medium text-slate-800 max-w-[180px] truncate" title={r.cliente}>
+                        {r.cliente}
+                      </td>
+
+                      {/* Locales */}
+                      <td className="px-2.5 py-2 text-center font-bold">
+                        <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full text-xs">
+                          {r.locales || 0}
+                        </span>
+                      </td>
+
+                      {/* m³ */}
+                      <td className="px-3 py-2 text-right font-mono font-bold text-emerald-700">
+                        {r.m3 || 0}
+                      </td>
+
+                      {/* Peso */}
+                      <td className="px-3 py-2 text-right font-mono text-slate-700">
+                        {r.peso || 0}
+                      </td>
+
+                      {/* CJ */}
+                      <td className="px-2.5 py-2 text-right font-mono text-slate-600">
+                        {r.cantCJ || 0}
+                      </td>
+
+                      {/* Transportista */}
+                      <td className="px-3 py-2 font-bold text-purple-700">
+                        {r.transportista ? (
+                          <span className="bg-purple-50 text-purple-800 px-2 py-0.5 rounded border border-purple-200 text-[11px]">
+                            {r.transportista}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 italic text-[11px]">—</span>
+                        )}
+                      </td>
+
+                      {/* Tipo Servicio */}
+                      <td className="px-2.5 py-2">
+                        <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-medium">
+                          {r.tipo_servicio || 'Centralizado'}
+                        </span>
+                      </td>
+                    </tr>
+
+                    {/* Desglose de Paradas al expandir la fila */}
+                    {isExpanded && (
+                      <tr className="bg-slate-50/80">
+                        <td colSpan="14" className="p-3 pl-8">
+                          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-inner">
+                            <h5 className="font-bold text-xs text-slate-700 mb-2 flex items-center gap-1.5">
+                              <MapPin size={14} className="text-red-500" />
+                              Detalle de Paradas — Ruta {r.ruta} ({paradas.length} paradas):
+                            </h5>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-[11px] whitespace-nowrap">
+                                <thead className="bg-slate-100 text-slate-600 font-semibold">
+                                  <tr>
+                                    <th className="px-2.5 py-1.5">Sec</th>
+                                    <th className="px-2.5 py-1.5 text-center">Ambiente</th>
+                                    <th className="px-2.5 py-1.5">Destino</th>
+                                    <th className="px-2.5 py-1.5">Dirección</th>
+                                    <th className="px-2.5 py-1.5">Comuna</th>
+                                    <th className="px-2.5 py-1.5">Horario</th>
+                                    <th className="px-2.5 py-1.5 text-right">m³</th>
+                                    <th className="px-2.5 py-1.5 text-right">Peso</th>
+                                    <th className="px-2.5 py-1.5 text-right">CJ</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {paradas.map((p, pIdx) => (
+                                    <tr key={p.id || pIdx} className="hover:bg-slate-50">
+                                      <td className="px-2.5 py-1 font-bold text-slate-500">{p.secuencia}</td>
+                                      <td className="px-2.5 py-1 text-center">
+                                        <AmbienteBadge ambiente={p.ambiente} />
+                                      </td>
+                                      <td className="px-2.5 py-1 font-semibold text-slate-800">{p.destino}</td>
+                                      <td className="px-2.5 py-1 text-slate-500">{p.direccion}</td>
+                                      <td className="px-2.5 py-1 text-slate-600">{p.comuna}</td>
+                                      <td className="px-2.5 py-1 text-slate-500 font-mono">
+                                        {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
+                                      </td>
+                                      <td className="px-2.5 py-1 text-right font-mono font-bold text-emerald-700">{p.volumen}</td>
+                                      <td className="px-2.5 py-1 text-right font-mono text-slate-600">{p.peso}</td>
+                                      <td className="px-2.5 py-1 text-right font-mono text-slate-600">{p.cantCJ}</td>
+                                    </tr>
+                                  ))}
+                                  {paradas.length === 0 && (
+                                    <tr>
+                                      <td colSpan="9" className="p-3 text-center text-slate-400 italic">
+                                        Sin paradas registradas para esta ruta.
+                                      </td>
+                                    </tr>
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+
+              {filteredRecords.length === 0 && (
+                <tr>
+                  <td colSpan="14" className="p-12 text-center text-slate-400 text-xs italic">
+                    No hay registros históricos encontrados para los filtros seleccionados en {selectedDate}.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

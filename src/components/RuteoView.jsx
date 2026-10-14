@@ -8,6 +8,7 @@ import {
 import { toast } from 'sonner';
 import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
 import { Button } from './ui/Button';
+import { AmbienteBadge } from './DailyPlanning';
 
 // COMPONENTE MULTI-SELECT DROPDOWN REUTILIZABLE
 function MultiSelectFilter({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
@@ -728,6 +729,7 @@ export default function RuteoView() {
                               <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100">
                                 <tr>
                                   <th className="px-3 py-1 w-10">Sec</th>
+                                  <th className="px-3 py-1 text-center">Ambiente</th>
                                   <th className="px-3 py-1">Destino</th>
                                   <th className="px-3 py-1">Dirección</th>
                                   <th className="px-3 py-1">Comuna</th>
@@ -742,6 +744,9 @@ export default function RuteoView() {
                                 {paradas.map((p, idx) => (
                                   <tr key={idx} className="hover:bg-slate-50">
                                     <td className="px-3 py-1 text-slate-500 font-bold">{p.secuencia || idx + 1}</td>
+                                    <td className="px-3 py-1 text-center">
+                                      <AmbienteBadge ambiente={p.ambiente} />
+                                    </td>
                                     <td className="px-3 py-1 font-bold text-slate-800">{p.destino}</td>
                                     <td className="px-3 py-1 text-slate-500">{p.direccion}</td>
                                     <td className="px-3 py-1 text-slate-600">{p.comuna}</td>

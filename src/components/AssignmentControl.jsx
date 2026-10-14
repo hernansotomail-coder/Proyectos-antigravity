@@ -1299,7 +1299,6 @@ export default function AssignmentControl() {
                     <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar</th>
                     <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar 2</th>
                     <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Camión</th>
-                    <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Tipo de equipo</th>
                     <th className="px-2.5 py-2 text-teal-700 bg-teal-50/40">Rampla</th>
                     <th className="px-2.5 py-2">Tipo de servicio</th>
                     <th className="px-2.5 py-2">Cliente</th>
@@ -1352,9 +1351,64 @@ export default function AssignmentControl() {
                           </select>
                         </td>
 
-                        {/* 3. N° de Ruta (Al lado de N° de vuelta) */}
-                        <td className="px-2.5 py-2 font-black text-slate-800 text-sm bg-slate-50/50 border-r border-slate-200">
-                          {row.ruta}
+                        {/* 3. N° de Ruta (Al lado de N° de vuelta) con comentario flotante (Requisito 4) */}
+                        <td className="px-2.5 py-2 font-black text-slate-800 text-sm bg-slate-50/50 border-r border-slate-200 relative group/route">
+                          <div className="flex items-center gap-1 cursor-pointer">
+                            <span className="border-b border-dotted border-slate-400 group-hover/route:text-blue-700 transition-colors">
+                              {row.ruta}
+                            </span>
+                            {row.paradas && row.paradas.length > 0 && (
+                              <span className="text-[10px] text-slate-400 font-normal">
+                                ({row.paradas.length})
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Comentario flotante con Destino, Dirección y Comuna */}
+                          <div className="hidden group-hover/route:block absolute left-full top-0 ml-2 z-50 bg-slate-900 text-white rounded-xl shadow-2xl p-3 border border-slate-700 min-w-[280px] max-w-[380px] pointer-events-none animate-in fade-in zoom-in-95">
+                            <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
+                              <div className="flex items-center gap-1.5">
+                                <MapPin size={13} className="text-red-400" />
+                                <span className="font-bold text-xs text-white">Ruta {row.ruta}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-medium truncate max-w-[180px]">{row.cliente}</span>
+                            </div>
+
+                            {row.paradas && row.paradas.length > 0 ? (
+                              <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                                {row.paradas.map((p, pIdx) => (
+                                  <div key={p.id || pIdx} className="text-[11px] pb-1.5 border-b border-slate-800 last:border-0 last:pb-0">
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span className="font-bold text-slate-100 truncate">
+                                        {p.secuencia ? `${p.secuencia}. ` : ''}{p.destino}
+                                      </span>
+                                      {p.ambiente && (
+                                        <span className={`px-1 py-0.2 rounded text-[9px] font-black ${
+                                          p.ambiente === 'C' ? 'bg-sky-900 text-sky-200' :
+                                          p.ambiente === 'R' ? 'bg-amber-900 text-amber-200' : 'bg-emerald-900 text-emerald-200'
+                                        }`}>
+                                          {p.ambiente}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-slate-300 mt-0.5">
+                                      <span className="text-slate-400">Dir: </span>{p.direccion || 'Sin dirección'}
+                                    </div>
+                                    <div className="text-[10px] text-slate-300">
+                                      <span className="text-slate-400">Comuna: </span>
+                                      <strong className="text-blue-300">{p.comuna || 'Sin comuna'}</strong>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-[11px] text-slate-300 space-y-1">
+                                <div><span className="text-slate-400">Destino: </span>{row.cliente || 'Centralizado'}</div>
+                                <div><span className="text-slate-400">Dirección: </span>Centro de Distribución</div>
+                                <div><span className="text-slate-400">Comuna: </span><strong className="text-blue-300">Santiago</strong></div>
+                              </div>
+                            )}
+                          </div>
                         </td>
 
                         {/* 4. Conductor */}
@@ -1423,14 +1477,17 @@ export default function AssignmentControl() {
                           )}
                         </td>
 
-                        {/* 7. Camión */}
+                        {/* 7. Camión (Con Tipo de equipo en hover - Requisito 5) */}
                         <td 
-                          className="px-2.5 py-2 font-bold text-slate-800 bg-emerald-50/20"
+                          className="px-2.5 py-2 font-bold text-slate-800 bg-emerald-50/20 relative group/truck"
                           onDrop={(e) => handleDropOnRow(e, row.id, 'camion')}
                         >
                           {row.camion ? (
-                            <span className="flex items-center justify-between gap-1">
-                              <span className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black text-[11px]">
+                            <div className="flex items-center justify-between gap-1">
+                              <span 
+                                className="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black text-[11px] cursor-help inline-flex items-center gap-1"
+                                title={`Tipo de equipo: ${row.tipo_equipo || 'No especificado'}`}
+                              >
                                 {row.camion}
                               </span>
                               <button 
@@ -1440,15 +1497,18 @@ export default function AssignmentControl() {
                               >
                                 ×
                               </button>
-                            </span>
+                            </div>
                           ) : (
                             <span className="text-slate-300 italic text-[11px]">— Vacío —</span>
                           )}
-                        </td>
 
-                        {/* 8. Tipo de equipo */}
-                        <td className="px-2.5 py-2 text-slate-600 bg-emerald-50/20">
-                          {row.tipo_equipo || '-'}
+                          {/* Tooltip flotante mostrando Tipo de equipo al pasar cursor (Requisito 5) */}
+                          {row.tipo_equipo && (
+                            <div className="hidden group-hover/truck:flex absolute left-full top-1/2 -translate-y-1/2 ml-2 z-50 bg-slate-900 text-white text-[11px] font-medium px-2.5 py-1.5 rounded-lg shadow-xl border border-slate-700 whitespace-nowrap items-center gap-1.5 pointer-events-none animate-in fade-in zoom-in-95">
+                              <Truck size={13} className="text-emerald-400" />
+                              <span>Tipo de equipo: <strong className="text-emerald-300 font-bold">{row.tipo_equipo}</strong></span>
+                            </div>
+                          )}
                         </td>
 
                         {/* 9. Rampla (Asignable por arrastrar camión, semirremolque o texto - Requisito 5) */}
@@ -1533,7 +1593,7 @@ export default function AssignmentControl() {
 
                   {filteredAssignments.length === 0 && (
                     <tr>
-                      <td colSpan="15" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="14" className="px-4 py-12 text-center text-slate-500">
                         No hay servicios para la fecha {activeDate}. Ve al menú <span className="font-bold text-blue-600">Planificación &gt; Asignación diaria</span> para cargar y transmitir la planilla de ruteo.
                       </td>
                     </tr>
