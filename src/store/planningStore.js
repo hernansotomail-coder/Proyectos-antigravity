@@ -296,6 +296,28 @@ const persistSavedRuteo = (data) => {
   }
 };
 
+const loadPersistedSavedBaseline = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_saved_baseline');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Object.keys(parsed).length > 0) return parsed;
+    }
+    return JSON.parse(JSON.stringify(DEFAULT_SAMPLE_ASSIGNMENTS));
+  } catch (e) {
+    console.error('Error loading saved baseline from localStorage:', e);
+    return JSON.parse(JSON.stringify(DEFAULT_SAMPLE_ASSIGNMENTS));
+  }
+};
+
+const persistSavedBaseline = (data) => {
+  try {
+    localStorage.setItem('keylogistics_saved_baseline', JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving baseline to localStorage:', e);
+  }
+};
+
 const persistHistory = (data) => {
   try {
     localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(data));
@@ -525,6 +547,8 @@ export const usePlanningStore = create((set, get) => ({
 
   // Guardados definitivos de Disponibilización transmitidos a Ruteo: { [fecha]: Array<AssignmentRow> }
   savedRuteoByDate: loadPersistedSavedRuteo(),
+  // Snapshot base para comparar modificaciones antes de guardar: { [fecha]: Array<AssignmentRow> }
+  savedRuteoBaseline: loadPersistedSavedBaseline(),
   selectedRuteoDate: '14-10-2026',
 
   // Historial de guardados para "Histórico Disponibilización"
@@ -756,8 +780,16 @@ export const usePlanningStore = create((set, get) => ({
     const dates = Object.keys(newAssignmentsByDate);
     const targetDate = transformedRoutes[0]?.fecha || dates[0] || '';
 
+    const currentBaseline = get().savedRuteoBaseline || {};
+    const updatedBaseline = { ...currentBaseline };
+    if (!updatedBaseline[targetDate] || updatedBaseline[targetDate].length === 0) {
+      updatedBaseline[targetDate] = JSON.parse(JSON.stringify(newAssignmentsByDate[targetDate] || []));
+      persistSavedBaseline(updatedBaseline);
+    }
+
     set({
       transmittedAssignments: newAssignmentsByDate,
+      savedRuteoBaseline: updatedBaseline,
       selectedDisponibilizarDate: targetDate
     });
 
@@ -943,9 +975,17 @@ export const usePlanningStore = create((set, get) => ({
     const targetDate = targetRoutes[0]?.fecha || Object.keys(newAssignmentsByDate)[0] || '14-10-2026';
     const synced = syncHistoryAndSavedForDate(get(), targetDate, newAssignmentsByDate[targetDate] || []);
 
+    const currentBaseline = get().savedRuteoBaseline || {};
+    const updatedBaseline = { ...currentBaseline };
+    if (!updatedBaseline[targetDate] || updatedBaseline[targetDate].length === 0) {
+      updatedBaseline[targetDate] = JSON.parse(JSON.stringify(newAssignmentsByDate[targetDate] || []));
+      persistSavedBaseline(updatedBaseline);
+    }
+
     set({
       transmittedAssignments: newAssignmentsByDate,
       transformedRoutes: nextTransformed,
+      savedRuteoBaseline: updatedBaseline,
       selectedDisponibilizarDate: targetDate,
       ...synced
     });
@@ -1060,9 +1100,9 @@ export const usePlanningStore = create((set, get) => ({
     toast.success(`Asignación limpiada en ${rowIds.length} fila(s)`);
   },
 
-  // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo" y guarda en histórico
+  // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo", actualiza baseline y guarda en histórico
   saveDisponibilizacion: (fecha) => {
-    const { transmittedAssignments } = get();
+    const { transmittedAssignments, savedRuteoBaseline } = get();
     const rows = transmittedAssignments[fecha] || [];
 
     if (rows.length === 0) {
@@ -1071,9 +1111,15 @@ export const usePlanningStore = create((set, get) => ({
     }
 
     const synced = syncHistoryAndSavedForDate(get(), fecha, rows);
+    const updatedBaseline = {
+      ...(savedRuteoBaseline || {}),
+      [fecha]: JSON.parse(JSON.stringify(rows))
+    };
+    persistSavedBaseline(updatedBaseline);
 
     set({
       ...synced,
+      savedRuteoBaseline: updatedBaseline,
       selectedRuteoDate: fecha
     });
 
@@ -1091,7 +1137,28 @@ export const usePlanningStore = create((set, get) => ({
     return true;
   },
 
-  // Limpiar historial de cambios
+  // Eliminar una fila individual del Histórico de cambios
+  deleteChangeHistoryRow: (id) => {
+    const current = get().changeHistoryList || [];
+    const updated = current.filter(item => item.id !== id);
+    persistChangeHistory(updated);
+    set({ changeHistoryList: updated });
+    toast.success('Registro de auditoría eliminado');
+    return true;
+  },
+
+  // Eliminar lote de filas del Histórico de cambios
+  deleteBatchChangeHistory: (ids) => {
+    const idSet = new Set(ids);
+    const current = get().changeHistoryList || [];
+    const updated = current.filter(item => !idSet.has(item.id));
+    persistChangeHistory(updated);
+    set({ changeHistoryList: updated });
+    toast.success(`${ids.length} registro(s) eliminado(s) del historial`);
+    return true;
+  },
+
+  // Limpiar historial de cambios completo
   clearChangeHistory: () => {
     persistChangeHistory([]);
     set({ changeHistoryList: [] });

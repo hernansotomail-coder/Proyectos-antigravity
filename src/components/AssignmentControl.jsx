@@ -267,6 +267,7 @@ export default function AssignmentControl() {
     selectedDisponibilizarDate, 
     setSelectedDisponibilizarDate,
     savedRuteoByDate,
+    savedRuteoBaseline,
     savedHistoryList,
     updateAssignmentField,
     batchUpdateRows,
@@ -920,7 +921,7 @@ export default function AssignmentControl() {
     }
   };
 
-  // AUDITORÍA Y GUARDADO CON POP-UP ALERT (Requisito 2)
+  // AUDITORÍA Y GUARDADO CON POP-UP ALERT (Requisito 2 y 3)
   const handlePreSave = () => {
     const currentRows = assignmentsForDate;
     if (currentRows.length === 0) {
@@ -928,7 +929,8 @@ export default function AssignmentControl() {
       return;
     }
 
-    const prevSavedRows = savedRuteoByDate[activeDate] || [];
+    // Usar savedRuteoBaseline como punto de comparación fiel (el estado previo al inicio de las modificaciones)
+    const prevSavedRows = savedRuteoBaseline?.[activeDate] || savedRuteoByDate?.[activeDate] || [];
     const prevSavedEntry = (savedHistoryList || []).find(h => h.fecha === activeDate);
     const horaAntigua = prevSavedEntry?.savedAt || 'Guardado inicial (09:00:00)';
     const horaModificada = new Date().toLocaleString('es-CL');
@@ -936,19 +938,19 @@ export default function AssignmentControl() {
 
     const incomplete = currentRows.filter(r => !r.conductor_name || !r.camion);
 
-    // Comparar cada fila para detectar cambios
+    // Comparar cada fila contra el baseline para detectar cambios reales
     const changes = [];
     currentRows.forEach(row => {
       const prev = prevSavedRows.find(p => p.id === row.id || String(p.ruta).trim() === String(row.ruta).trim());
       
-      const condAnt = prev?.conductor_name || 'Sin Asignar';
-      const condMod = row.conductor_name || 'Sin Asignar';
+      const condAnt = prev?.conductor_name ? prev.conductor_name.trim() : 'Sin Asignar';
+      const condMod = row.conductor_name ? row.conductor_name.trim() : 'Sin Asignar';
       
-      const auxAnt = [prev?.aux1_name, prev?.aux2_name].filter(Boolean).join(', ') || 'Sin Asignar';
-      const auxMod = [row.aux1_name, row.aux2_name].filter(Boolean).join(', ') || 'Sin Asignar';
+      const auxAnt = [prev?.aux1_name, prev?.aux2_name].filter(Boolean).map(s => s.trim()).join(', ') || 'Sin Asignar';
+      const auxMod = [row.aux1_name, row.aux2_name].filter(Boolean).map(s => s.trim()).join(', ') || 'Sin Asignar';
       
-      const camAnt = prev?.camion || 'Sin Asignar';
-      const camMod = row.camion || 'Sin Asignar';
+      const camAnt = prev?.camion ? prev.camion.trim() : 'Sin Asignar';
+      const camMod = row.camion ? row.camion.trim() : 'Sin Asignar';
       
       const vAnt = prev?.n_vuelta ? `Vuelta ${prev.n_vuelta}` : 'Sin Vuelta';
       const vMod = row.n_vuelta ? `Vuelta ${row.n_vuelta}` : 'Sin Vuelta';
@@ -988,10 +990,13 @@ export default function AssignmentControl() {
   };
 
   const confirmAuditAndSave = () => {
+    // Filtrar solo las filas que efectivamente sufrieron modificaciones respecto a la base anterior
     const entriesToRecord = auditData.changes.filter(c => c.isDiff);
-    const records = entriesToRecord.length > 0 ? entriesToRecord : auditData.changes;
     
-    recordChangeAudit(records);
+    if (entriesToRecord.length > 0) {
+      recordChangeAudit(entriesToRecord);
+    }
+    
     saveDisponibilizacion(activeDate);
     setIsAuditModalOpen(false);
 
@@ -2243,7 +2248,7 @@ export default function AssignmentControl() {
 
       {/* POP-UP MODAL DE AUDITORÍA Y ALERTA AL GUARDAR DISPONIBILIZACIÓN (Requisito 2) */}
       {isAuditModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-5 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
             {/* Header */}
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">

@@ -5,10 +5,11 @@ import {
   Upload, FileSpreadsheet, Sparkles, Send, CheckCircle2, 
   ChevronRight, ChevronDown, Search, ArrowRight, Table, 
   Layers, Package, MapPin, Calendar, Clock, AlertCircle,
-  GitFork, Scissors, Plus, X, CheckSquare, Square, CornerDownRight
+  GitFork, Scissors, Plus, X, CheckSquare, Square, CornerDownRight, User
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 
 // Componente de Badge para columna Ambiente (Requisitos 2 y 3)
@@ -48,11 +49,21 @@ export default function DailyPlanning() {
     aperturarRuta,
     transmitSpecificRoutesToDisponibilizacion
   } = usePlanningStore();
+  const { user } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState(isTransformed ? 'ruteo' : 'carga'); // 'carga' | 'ruteo'
   const [expandedRoute, setExpandedRoute] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Pop-up modal de Confirmación y Alerta de Transmisión a Disponibilización (Requisito 3)
+  const [isTransmitModalOpen, setIsTransmitModalOpen] = useState(false);
+  const [transmitModalData, setTransmitModalData] = useState({
+    type: 'all', // 'all' | 'specific' | 'modified'
+    routeIds: [],
+    routes: [],
+    fecha: ''
+  });
 
   // Handle Excel file upload
   const handleFileUpload = (e) => {
@@ -127,40 +138,77 @@ export default function DailyPlanning() {
     }
   };
 
-  // Transmit ALL to Disponibilización
-  const handleTransmit = () => {
-    const ok = transmitToDisponibilizacion();
-    if (ok) {
-      toast.success('Rutas transmitidas. Redirigiendo a Disponibilización...', {
-        action: {
-          label: 'Ir Ahora',
-          onClick: () => navigate('/assignment')
-        }
-      });
+  // Abrir Modal de Confirmación para Transmitir Todo (Requisito 3)
+  const promptTransmitAll = () => {
+    if (!transformedRoutes || transformedRoutes.length === 0) {
+      toast.error('No hay rutas transformadas para transmitir.');
+      return;
     }
+    setTransmitModalData({
+      type: 'all',
+      routeIds: transformedRoutes.map(r => r.id),
+      routes: transformedRoutes,
+      fecha: transformedRoutes[0]?.fecha || '14-10-2026'
+    });
+    setIsTransmitModalOpen(true);
   };
 
-  // Transmit ONLY specific routes (Requisito 4: mantiene el resto en Disponibilización)
-  const handleTransmitSpecific = (routeIds) => {
-    const ok = transmitSpecificRoutesToDisponibilizacion(routeIds);
-    if (ok) {
-      toast.success('Ruta(s) transmitida(s) a Disponibilización manteniendo el resto intacto.', {
-        action: {
-          label: 'Ver Disponibilización',
-          onClick: () => navigate('/assignment')
-        }
-      });
-    }
-  };
-
-  // Transmit ALL modified/aperturadas routes (Requisito 4)
-  const handleTransmitModified = () => {
+  // Abrir Modal de Confirmación para Transmitir Modificadas (Requisito 3)
+  const promptTransmitModified = () => {
     const modified = transformedRoutes.filter(r => r.isModified);
     if (modified.length === 0) {
       toast.info('No hay rutas modificadas o aperturadas pendientes de transmitir.');
       return;
     }
-    handleTransmitSpecific(modified.map(r => r.id));
+    setTransmitModalData({
+      type: 'modified',
+      routeIds: modified.map(r => r.id),
+      routes: modified,
+      fecha: modified[0]?.fecha || '14-10-2026'
+    });
+    setIsTransmitModalOpen(true);
+  };
+
+  // Abrir Modal de Confirmación para Transmitir una ruta específica (Requisito 3)
+  const promptTransmitSpecific = (routeIds) => {
+    const targetRoutes = transformedRoutes.filter(r => routeIds.includes(r.id));
+    if (targetRoutes.length === 0) {
+      toast.error('No se encontraron las rutas seleccionadas.');
+      return;
+    }
+    setTransmitModalData({
+      type: 'specific',
+      routeIds,
+      routes: targetRoutes,
+      fecha: targetRoutes[0]?.fecha || '14-10-2026'
+    });
+    setIsTransmitModalOpen(true);
+  };
+
+  // Acción confirmada dentro de la ventana flotante
+  const confirmTransmitAction = () => {
+    setIsTransmitModalOpen(false);
+    if (transmitModalData.type === 'all') {
+      const ok = transmitToDisponibilizacion();
+      if (ok) {
+        toast.success('Rutas transmitidas a Disponibilización exitosamente.', {
+          action: {
+            label: 'Ver Disponibilización',
+            onClick: () => navigate('/assignment')
+          }
+        });
+      }
+    } else {
+      const ok = transmitSpecificRoutesToDisponibilizacion(transmitModalData.routeIds);
+      if (ok) {
+        toast.success(`Transmitido a Disponibilización: ${transmitModalData.routes.length} ruta(s). El resto se mantuvo intacto.`, {
+          action: {
+            label: 'Ver Disponibilización',
+            onClick: () => navigate('/assignment')
+          }
+        });
+      }
+    }
   };
 
   // Filter transformed routes
@@ -248,7 +296,7 @@ export default function DailyPlanning() {
 
           {activeTab === 'ruteo' && transformedRoutes.length > 0 && (
             <Button 
-              onClick={handleTransmit}
+              onClick={promptTransmitAll}
               className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 shadow-sm text-xs font-bold px-4 py-2"
             >
               <Send size={15} />
@@ -434,7 +482,7 @@ export default function DailyPlanning() {
                 {/* Botón Transmitir Modificadas (Requisito 4) */}
                 {countModified > 0 && (
                   <Button 
-                    onClick={handleTransmitModified}
+                    onClick={promptTransmitModified}
                     className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm animate-pulse"
                     title="Transmite solo las rutas que fueron aperturadas o modificadas, manteniendo el resto en Disponibilización intacto"
                   >
@@ -444,7 +492,7 @@ export default function DailyPlanning() {
                 )}
 
                 <Button 
-                  onClick={handleTransmit}
+                  onClick={promptTransmitAll}
                   className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm"
                   title="Transmite todas las rutas a Disponibilización"
                 >
@@ -518,7 +566,7 @@ export default function DailyPlanning() {
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => handleTransmitSpecific([route.id])}
+                                onClick={() => promptTransmitSpecific([route.id])}
                                 className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 transition-colors shadow-2xs"
                                 title="Transmitir solo esta ruta a Disponibilización manteniendo el resto intacto"
                               >
@@ -595,6 +643,139 @@ export default function DailyPlanning() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL FLOTANTE DE ALERTA DE TRANSMISIÓN A DISPONIBILIZACIÓN (Requisito 3) */}
+      {isTransmitModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full p-5 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                  <Send size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 leading-tight">
+                    Confirmar Transmisión a Disponibilización — Planificación
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Revisa las rutas consolidadas antes de transmitirlas a Disponibilización de Transporte.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsTransmitModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Metadatos */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-3 shrink-0">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Usuario</span>
+                <span className="text-xs font-black text-slate-800 flex items-center gap-1 mt-0.5 truncate">
+                  <User size={13} className="text-blue-600 shrink-0" />
+                  {user?.name || user?.username || 'Hernán Soto'}
+                </span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Fecha Planif.</span>
+                <span className="text-xs font-black text-blue-700 flex items-center gap-1 mt-0.5">
+                  <Calendar size={13} className="shrink-0" />
+                  {transmitModalData.fecha || '14-10-2026'}
+                </span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Rutas a Cargar</span>
+                <span className="text-xs font-black text-indigo-700 block mt-0.5">
+                  {transmitModalData.routes.length} ruta(s)
+                </span>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Volumen Total</span>
+                <span className="text-xs font-mono font-bold text-emerald-800 block mt-0.5">
+                  {transmitModalData.routes.reduce((acc, r) => acc + (parseFloat(r.sumaVolumen) || 0), 0).toFixed(4)} m³
+                </span>
+              </div>
+            </div>
+
+            {/* Tabla resumen de rutas a transmitir */}
+            <div className="flex-1 overflow-hidden border border-slate-200 rounded-xl flex flex-col min-h-0 bg-white shadow-inner">
+              <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 flex items-center justify-between text-xs text-slate-700 font-bold shrink-0">
+                <span>Rutas Seleccionadas ({transmitModalData.routes.length})</span>
+                <span className="text-[11px] font-normal text-slate-500">
+                  {transmitModalData.type === 'all' ? 'Transmisión completa' : 'Transmisión parcial'}
+                </span>
+              </div>
+              <div className="flex-1 overflow-auto">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 font-bold sticky top-0 z-10 text-[11px] border-b border-slate-200">
+                    <tr>
+                      <th className="px-3 py-2">Ruta</th>
+                      <th className="px-3 py-2">Cliente / Nombre Ruta</th>
+                      <th className="px-3 py-2">Transportista</th>
+                      <th className="px-3 py-2 text-center">Ambientes</th>
+                      <th className="px-3 py-2 text-center">Destinos</th>
+                      <th className="px-3 py-2 text-right">m³</th>
+                      <th className="px-3 py-2 text-right">Peso (kg)</th>
+                      <th className="px-3 py-2 text-right">Cajas (CJ)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {transmitModalData.routes.map(r => (
+                      <tr key={r.id} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 font-mono font-black text-slate-900">
+                          <span className="bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">{r.ruta}</span>
+                        </td>
+                        <td className="px-3 py-2 font-semibold text-slate-700 max-w-[200px] truncate" title={r.nombreRuta}>
+                          {r.nombreRuta}
+                        </td>
+                        <td className="px-3 py-2 text-slate-600 font-bold">{r.transportista || 'T300'}</td>
+                        <td className="px-3 py-2 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            {(r.ambientes || []).map(amb => (
+                              <AmbienteBadge key={amb} ambiente={amb} />
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-center font-bold text-slate-700">{r.recuentoDestino}</td>
+                        <td className="px-3 py-2 text-right font-mono font-bold text-emerald-700">{r.sumaVolumen}</td>
+                        <td className="px-3 py-2 text-right font-mono text-slate-600">{r.sumaPeso}</td>
+                        <td className="px-3 py-2 text-right font-mono text-slate-600">{r.sumaCantCJ}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer buttons */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 shrink-0 mt-3">
+              <span className="text-[11px] text-slate-500">
+                Al confirmar, las rutas se cargarán en <strong className="text-slate-700">Disponibilización</strong> y podrás asignar choferes y camiones.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsTransmitModalOpen(false)}
+                  className="text-xs"
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={confirmTransmitAction}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                >
+                  <Send size={14} />
+                  Confirmar y Transmitir a Disponibilización
+                </Button>
+              </div>
             </div>
           </div>
         </div>

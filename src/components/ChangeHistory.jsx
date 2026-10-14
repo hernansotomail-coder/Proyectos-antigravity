@@ -2,15 +2,24 @@ import React, { useState, useMemo } from 'react';
 import { 
   History, Search, Filter, Download, Calendar, User, 
   Truck, ArrowRight, RefreshCw, ExternalLink, FileSpreadsheet, 
-  FileText, Shield, Layers, CheckCircle2, ChevronDown
+  FileText, Shield, Layers, CheckCircle2, ChevronDown, Trash2,
+  AlertTriangle, Lock, CheckSquare, Square, X
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { usePlanningStore } from '../store/planningStore';
+import { useAuthStore, canUserDeleteHistory } from '../store/authStore';
 import { Button } from './ui/Button';
 
 export default function ChangeHistory() {
-  const { changeHistoryList = [], clearChangeHistory } = usePlanningStore();
+  const { 
+    changeHistoryList = [], 
+    deleteChangeHistoryRow, 
+    deleteBatchChangeHistory, 
+    clearChangeHistory 
+  } = usePlanningStore();
+  const { user } = useAuthStore();
+  const isAuthorized = useMemo(() => canUserDeleteHistory(user), [user]);
 
   const [activeTab, setActiveTab] = useState('audit'); // 'audit' | 'asignaciones_cliente'
   const [searchTerm, setSearchTerm] = useState('');
@@ -18,6 +27,18 @@ export default function ChangeHistory() {
   const [filterUser, setFilterUser] = useState('TODOS');
   const [filterConductor, setFilterConductor] = useState('TODOS');
   const [filterCamion, setFilterCamion] = useState('TODOS');
+
+  // Multi-selection de filas para eliminación masiva
+  const [selectedIds, setSelectedIds] = useState([]);
+
+  // Modal de confirmación para eliminar
+  const [confirmDeleteModal, setConfirmDeleteModal] = useState({
+    isOpen: false,
+    type: 'single', // 'single' | 'batch' | 'all'
+    targetId: null,
+    targetRuta: '',
+    count: 0
+  });
 
   // Iframe key for reload
   const [iframeKey, setIframeKey] = useState(1);
@@ -86,7 +107,92 @@ export default function ChangeHistory() {
   const rutasDistintas = useMemo(() => {
     return new Set(changeHistoryList.map(item => item.ruta)).size;
   }, [changeHistoryList]);
-  const ultimoRegistro = changeHistoryList[0] || null;
+
+  // Manejo de Selección para borrado
+  const allFilteredSelected = useMemo(() => {
+    if (filteredRecords.length === 0) return false;
+    return filteredRecords.every(r => selectedIds.includes(r.id));
+  }, [filteredRecords, selectedIds]);
+
+  const toggleSelectAllFiltered = () => {
+    if (allFilteredSelected) {
+      const filteredIdSet = new Set(filteredRecords.map(r => r.id));
+      setSelectedIds(prev => prev.filter(id => !filteredIdSet.has(id)));
+    } else {
+      const newIds = new Set([...selectedIds, ...filteredRecords.map(r => r.id)]);
+      setSelectedIds(Array.from(newIds));
+    }
+  };
+
+  const toggleSelectRow = (id) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  // Triggers de Confirmación de Borrado
+  const promptDeleteSingle = (record) => {
+    if (!isAuthorized) {
+      toast.error('No tienes permisos para eliminar registros del histórico.');
+      return;
+    }
+    setConfirmDeleteModal({
+      isOpen: true,
+      type: 'single',
+      targetId: record.id,
+      targetRuta: record.ruta,
+      count: 1
+    });
+  };
+
+  const promptDeleteBatch = () => {
+    if (!isAuthorized) {
+      toast.error('No tienes permisos para eliminar registros del histórico.');
+      return;
+    }
+    if (selectedIds.length === 0) {
+      toast.warning('Selecciona una o más filas para eliminar.');
+      return;
+    }
+    setConfirmDeleteModal({
+      isOpen: true,
+      type: 'batch',
+      targetId: null,
+      targetRuta: '',
+      count: selectedIds.length
+    });
+  };
+
+  const promptClearAll = () => {
+    if (!isAuthorized) {
+      toast.error('No tienes permisos para vaciar el historial.');
+      return;
+    }
+    setConfirmDeleteModal({
+      isOpen: true,
+      type: 'all',
+      targetId: null,
+      targetRuta: '',
+      count: changeHistoryList.length
+    });
+  };
+
+  const handleConfirmDelete = () => {
+    if (!isAuthorized) return;
+
+    if (confirmDeleteModal.type === 'single' && confirmDeleteModal.targetId) {
+      deleteChangeHistoryRow(confirmDeleteModal.targetId);
+      setSelectedIds(prev => prev.filter(id => id !== confirmDeleteModal.targetId));
+    } else if (confirmDeleteModal.type === 'batch') {
+      deleteBatchChangeHistory(selectedIds);
+      setSelectedIds([]);
+    } else if (confirmDeleteModal.type === 'all') {
+      clearChangeHistory();
+      setSelectedIds([]);
+    }
+
+    setConfirmDeleteModal({ isOpen: false, type: 'single', targetId: null, targetRuta: '', count: 0 });
+  };
 
   // Exportar a Excel
   const handleExportExcel = () => {
@@ -139,13 +245,24 @@ export default function ChangeHistory() {
               <History className="text-blue-600" size={22} />
               Histórico de Cambios
             </h1>
+            {isAuthorized ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200 px-2 py-0.5 rounded-full" title="Usuario con permisos para eliminar registros">
+                <Shield size={11} />
+                Control Superadmin / Autorizado
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full" title="Solo superadmin o usuarios autorizados pueden eliminar">
+                <Lock size={10} />
+                Solo Lectura
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             Registro y auditoría de modificaciones de dotación, camiones y rutas al guardar disponibilización.
           </p>
         </div>
 
-        {/* Tab switchers */}
+        {/* Tab switchers y Acciones de Cabecera */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex bg-slate-100 p-1 rounded-xl">
             <button
@@ -182,14 +299,38 @@ export default function ChangeHistory() {
           </div>
 
           {activeTab === 'audit' && (
-            <Button
-              onClick={handleExportExcel}
-              variant="outline"
-              className="flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border-emerald-200"
-            >
-              <Download size={14} />
-              Exportar Excel
-            </Button>
+            <div className="flex items-center gap-2">
+              {isAuthorized && selectedIds.length > 0 && (
+                <Button
+                  onClick={promptDeleteBatch}
+                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm px-3 py-1.5 rounded-xl animate-in fade-in"
+                >
+                  <Trash2 size={13} />
+                  Eliminar Seleccionados ({selectedIds.length})
+                </Button>
+              )}
+
+              {isAuthorized && changeHistoryList.length > 0 && (
+                <Button
+                  onClick={promptClearAll}
+                  variant="outline"
+                  className="text-xs text-red-600 hover:bg-red-50 border-red-200 flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
+                  title="Vaciar todo el historial de cambios (Solo usuarios autorizados)"
+                >
+                  <Trash2 size={13} />
+                  Vaciar Todo
+                </Button>
+              )}
+
+              <Button
+                onClick={handleExportExcel}
+                variant="outline"
+                className="flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border-emerald-200 rounded-xl"
+              >
+                <Download size={14} />
+                Exportar Excel
+              </Button>
+            </div>
           )}
 
           {activeTab === 'asignaciones_cliente' && (
@@ -203,7 +344,7 @@ export default function ChangeHistory() {
               </button>
               <Button
                 onClick={() => window.open('/asignaciones-por-cliente.html', '_blank')}
-                className="flex items-center gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                className="flex items-center gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm rounded-xl"
               >
                 <ExternalLink size={13} />
                 Abrir en Ventana Completa
@@ -241,41 +382,37 @@ export default function ChangeHistory() {
 
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
               <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Último Usuario</p>
-                <p className="text-sm font-black text-slate-800 truncate max-w-[130px]">
-                  {ultimoRegistro?.usuario || 'Sin registros'}
-                </p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
-                <User size={20} />
-              </div>
-            </div>
-
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Última Modificación</p>
-                <p className="text-xs font-mono font-bold text-emerald-700 truncate max-w-[140px]">
-                  {ultimoRegistro?.horaModificada || 'N/A'}
-                </p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fechas Registradas</p>
+                <p className="text-2xl font-black text-emerald-700">{availableDates.length}</p>
               </div>
               <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
                 <Calendar size={20} />
               </div>
             </div>
+
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Usuarios Modificadores</p>
+                <p className="text-2xl font-black text-purple-700">{availableUsers.length}</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                <User size={20} />
+              </div>
+            </div>
           </div>
 
-          {/* Filter Bar */}
-          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
-            <div className="flex items-center gap-2 flex-wrap flex-1">
+          {/* Filters Bar */}
+          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-2 flex-wrap">
               {/* Search */}
               <div className="relative">
-                <Search className="absolute left-2.5 top-2 text-slate-400" size={13} />
+                <Search className="absolute left-2.5 top-2.5 text-slate-400" size={13} />
                 <input
                   type="text"
-                  placeholder="Buscar ruta, cliente, conductor o usuario..."
+                  placeholder="Buscar ruta, cliente, usuario..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-7 pr-3 py-1 text-xs border border-slate-200 rounded-lg w-64 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 w-56"
                 />
               </div>
 
@@ -283,7 +420,7 @@ export default function ChangeHistory() {
               <select
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 text-slate-700 focus:outline-none"
+                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 focus:outline-none font-medium"
               >
                 <option value="TODAS">Fecha: Todas</option>
                 {availableDates.map(d => (
@@ -295,7 +432,7 @@ export default function ChangeHistory() {
               <select
                 value={filterUser}
                 onChange={(e) => setFilterUser(e.target.value)}
-                className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 text-slate-700 focus:outline-none"
+                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 focus:outline-none max-w-[150px]"
               >
                 <option value="TODOS">Usuario: Todos</option>
                 {availableUsers.map(u => (
@@ -307,7 +444,7 @@ export default function ChangeHistory() {
               <select
                 value={filterConductor}
                 onChange={(e) => setFilterConductor(e.target.value)}
-                className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 text-slate-700 focus:outline-none max-w-[160px]"
+                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 focus:outline-none max-w-[160px]"
               >
                 <option value="TODOS">Conductor: Todos</option>
                 {availableConductores.map(c => (
@@ -319,7 +456,7 @@ export default function ChangeHistory() {
               <select
                 value={filterCamion}
                 onChange={(e) => setFilterCamion(e.target.value)}
-                className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 text-slate-700 focus:outline-none max-w-[140px]"
+                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 focus:outline-none max-w-[140px]"
               >
                 <option value="TODOS">Camión: Todos</option>
                 {availableCamiones.map(c => (
@@ -354,6 +491,17 @@ export default function ChangeHistory() {
               <table className="w-full text-left text-xs whitespace-nowrap">
                 <thead className="bg-slate-100 text-slate-600 font-bold sticky top-0 z-10 text-[11px] border-b border-slate-200">
                   <tr>
+                    {isAuthorized && (
+                      <th className="px-3 py-2.5 w-8 text-center">
+                        <input
+                          type="checkbox"
+                          checked={allFilteredSelected}
+                          onChange={toggleSelectAllFiltered}
+                          className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer"
+                          title="Seleccionar todos los registros filtrados"
+                        />
+                      </th>
+                    )}
                     <th className="px-3 py-2.5">#</th>
                     <th className="px-3 py-2.5">Fecha Planif.</th>
                     <th className="px-3 py-2.5 text-emerald-800">Hora Modificada</th>
@@ -365,6 +513,9 @@ export default function ChangeHistory() {
                     <th className="px-3 py-2.5 text-indigo-700">Auxiliar (Antiguo ➔ Modificado)</th>
                     <th className="px-3 py-2.5 text-emerald-700">Camión (Antiguo ➔ Modificado)</th>
                     <th className="px-3 py-2.5 text-center text-amber-800">N° Vuelta</th>
+                    {isAuthorized && (
+                      <th className="px-3 py-2.5 text-center text-red-700">Acción</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -373,9 +524,20 @@ export default function ChangeHistory() {
                     const isAuxDiff = r.auxiliarAntiguo !== r.auxiliarModificado;
                     const isCamDiff = r.camionAntiguo !== r.camionModificado;
                     const isVueltaDiff = r.vueltaAntigua !== r.vueltaModificada;
+                    const isSelected = selectedIds.includes(r.id);
 
                     return (
-                      <tr key={r.id || idx} className="hover:bg-blue-50/30 transition-colors">
+                      <tr key={r.id || idx} className={`hover:bg-blue-50/30 transition-colors ${isSelected ? 'bg-blue-50/40' : ''}`}>
+                        {isAuthorized && (
+                          <td className="px-3 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectRow(r.id)}
+                              className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 cursor-pointer"
+                            />
+                          </td>
+                        )}
                         <td className="px-3 py-2 text-slate-400 font-mono text-[10px]">{idx + 1}</td>
                         <td className="px-3 py-2 font-bold text-blue-700">{r.fechaPlanificacion}</td>
                         <td className="px-3 py-2 font-mono font-bold text-emerald-700 text-[11px]">
@@ -399,7 +561,7 @@ export default function ChangeHistory() {
                           {r.destino}
                         </td>
 
-                        {/* Conductor */}
+                        {/* Conductor Antiguo ➔ Modificado */}
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1 text-[11px]">
                             <span className="text-slate-400 line-through text-[10px] max-w-[110px] truncate" title={`Antiguo: ${r.conductorAntiguo}`}>
@@ -414,7 +576,7 @@ export default function ChangeHistory() {
                           </div>
                         </td>
 
-                        {/* Auxiliar */}
+                        {/* Auxiliar Antiguo ➔ Modificado */}
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1 text-[11px]">
                             <span className="text-slate-400 line-through text-[10px] max-w-[100px] truncate" title={`Antiguo: ${r.auxiliarAntiguo}`}>
@@ -429,7 +591,7 @@ export default function ChangeHistory() {
                           </div>
                         </td>
 
-                        {/* Camión */}
+                        {/* Camión Antiguo ➔ Modificado */}
                         <td className="px-3 py-2">
                           <div className="flex items-center gap-1 text-[11px]">
                             <span className="text-slate-400 line-through text-[10px] max-w-[90px] truncate" title={`Antiguo: ${r.camionAntiguo}`}>
@@ -460,13 +622,27 @@ export default function ChangeHistory() {
                             </span>
                           </div>
                         </td>
+
+                        {/* Botón de eliminación por fila */}
+                        {isAuthorized && (
+                          <td className="px-3 py-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => promptDeleteSingle(r)}
+                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title={`Eliminar este registro de auditoría (Ruta ${r.ruta})`}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
 
                   {filteredRecords.length === 0 && (
                     <tr>
-                      <td colSpan="11" className="p-8 text-center text-slate-400 italic">
+                      <td colSpan={isAuthorized ? 13 : 11} className="p-8 text-center text-slate-400 italic">
                         No se encontraron registros de cambios con los filtros seleccionados.
                       </td>
                     </tr>
@@ -519,6 +695,56 @@ export default function ChangeHistory() {
               title="Asignaciones por Cliente"
               className="w-full h-full border-0"
             />
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL FLOTANTE DE CONFIRMACIÓN DE ELIMINACIÓN */}
+      {confirmDeleteModal.isOpen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-5 flex flex-col animate-in fade-in zoom-in-95">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle size={22} />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-bold text-base text-slate-900">
+                  {confirmDeleteModal.type === 'all' 
+                    ? '¿Vaciar Histórico Completo?' 
+                    : confirmDeleteModal.type === 'batch'
+                    ? `¿Eliminar ${confirmDeleteModal.count} registros seleccionados?`
+                    : `¿Eliminar registro de la Ruta ${confirmDeleteModal.targetRuta}?`}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  {confirmDeleteModal.type === 'all'
+                    ? 'Esta acción eliminará todos los registros de auditoría almacenados. No se podrá deshacer.'
+                    : 'Esta acción borrará definitivamente este(os) registro(s) de auditoría del histórico.'}
+                </p>
+              </div>
+              <button 
+                onClick={() => setConfirmDeleteModal({ isOpen: false, type: 'single', targetId: null, targetRuta: '', count: 0 })}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="flex justify-end gap-2.5 mt-5 pt-3 border-t border-slate-100">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmDeleteModal({ isOpen: false, type: 'single', targetId: null, targetRuta: '', count: 0 })}
+                className="text-xs"
+              >
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleConfirmDelete}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
+              >
+                <Trash2 size={14} />
+                Sí, Eliminar
+              </Button>
+            </div>
           </div>
         </div>
       )}

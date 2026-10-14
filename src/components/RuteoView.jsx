@@ -3,10 +3,12 @@ import * as XLSX from 'xlsx';
 import { 
   Download, Calendar, Search, Filter, Layers, 
   MapPin, User, Truck, Package, Weight, CheckCircle2,
-  ChevronDown, ChevronRight, ArrowUpDown, FileSpreadsheet, RefreshCw, X, Check
+  ChevronDown, ChevronRight, ArrowUpDown, FileSpreadsheet, RefreshCw, X, Check,
+  Save, AlertTriangle, History
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
+import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 
@@ -165,10 +167,25 @@ function MultiSelectFilter({ label, options, selectedValues, onChange, placehold
 export default function RuteoView() {
   const { 
     savedRuteoByDate, 
+    savedRuteoBaseline,
+    savedHistoryList,
     transmittedAssignments, 
     selectedRuteoDate, 
-    setSelectedRuteoDate 
+    setSelectedRuteoDate,
+    saveDisponibilizacion,
+    recordChangeAudit
   } = usePlanningStore();
+  const { user } = useAuthStore();
+
+  // Modal de Auditoría de Cambios al Guardar desde Ruteo (Requisito 3)
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [auditData, setAuditData] = useState({
+    changes: [],
+    incompleteList: [],
+    usuario: '',
+    horaAntigua: '',
+    horaModificada: ''
+  });
 
   // Fechas disponibles
   const availableDates = useMemo(() => {
@@ -180,6 +197,82 @@ export default function RuteoView() {
   }, [savedRuteoByDate, transmittedAssignments]);
 
   const activeDate = selectedRuteoDate || availableDates[0] || '14-10-2026';
+
+  // Handler para abrir modal de auditoría al Guardar Disponibilización desde Ruteo
+  const handlePreSaveFromRuteo = () => {
+    const currentRows = transmittedAssignments[activeDate] || savedRuteoByDate[activeDate] || [];
+    if (currentRows.length === 0) {
+      toast.warning(`No hay datos en la fecha ${activeDate} para guardar.`);
+      return;
+    }
+
+    const prevSavedRows = savedRuteoBaseline?.[activeDate] || savedRuteoByDate?.[activeDate] || [];
+    const prevSavedEntry = (savedHistoryList || []).find(h => h.fecha === activeDate);
+    const horaAntigua = prevSavedEntry?.savedAt || 'Guardado inicial (09:00:00)';
+    const horaModificada = new Date().toLocaleString('es-CL');
+    const usuario = user?.name || user?.username || 'Hernán Soto';
+
+    const incomplete = currentRows.filter(r => !r.conductor_name || !r.camion);
+
+    const changes = [];
+    currentRows.forEach(row => {
+      const prev = prevSavedRows.find(p => p.id === row.id || String(p.ruta).trim() === String(row.ruta).trim());
+      
+      const condAnt = prev?.conductor_name ? prev.conductor_name.trim() : 'Sin Asignar';
+      const condMod = row.conductor_name ? row.conductor_name.trim() : 'Sin Asignar';
+      
+      const auxAnt = [prev?.aux1_name, prev?.aux2_name].filter(Boolean).map(s => s.trim()).join(', ') || 'Sin Asignar';
+      const auxMod = [row.aux1_name, row.aux2_name].filter(Boolean).map(s => s.trim()).join(', ') || 'Sin Asignar';
+      
+      const camAnt = prev?.camion ? prev.camion.trim() : 'Sin Asignar';
+      const camMod = row.camion ? row.camion.trim() : 'Sin Asignar';
+      
+      const vAnt = prev?.n_vuelta ? `Vuelta ${prev.n_vuelta}` : 'Sin Vuelta';
+      const vMod = row.n_vuelta ? `Vuelta ${row.n_vuelta}` : 'Sin Vuelta';
+
+      const isDiff = !prev || condAnt !== condMod || auxAnt !== auxMod || camAnt !== camMod || vAnt !== vMod;
+
+      changes.push({
+        id: `ch-${activeDate}-${row.ruta}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        fechaPlanificacion: activeDate,
+        fechaHoraModificacion: horaModificada,
+        horaAntigua,
+        horaModificada,
+        usuario,
+        ruta: row.ruta,
+        destino: row.cliente || `Ruta ${row.ruta}`,
+        conductorAntiguo: condAnt,
+        conductorModificado: condMod,
+        auxiliarAntiguo: auxAnt,
+        auxiliarModificado: auxMod,
+        camionAntiguo: camAnt,
+        camionModificado: camMod,
+        vueltaAntigua: vAnt,
+        vueltaModificada: vMod,
+        isDiff
+      });
+    });
+
+    setAuditData({
+      changes,
+      incompleteList: incomplete,
+      usuario,
+      horaAntigua,
+      horaModificada
+    });
+
+    setIsAuditModalOpen(true);
+  };
+
+  const confirmAuditAndSaveFromRuteo = () => {
+    const entriesToRecord = auditData.changes.filter(c => c.isDiff);
+    if (entriesToRecord.length > 0) {
+      recordChangeAudit(entriesToRecord);
+    }
+    saveDisponibilizacion(activeDate);
+    setIsAuditModalOpen(false);
+    toast.success('¡Disponibilización guardada y registrada en Histórico de cambios!');
+  };
 
   // Rutas de la fecha activa (con fallback automático a ensureRowTransportista)
   const currentRoutes = useMemo(() => {
@@ -470,8 +563,18 @@ export default function RuteoView() {
 
         <div className="flex items-center gap-2">
           <Button 
+            onClick={handlePreSaveFromRuteo}
+            className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm transition-all"
+            title="Guardar disponibilización y generar auditoría de cambios con pop-up"
+          >
+            <Save size={15} />
+            Guardar Disponibilización
+          </Button>
+
+          <Button 
             onClick={handleExportExcel}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm transition-all"
+            variant="outline"
+            className="flex items-center gap-2 text-slate-700 hover:bg-slate-100 text-xs font-bold px-3.5 py-2 rounded-xl border-slate-200 shadow-2xs transition-all"
           >
             <Download size={15} />
             Exportar Reporte Excel
@@ -787,6 +890,208 @@ export default function RuteoView() {
           )}
         </div>
       </div>
+
+      {/* POP-UP MODAL DE AUDITORÍA Y ALERTA AL GUARDAR DISPONIBILIZACIÓN DESDE RUTEO (Requisito 3) */}
+      {isAuditModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-5 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <History size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 leading-tight">
+                    Auditoría y Registro de Modificaciones — Ruteo
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Revisa las modificaciones detectadas antes de sincronizar con Ruteo y el Histórico de Cambios.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsAuditModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Audit Metadata Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 my-3 shrink-0">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Usuario Modificador</span>
+                <span className="text-xs font-black text-slate-800 flex items-center gap-1 mt-0.5 truncate">
+                  <User size={13} className="text-blue-600 shrink-0" />
+                  {auditData.usuario}
+                </span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Fecha Planificación</span>
+                <span className="text-xs font-black text-blue-700 flex items-center gap-1 mt-0.5">
+                  <Calendar size={13} className="shrink-0" />
+                  {activeDate}
+                </span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Hora Anterior</span>
+                <span className="text-[11px] font-mono text-slate-600 truncate block mt-0.5" title={auditData.horaAntigua}>
+                  {auditData.horaAntigua}
+                </span>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Hora Modificada</span>
+                <span className="text-[11px] font-mono font-bold text-emerald-800 truncate block mt-0.5" title={auditData.horaModificada}>
+                  {auditData.horaModificada}
+                </span>
+              </div>
+            </div>
+
+            {/* Comparison Table */}
+            <div className="flex-1 overflow-hidden border border-slate-200 rounded-xl flex flex-col min-h-0 bg-white shadow-inner">
+              <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 flex items-center justify-between text-xs text-slate-700 font-bold shrink-0">
+                <span>Detalle de Rutas y Asignaciones ({auditData.changes.length} servicios)</span>
+                <span className="text-[11px] font-normal text-slate-500">
+                  {auditData.changes.filter(c => c.isDiff).length} modificadas / {auditData.changes.length} totales
+                </span>
+              </div>
+
+              <div className="flex-1 overflow-auto">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 font-bold sticky top-0 z-10 text-[11px] border-b border-slate-200">
+                    <tr>
+                      <th className="px-2.5 py-2">Ruta</th>
+                      <th className="px-2.5 py-2">Destino / Cliente</th>
+                      <th className="px-2.5 py-2">Conductor (Antiguo ➔ Modificado)</th>
+                      <th className="px-2.5 py-2">Auxiliar (Antiguo ➔ Modificado)</th>
+                      <th className="px-2.5 py-2">Camión (Antiguo ➔ Modificado)</th>
+                      <th className="px-2.5 py-2 text-center">N° Vuelta</th>
+                      <th className="px-2.5 py-2">Usuario</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {auditData.changes.map((item) => {
+                      const isCondDiff = item.conductorAntiguo !== item.conductorModificado;
+                      const isAuxDiff = item.auxiliarAntiguo !== item.auxiliarModificado;
+                      const isCamDiff = item.camionAntiguo !== item.camionModificado;
+                      const isVueltaDiff = item.vueltaAntigua !== item.vueltaModificada;
+
+                      return (
+                        <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${item.isDiff ? 'bg-blue-50/20' : ''}`}>
+                          <td className="px-2.5 py-2 font-black text-slate-900 font-mono">
+                            <span className="bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 text-xs">
+                              {item.ruta}
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-2 font-semibold text-slate-700 max-w-[160px] truncate" title={item.destino}>
+                            {item.destino}
+                          </td>
+                          
+                          {/* Conductor Antiguo vs Modificado */}
+                          <td className="px-2.5 py-2">
+                            <div className="flex items-center gap-1 text-[11px]">
+                              <span className="text-slate-400 line-through text-[10px] max-w-[110px] truncate" title={`Antiguo: ${item.conductorAntiguo}`}>
+                                {item.conductorAntiguo}
+                              </span>
+                              <span className="text-slate-300">➔</span>
+                              <span className={`font-bold px-1.5 py-0.5 rounded text-[11px] max-w-[130px] truncate ${
+                                isCondDiff 
+                                  ? 'bg-blue-100 text-blue-900 border border-blue-300' 
+                                  : 'text-slate-700'
+                              }`} title={`Modificado: ${item.conductorModificado}`}>
+                                {item.conductorModificado}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Auxiliar Antiguo vs Modificado */}
+                          <td className="px-2.5 py-2">
+                            <div className="flex items-center gap-1 text-[11px]">
+                              <span className="text-slate-400 line-through text-[10px] max-w-[100px] truncate" title={`Antiguo: ${item.auxiliarAntiguo}`}>
+                                {item.auxiliarAntiguo}
+                              </span>
+                              <span className="text-slate-300">➔</span>
+                              <span className={`font-bold px-1.5 py-0.5 rounded text-[11px] max-w-[120px] truncate ${
+                                isAuxDiff 
+                                  ? 'bg-indigo-100 text-indigo-900 border border-indigo-300' 
+                                  : 'text-slate-700'
+                              }`} title={`Modificado: ${item.auxiliarModificado}`}>
+                                {item.auxiliarModificado}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Camión Antiguo vs Modificado */}
+                          <td className="px-2.5 py-2">
+                            <div className="flex items-center gap-1 text-[11px]">
+                              <span className="text-slate-400 line-through text-[10px] max-w-[90px] truncate" title={`Antiguo: ${item.camionAntiguo}`}>
+                                {item.camionAntiguo}
+                              </span>
+                              <span className="text-slate-300">➔</span>
+                              <span className={`font-bold px-1.5 py-0.5 rounded text-[11px] max-w-[110px] truncate ${
+                                isCamDiff 
+                                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' 
+                                  : 'text-slate-700'
+                              }`} title={`Modificado: ${item.camionModificado}`}>
+                                {item.camionModificado}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Vuelta */}
+                          <td className="px-2.5 py-2 text-center">
+                            <div className="flex items-center justify-center gap-1 text-[11px]">
+                              {isVueltaDiff && (
+                                <>
+                                  <span className="text-slate-400 line-through text-[10px]">{item.vueltaAntigua}</span>
+                                  <span className="text-slate-300">➔</span>
+                                </>
+                              )}
+                              <span className={`font-black px-1.5 py-0.5 rounded text-[10px] ${
+                                isVueltaDiff ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'text-slate-700'
+                              }`}>
+                                {item.vueltaModificada}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-2.5 py-2 text-slate-600 font-semibold text-[11px]">
+                            {item.usuario}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 shrink-0 mt-3">
+              <span className="text-[11px] text-slate-500">
+                Se guardará una copia de auditoría en <strong className="text-slate-700 font-bold">Histórico de cambios</strong>.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsAuditModalOpen(false)}
+                  className="text-xs"
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={confirmAuditAndSaveFromRuteo}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                >
+                  <Save size={14} />
+                  Confirmar y Guardar Cambios
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
