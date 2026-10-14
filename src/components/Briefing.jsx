@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   FileText, Calendar, CheckSquare, MessageSquare, AlertTriangle, 
-  Printer, ShieldCheck, Truck, Users, Clock, CheckCircle2 
+  Printer, ShieldCheck, Truck, Users, Clock, CheckCircle2, ExternalLink 
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { usePlanningStore } from '../store/planningStore';
@@ -50,6 +50,16 @@ export default function Briefing() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={() => window.open('/asignaciones-por-cliente.html', '_blank')}
+            className="flex items-center gap-1.5 text-xs text-indigo-700 hover:text-indigo-900 border-indigo-200 hover:bg-indigo-50 font-bold"
+            title="Abrir Asignaciones por Cliente en ventana completa"
+          >
+            <ExternalLink size={14} />
+            Asignaciones por Cliente
+          </Button>
+
           <Button 
             variant="outline" 
             onClick={() => window.print()}

@@ -30,6 +30,7 @@ export default function Layout() {
   const planificacionItems = [
     { name: 'Asignación diaria', path: '/daily-planning', icon: Layers },
     { name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
+    { name: 'Histórico de cambios', path: '/change-history', icon: History },
     { name: 'Briefing', path: '/briefing', icon: FileText },
   ];
 

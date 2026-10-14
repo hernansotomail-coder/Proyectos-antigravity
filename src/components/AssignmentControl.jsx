@@ -4,14 +4,39 @@ import {
   Filter, Search, RefreshCw, User, Truck, MapPin, 
   ChevronUp, ChevronDown, ChevronRight, CheckCircle2, Circle, Check,
   Calendar, Layers, Trash2, ArrowRight, UserCheck, Shield, Sparkles,
-  Save, Eye, Download, Send, AlertTriangle, X
+  Save, Eye, Download, Send, AlertTriangle, X, Scissors, History, CheckSquare
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore } from '../store/fleetStore';
 import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
 import { useAttendanceStore } from '../store/attendanceStore';
+import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
+
+// Badge para columna Ambiente
+export function AmbienteBadge({ ambiente }) {
+  const amb = String(ambiente || 'S').trim().toUpperCase();
+  if (amb === 'C') {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded font-black text-[10px] bg-sky-100 text-sky-800 border border-sky-300 shadow-2xs" title="Congelado (C)">
+        C
+      </span>
+    );
+  }
+  if (amb === 'R') {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded font-black text-[10px] bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs" title="Refrigerado (R)">
+        R
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded font-black text-[10px] bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs" title="Seco (S)">
+      S
+    </span>
+  );
+}
 
 // COMPONENTE MULTI-SELECT DROPDOWN COMPACTO (Requisito 2)
 function CompactMultiSelect({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
@@ -233,6 +258,7 @@ const getTruckDocumentHealth = (truck) => {
 
 export default function AssignmentControl() {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
   const { staffList, fetchStaff } = useStaffStore();
   const { fleetList, fetchFleet } = useFleetStore();
   const { attendanceList, fetchAttendanceByDateRange } = useAttendanceStore();
@@ -240,13 +266,17 @@ export default function AssignmentControl() {
     transmittedAssignments, 
     selectedDisponibilizarDate, 
     setSelectedDisponibilizarDate,
+    savedRuteoByDate,
+    savedHistoryList,
     updateAssignmentField,
     batchUpdateRows,
     assignStaffToRows,
     assignTruckToRows,
     assignRamplaToRows,
     clearSlotFromRows,
-    saveDisponibilizacion
+    saveDisponibilizacion,
+    recordChangeAudit,
+    aperturarRutaEnDisponibilizacion
   } = usePlanningStore();
 
   const availableDates = useMemo(() => {
@@ -355,6 +385,25 @@ export default function AssignmentControl() {
   // Pop-up modal de confirmación al guardar
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [incompleteRoutesList, setIncompleteRoutesList] = useState([]);
+
+  // Pop-up modal de Auditoría de Cambios al Guardar Disponibilización (Requisito 2)
+  const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [auditData, setAuditData] = useState({
+    changes: [],
+    incompleteList: [],
+    usuario: '',
+    horaAntigua: '',
+    horaModificada: ''
+  });
+
+  // Modal "Aperturar Ruta" en Disponibilización (Requisito 1)
+  const [isAperturarModalOpen, setIsAperturarModalOpen] = useState(false);
+  const [aperturarSourceId, setAperturarSourceId] = useState('');
+  const [aperturarNewRouteNumber, setAperturarNewRouteNumber] = useState('');
+  const [aperturarNewRouteName, setAperturarNewRouteName] = useState('');
+  const [aperturarNewTransportista, setAperturarNewTransportista] = useState('');
+  const [aperturarSelectedParadaIds, setAperturarSelectedParadaIds] = useState([]);
+  const [aperturarFilterAmbiente, setAperturarFilterAmbiente] = useState('TODOS');
 
   // Filas expandidas en el Resumen inferior (por clave Conductor:::Vuelta)
   const [expandedSummaryKeys, setExpandedSummaryKeys] = useState({});
@@ -794,28 +843,164 @@ export default function AssignmentControl() {
     toast.success(`Vuelta ${vueltaNum} asignada a ${selectedRowIds.length} fila(s)`);
   };
 
-  // Guardar con Validación y Pop-up
-  const handlePreSave = () => {
-    const incomplete = assignmentsForDate.filter(r => !r.conductor_name || !r.camion);
-    if (incomplete.length > 0) {
-      setIncompleteRoutesList(incomplete);
-      setIsConfirmModalOpen(true);
+  // APERTURAR RUTA MODAL HANDLERS EN DISPONIBILIZACIÓN (Requisito 1)
+  const handleOpenAperturarModal = (preselectedRow = null) => {
+    const source = preselectedRow || assignmentsForDate[0] || null;
+    if (source) {
+      setAperturarSourceId(source.id);
+      setAperturarNewRouteNumber(`${source.ruta}-B`);
+      setAperturarNewRouteName(`${source.cliente || `Ruta ${source.ruta}`} (Aperturada)`);
+      setAperturarNewTransportista(source.transportista || '');
+      setAperturarSelectedParadaIds([]);
+      setAperturarFilterAmbiente('TODOS');
     } else {
-      executeSave();
+      setAperturarSourceId('');
+      setAperturarNewRouteNumber('');
+      setAperturarNewRouteName('');
+      setAperturarNewTransportista('');
+      setAperturarSelectedParadaIds([]);
+      setAperturarFilterAmbiente('TODOS');
+    }
+    setIsAperturarModalOpen(true);
+  };
+
+  const currentAperturarSource = useMemo(() => {
+    return assignmentsForDate.find(r => r.id === aperturarSourceId) || assignmentsForDate[0] || null;
+  }, [assignmentsForDate, aperturarSourceId]);
+
+  const toggleSelectAperturarParada = (paradaId) => {
+    setAperturarSelectedParadaIds(prev => 
+      prev.includes(paradaId) ? prev.filter(id => id !== paradaId) : [...prev, paradaId]
+    );
+  };
+
+  const handleSelectAllAperturarParadas = () => {
+    if (!currentAperturarSource?.paradas) return;
+    const allIds = currentAperturarSource.paradas.map((p, idx) => p.id || `${currentAperturarSource.ruta}-${idx}`);
+    setAperturarSelectedParadaIds(allIds);
+  };
+
+  const handleClearAllAperturarParadas = () => {
+    setAperturarSelectedParadaIds([]);
+  };
+
+  const handleSelectAperturarParadasByAmbiente = (amb) => {
+    if (!currentAperturarSource?.paradas) return;
+    const matchingIds = currentAperturarSource.paradas
+      .filter(p => !amb || amb === 'TODOS' || p.ambiente === amb)
+      .map((p, idx) => p.id || `${currentAperturarSource.ruta}-${idx}`);
+    setAperturarSelectedParadaIds(prev => Array.from(new Set([...prev, ...matchingIds])));
+  };
+
+  const handleConfirmAperturar = () => {
+    if (!currentAperturarSource) {
+      toast.error('Selecciona una ruta de origen');
+      return;
+    }
+    if (!aperturarNewRouteNumber.trim()) {
+      toast.error('Ingresa una nueva numeración para la ruta (Ej: 1611-B)');
+      return;
+    }
+    if (aperturarSelectedParadaIds.length === 0) {
+      toast.error('Debes seleccionar al menos una fila/parada para mover a la nueva ruta');
+      return;
+    }
+
+    const ok = aperturarRutaEnDisponibilizacion(
+      activeDate,
+      currentAperturarSource.id,
+      aperturarNewRouteNumber.trim(),
+      aperturarNewRouteName.trim(),
+      aperturarNewTransportista.trim(),
+      aperturarSelectedParadaIds
+    );
+
+    if (ok) {
+      setIsAperturarModalOpen(false);
     }
   };
 
-  const executeSave = () => {
-    setIsConfirmModalOpen(false);
-    const ok = saveDisponibilizacion(activeDate);
-    if (ok) {
-      toast.success('¡Disponibilización guardada! Transmitida a Ruteo.', {
-        action: {
-          label: 'Ver en Ruteo',
-          onClick: () => navigate('/ruteo')
-        }
-      });
+  // AUDITORÍA Y GUARDADO CON POP-UP ALERT (Requisito 2)
+  const handlePreSave = () => {
+    const currentRows = assignmentsForDate;
+    if (currentRows.length === 0) {
+      toast.warning(`No hay datos en la fecha ${activeDate} para guardar.`);
+      return;
     }
+
+    const prevSavedRows = savedRuteoByDate[activeDate] || [];
+    const prevSavedEntry = (savedHistoryList || []).find(h => h.fecha === activeDate);
+    const horaAntigua = prevSavedEntry?.savedAt || 'Guardado inicial (09:00:00)';
+    const horaModificada = new Date().toLocaleString('es-CL');
+    const usuario = user?.name || user?.username || 'Hernán Soto';
+
+    const incomplete = currentRows.filter(r => !r.conductor_name || !r.camion);
+
+    // Comparar cada fila para detectar cambios
+    const changes = [];
+    currentRows.forEach(row => {
+      const prev = prevSavedRows.find(p => p.id === row.id || String(p.ruta).trim() === String(row.ruta).trim());
+      
+      const condAnt = prev?.conductor_name || 'Sin Asignar';
+      const condMod = row.conductor_name || 'Sin Asignar';
+      
+      const auxAnt = [prev?.aux1_name, prev?.aux2_name].filter(Boolean).join(', ') || 'Sin Asignar';
+      const auxMod = [row.aux1_name, row.aux2_name].filter(Boolean).join(', ') || 'Sin Asignar';
+      
+      const camAnt = prev?.camion || 'Sin Asignar';
+      const camMod = row.camion || 'Sin Asignar';
+      
+      const vAnt = prev?.n_vuelta ? `Vuelta ${prev.n_vuelta}` : 'Sin Vuelta';
+      const vMod = row.n_vuelta ? `Vuelta ${row.n_vuelta}` : 'Sin Vuelta';
+
+      const isDiff = !prev || condAnt !== condMod || auxAnt !== auxMod || camAnt !== camMod || vAnt !== vMod;
+
+      changes.push({
+        id: `ch-${activeDate}-${row.ruta}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        fechaPlanificacion: activeDate,
+        fechaHoraModificacion: horaModificada,
+        horaAntigua,
+        horaModificada,
+        usuario,
+        ruta: row.ruta,
+        destino: row.cliente || `Ruta ${row.ruta}`,
+        conductorAntiguo: condAnt,
+        conductorModificado: condMod,
+        auxiliarAntiguo: auxAnt,
+        auxiliarModificado: auxMod,
+        camionAntiguo: camAnt,
+        camionModificado: camMod,
+        vueltaAntigua: vAnt,
+        vueltaModificada: vMod,
+        isDiff
+      });
+    });
+
+    setAuditData({
+      changes,
+      incompleteList: incomplete,
+      usuario,
+      horaAntigua,
+      horaModificada
+    });
+
+    setIsAuditModalOpen(true);
+  };
+
+  const confirmAuditAndSave = () => {
+    const entriesToRecord = auditData.changes.filter(c => c.isDiff);
+    const records = entriesToRecord.length > 0 ? entriesToRecord : auditData.changes;
+    
+    recordChangeAudit(records);
+    saveDisponibilizacion(activeDate);
+    setIsAuditModalOpen(false);
+
+    toast.success('¡Disponibilización guardada y registrada en Histórico de cambios!', {
+      action: {
+        label: 'Ver Histórico',
+        onClick: () => navigate('/change-history')
+      }
+    });
   };
 
   // Drag and drop handlers
@@ -967,6 +1152,15 @@ export default function AssignmentControl() {
               × Limpiar
             </button>
           )}
+
+          <Button 
+            onClick={() => handleOpenAperturarModal()}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl"
+            title="Aperturar / dividir una ruta quitando filas/paradas hacia una nueva numeración"
+          >
+            <Scissors size={13} />
+            Aperturar Ruta
+          </Button>
 
           <Button 
             onClick={handlePreSave}
@@ -1362,6 +1556,17 @@ export default function AssignmentControl() {
                                 ({row.paradas.length})
                               </span>
                             )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenAperturarModal(row);
+                              }}
+                              className="opacity-0 group-hover/route:opacity-100 text-slate-400 hover:text-blue-600 hover:bg-blue-50 p-0.5 rounded transition-all ml-0.5"
+                              title="Aperturar / dividir paradas de esta ruta"
+                            >
+                              <Scissors size={11} />
+                            </button>
                           </div>
 
                           {/* Comentario flotante con Destino, Dirección y Comuna (Permite interactuar y hacer scroll) */}
@@ -2036,48 +2241,481 @@ export default function AssignmentControl() {
 
       </div>
 
-      {/* POP-UP MODAL DE ADVERTENCIA AL GUARDAR */}
-      {isConfirmModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95">
-            <div className="flex items-center gap-3 text-amber-600 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 flex items-center justify-center shrink-0">
-                <AlertTriangle size={24} />
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-slate-800">
-                  ¿Está seguro que desea guardar esta información?
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Existen {incompleteRoutesList.length} servicio(s) sin Conductor y/o Camión asignado.
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 my-4 max-h-48 overflow-y-auto space-y-1.5">
-              {incompleteRoutesList.map(r => (
-                <div key={r.id} className="text-xs flex items-center justify-between text-slate-700 bg-white p-2 rounded border border-slate-100">
-                  <span className="font-bold">Ruta {r.ruta} - {r.cliente}</span>
-                  <span className="text-[10px] text-amber-700 font-semibold">
-                    {[!r.conductor_name && 'Sin Chofer', !r.camion && 'Sin Camión'].filter(Boolean).join(' / ')}
-                  </span>
+      {/* POP-UP MODAL DE AUDITORÍA Y ALERTA AL GUARDAR DISPONIBILIZACIÓN (Requisito 2) */}
+      {isAuditModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-5 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                  <History size={22} />
                 </div>
-              ))}
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 leading-tight">
+                    Auditoría y Registro de Modificaciones — Disponibilización
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Revisa las modificaciones detectadas antes de sincronizar con Ruteo y el Histórico de Cambios.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsAuditModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            {/* Audit Metadata Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 my-3 shrink-0">
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Usuario Modificador</span>
+                <span className="text-xs font-black text-slate-800 flex items-center gap-1 mt-0.5">
+                  <User size={13} className="text-blue-600" />
+                  {auditData.usuario}
+                </span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Fecha Planificación</span>
+                <span className="text-xs font-black text-blue-700 flex items-center gap-1 mt-0.5">
+                  <Calendar size={13} />
+                  {activeDate}
+                </span>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Hora Anterior</span>
+                <span className="text-[11px] font-mono text-slate-600 truncate block mt-0.5" title={auditData.horaAntigua}>
+                  {auditData.horaAntigua}
+                </span>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5">
+                <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Hora Modificada</span>
+                <span className="text-[11px] font-mono font-bold text-emerald-800 truncate block mt-0.5" title={auditData.horaModificada}>
+                  {auditData.horaModificada}
+                </span>
+              </div>
+            </div>
+
+            {/* Incomplete warning banner if any */}
+            {auditData.incompleteList.length > 0 && (
+              <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-3 flex items-start gap-2.5 text-amber-900 shrink-0">
+                <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs">
+                  <p className="font-bold">
+                    ¿Está seguro que desea guardar esta información?
+                  </p>
+                  <p className="text-amber-800 text-[11px] mt-0.5">
+                    Existen <strong className="font-bold">{auditData.incompleteList.length} ruta(s)</strong> sin Conductor y/o Camión asignado (
+                    {auditData.incompleteList.map(r => `Ruta ${r.ruta}`).join(', ')}).
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Comparison Table */}
+            <div className="flex-1 overflow-hidden border border-slate-200 rounded-xl flex flex-col min-h-0 bg-white shadow-inner">
+              <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 flex items-center justify-between text-xs text-slate-700 font-bold shrink-0">
+                <span>Detalle de Rutas y Asignaciones ({auditData.changes.length} servicios)</span>
+                <span className="text-[11px] font-normal text-slate-500">
+                  {auditData.changes.filter(c => c.isDiff).length} modificadas / {auditData.changes.length} totales
+                </span>
+              </div>
+
+              <div className="flex-1 overflow-auto">
+                <table className="w-full text-left text-xs whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 font-bold sticky top-0 z-10 text-[11px] border-b border-slate-200">
+                    <tr>
+                      <th className="px-2.5 py-2">Ruta</th>
+                      <th className="px-2.5 py-2">Destino / Cliente</th>
+                      <th className="px-2.5 py-2">Conductor (Antiguo ➔ Modificado)</th>
+                      <th className="px-2.5 py-2">Auxiliar (Antiguo ➔ Modificado)</th>
+                      <th className="px-2.5 py-2">Camión (Antiguo ➔ Modificado)</th>
+                      <th className="px-2.5 py-2 text-center">N° Vuelta</th>
+                      <th className="px-2.5 py-2">Usuario</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {auditData.changes.map((item) => {
+                      const isCondDiff = item.conductorAntiguo !== item.conductorModificado;
+                      const isAuxDiff = item.auxiliarAntiguo !== item.auxiliarModificado;
+                      const isCamDiff = item.camionAntiguo !== item.camionModificado;
+                      const isVueltaDiff = item.vueltaAntigua !== item.vueltaModificada;
+
+                      return (
+                        <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${item.isDiff ? 'bg-blue-50/20' : ''}`}>
+                          <td className="px-2.5 py-2 font-black text-slate-900 font-mono">
+                            <span className="bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 text-xs">
+                              {item.ruta}
+                            </span>
+                          </td>
+                          <td className="px-2.5 py-2 font-semibold text-slate-700 max-w-[160px] truncate" title={item.destino}>
+                            {item.destino}
+                          </td>
+                          
+                          {/* Conductor Antiguo vs Modificado */}
+                          <td className="px-2.5 py-2">
+                            <div className="flex items-center gap-1 text-[11px]">
+                              <span className="text-slate-400 line-through text-[10px] max-w-[110px] truncate" title={`Antiguo: ${item.conductorAntiguo}`}>
+                                {item.conductorAntiguo}
+                              </span>
+                              <span className="text-slate-300">➔</span>
+                              <span className={`font-bold px-1.5 py-0.5 rounded text-[11px] max-w-[130px] truncate ${
+                                isCondDiff 
+                                  ? 'bg-blue-100 text-blue-900 border border-blue-300' 
+                                  : 'text-slate-700'
+                              }`} title={`Modificado: ${item.conductorModificado}`}>
+                                {item.conductorModificado}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Auxiliar Antiguo vs Modificado */}
+                          <td className="px-2.5 py-2">
+                            <div className="flex items-center gap-1 text-[11px]">
+                              <span className="text-slate-400 line-through text-[10px] max-w-[100px] truncate" title={`Antiguo: ${item.auxiliarAntiguo}`}>
+                                {item.auxiliarAntiguo}
+                              </span>
+                              <span className="text-slate-300">➔</span>
+                              <span className={`font-bold px-1.5 py-0.5 rounded text-[11px] max-w-[120px] truncate ${
+                                isAuxDiff 
+                                  ? 'bg-indigo-100 text-indigo-900 border border-indigo-300' 
+                                  : 'text-slate-700'
+                              }`} title={`Modificado: ${item.auxiliarModificado}`}>
+                                {item.auxiliarModificado}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Camión Antiguo vs Modificado */}
+                          <td className="px-2.5 py-2">
+                            <div className="flex items-center gap-1 text-[11px]">
+                              <span className="text-slate-400 line-through text-[10px] max-w-[90px] truncate" title={`Antiguo: ${item.camionAntiguo}`}>
+                                {item.camionAntiguo}
+                              </span>
+                              <span className="text-slate-300">➔</span>
+                              <span className={`font-bold px-1.5 py-0.5 rounded text-[11px] max-w-[110px] truncate ${
+                                isCamDiff 
+                                  ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' 
+                                  : 'text-slate-700'
+                              }`} title={`Modificado: ${item.camionModificado}`}>
+                                {item.camionModificado}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Vuelta */}
+                          <td className="px-2.5 py-2 text-center">
+                            <div className="flex items-center justify-center gap-1 text-[11px]">
+                              {isVueltaDiff && (
+                                <>
+                                  <span className="text-slate-400 line-through text-[10px]">{item.vueltaAntigua}</span>
+                                  <span className="text-slate-300">➔</span>
+                                </>
+                              )}
+                              <span className={`font-black px-1.5 py-0.5 rounded text-[10px] ${
+                                isVueltaDiff ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'text-slate-700'
+                              }`}>
+                                {item.vueltaModificada}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-2.5 py-2 text-slate-600 font-semibold text-[11px]">
+                            {item.usuario}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 shrink-0 mt-3">
+              <span className="text-[11px] text-slate-500">
+                Se guardará una copia de auditoría en <strong className="text-slate-700 font-bold">Histórico de cambios</strong>.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsAuditModalOpen(false)}
+                  className="text-xs"
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={confirmAuditAndSave}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
+                >
+                  <Save size={14} />
+                  Confirmar y Guardar Cambios
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL APERTURAR RUTA EN DISPONIBILIZACIÓN (Requisito 1) */}
+      {isAperturarModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full p-5 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Scissors size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-800">Aperturar / Dividir Ruta en Disponibilización</h3>
+                  <p className="text-xs text-slate-500">
+                    Selecciona una ruta, quita filas/paradas y crea una nueva ruta lista para asignar dotación y camión.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsAperturarModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto py-3 space-y-3 min-h-0">
+              
+              {/* Form Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Ruta de Origen</label>
+                  <select
+                    value={aperturarSourceId}
+                    onChange={(e) => {
+                      setAperturarSourceId(e.target.value);
+                      const r = assignmentsForDate.find(x => x.id === e.target.value);
+                      if (r) {
+                        setAperturarNewRouteNumber(`${r.ruta}-B`);
+                        setAperturarNewRouteName(`${r.cliente || `Ruta ${r.ruta}`} (Aperturada)`);
+                        setAperturarNewTransportista(r.transportista || '');
+                        setAperturarSelectedParadaIds([]);
+                        setAperturarFilterAmbiente('TODOS');
+                      }
+                    }}
+                    className="w-full text-xs font-bold border border-slate-200 rounded-lg p-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {assignmentsForDate.map(r => (
+                      <option key={r.id} value={r.id}>
+                        Ruta {r.ruta} - {r.cliente} ({r.paradas?.length || 0} paradas)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-blue-700 uppercase">Nueva Numeración *</label>
+                  <input
+                    type="text"
+                    value={aperturarNewRouteNumber}
+                    onChange={(e) => setAperturarNewRouteNumber(e.target.value)}
+                    placeholder="Ej: 1611-B o 1700"
+                    className="w-full text-xs font-black border border-blue-300 rounded-lg p-1.5 bg-white text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Nombre / Cliente</label>
+                  <input
+                    type="text"
+                    value={aperturarNewRouteName}
+                    onChange={(e) => setAperturarNewRouteName(e.target.value)}
+                    placeholder="Cliente de la nueva ruta"
+                    className="w-full text-xs border border-slate-200 rounded-lg p-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Transportista</label>
+                  <input
+                    type="text"
+                    value={aperturarNewTransportista}
+                    onChange={(e) => setAperturarNewTransportista(e.target.value)}
+                    placeholder="Ej: T300 o T405"
+                    className="w-full text-xs border border-slate-200 rounded-lg p-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Table of Paradas to transfer */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
+                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    Selecciona las filas / paradas a transferir a la nueva Ruta {aperturarNewRouteNumber || '...'}:
+                  </span>
+                  <div className="flex items-center gap-2 text-xs flex-wrap">
+                    {/* Filtro por Ambiente */}
+                    <div className="flex items-center gap-1 text-[10px] bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                      <span className="text-slate-400 font-semibold px-1">Ver:</span>
+                      {['TODOS', 'C', 'R', 'S'].map(amb => (
+                        <button
+                          key={amb}
+                          type="button"
+                          onClick={() => setAperturarFilterAmbiente(amb)}
+                          className={`px-1.5 py-0.5 rounded font-black transition-colors ${
+                            aperturarFilterAmbiente === amb 
+                              ? 'bg-white text-blue-700 shadow-2xs' 
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          {amb}
+                        </button>
+                      ))}
+                    </div>
+
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={handleSelectAllAperturarParadas}
+                      className="text-blue-600 hover:text-blue-800 font-semibold"
+                    >
+                      Todas
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectAperturarParadasByAmbiente('C')}
+                      className="text-sky-700 hover:text-sky-900 font-bold"
+                      title="Seleccionar paradas de Congelado (C)"
+                    >
+                      +Solo C
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectAperturarParadasByAmbiente('R')}
+                      className="text-amber-700 hover:text-amber-900 font-bold"
+                      title="Seleccionar paradas de Refrigerado (R)"
+                    >
+                      +Solo R
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectAperturarParadasByAmbiente('S')}
+                      className="text-emerald-700 hover:text-emerald-900 font-bold"
+                      title="Seleccionar paradas de Seco (S)"
+                    >
+                      +Solo S
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={handleClearAllAperturarParadas}
+                      className="text-slate-500 hover:text-red-600 font-semibold"
+                    >
+                      Deseleccionar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
+                  <table className="w-full text-left text-xs whitespace-nowrap">
+                    <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-10 text-[11px]">
+                      <tr>
+                        <th className="px-2.5 py-1.5 w-8 text-center">✓</th>
+                        <th className="px-2 py-1.5">Sec</th>
+                        <th className="px-2 py-1.5 text-center">Ambiente</th>
+                        <th className="px-2 py-1.5">Destino</th>
+                        <th className="px-2 py-1.5">Dirección</th>
+                        <th className="px-2 py-1.5">Comuna</th>
+                        <th className="px-2 py-1.5">Horario</th>
+                        <th className="px-2 py-1.5 text-right">m³</th>
+                        <th className="px-2 py-1.5 text-right">Peso (kg)</th>
+                        <th className="px-2 py-1.5 text-right">CJ</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {(currentAperturarSource?.paradas || [])
+                        .filter(p => aperturarFilterAmbiente === 'TODOS' || p.ambiente === aperturarFilterAmbiente)
+                        .map((p, pIdx) => {
+                          const pId = p.id || `${currentAperturarSource.ruta}-${pIdx}`;
+                          const isChecked = aperturarSelectedParadaIds.includes(pId);
+                          return (
+                            <tr 
+                              key={pId} 
+                              onClick={() => toggleSelectAperturarParada(pId)}
+                              className={`cursor-pointer transition-colors ${
+                                isChecked ? 'bg-blue-50/90 font-medium' : 'hover:bg-slate-50'
+                              }`}
+                            >
+                              <td className="px-2.5 py-1 text-center" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => toggleSelectAperturarParada(pId)}
+                                  className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                                />
+                              </td>
+                              <td className="px-2 py-1 font-mono text-slate-500 text-[11px]">{p.secuencia}</td>
+                              <td className="px-2 py-1 text-center">
+                                <AmbienteBadge ambiente={p.ambiente} />
+                              </td>
+                              <td className="px-2 py-1 font-bold text-slate-800">{p.destino}</td>
+                              <td className="px-2 py-1 text-slate-500 max-w-[150px] truncate">{p.direccion}</td>
+                              <td className="px-2 py-1 text-slate-600">{p.comuna}</td>
+                              <td className="px-2 py-1 text-slate-500 font-mono text-[11px]">
+                                {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
+                              </td>
+                              <td className="px-2 py-1 text-right font-mono font-bold text-emerald-700">{p.volumen}</td>
+                              <td className="px-2 py-1 text-right font-mono text-slate-600">{p.peso}</td>
+                              <td className="px-2 py-1 text-right font-mono text-slate-600">{p.cantCJ}</td>
+                            </tr>
+                          );
+                        })}
+                      {(currentAperturarSource?.paradas || []).length === 0 && (
+                        <tr>
+                          <td colSpan="10" className="p-4 text-center text-slate-400 italic">
+                            Esta ruta no tiene paradas registradas.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Counter / Balance preview */}
+                <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-2.5 mt-2 flex items-center justify-between text-xs text-blue-900 flex-wrap gap-2">
+                  <div>
+                    <span className="font-semibold">A transferir a Ruta {aperturarNewRouteNumber || 'Nueva'}: </span>
+                    <strong className="text-blue-800 font-bold">{aperturarSelectedParadaIds.length} parada(s)</strong>
+                  </div>
+                  <div>
+                    <span className="font-semibold">Quedarán en Ruta {currentAperturarSource?.ruta}: </span>
+                    <strong className="text-slate-800 font-bold">
+                      {Math.max(0, (currentAperturarSource?.paradas?.length || 0) - aperturarSelectedParadaIds.length)} parada(s)
+                    </strong>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 shrink-0">
               <Button 
                 variant="outline" 
-                onClick={() => setIsConfirmModalOpen(false)}
+                onClick={() => setIsAperturarModalOpen(false)}
                 className="text-xs"
               >
                 Cancelar
               </Button>
               <Button 
-                onClick={executeSave}
-                className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs"
+                onClick={handleConfirmAperturar}
+                disabled={aperturarSelectedParadaIds.length === 0 || !aperturarNewRouteNumber.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
               >
-                Sí, Guardar de todas formas
+                <Scissors size={14} />
+                Confirmar y Crear Ruta {aperturarNewRouteNumber || ''}
               </Button>
             </div>
           </div>

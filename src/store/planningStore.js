@@ -364,6 +364,67 @@ const loadPersistedHistory = () => {
   }
 };
 
+const SAMPLE_CHANGE_HISTORY = [
+  {
+    id: 'ch-sample-1',
+    fechaPlanificacion: '14-10-2026',
+    fechaHoraModificacion: '14-10-2026 15:30:12',
+    horaAntigua: '14-10-2026 09:15:00',
+    horaModificada: '14-10-2026 15:30:12',
+    usuario: 'Hernán Soto',
+    ruta: '1611',
+    destino: 'RUTA CANTABRIA 02',
+    conductorAntiguo: 'Sin Asignar',
+    conductorModificado: 'AGUILERA BELTRAN SERGIO',
+    auxiliarAntiguo: 'Sin Asignar',
+    auxiliarModificado: 'ABARCA LEIVA RICARDO ANTONIO',
+    camionAntiguo: 'Sin Asignar',
+    camionModificado: 'C288 (GKPT12)',
+    vueltaAntigua: 'Sin Vuelta',
+    vueltaModificada: 'Vuelta 1'
+  },
+  {
+    id: 'ch-sample-2',
+    fechaPlanificacion: '14-10-2026',
+    fechaHoraModificacion: '14-10-2026 16:10:45',
+    horaAntigua: '14-10-2026 15:30:12',
+    horaModificada: '14-10-2026 16:10:45',
+    usuario: 'Hernán Soto',
+    ruta: '1612',
+    destino: 'RUTA CANTABRIA 03',
+    conductorAntiguo: 'Sin Asignar',
+    conductorModificado: 'AGUILERA BELTRAN SERGIO',
+    auxiliarAntiguo: 'Sin Asignar',
+    auxiliarModificado: 'Sin Asignar',
+    camionAntiguo: 'Sin Asignar',
+    camionModificado: 'C288 (GKPT12)',
+    vueltaAntigua: 'Sin Vuelta',
+    vueltaModificada: 'Vuelta 2'
+  }
+];
+
+export const loadPersistedChangeHistory = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_change_history');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+    return SAMPLE_CHANGE_HISTORY;
+  } catch (e) {
+    console.error('Error loading change history from localStorage:', e);
+    return SAMPLE_CHANGE_HISTORY;
+  }
+};
+
+export const persistChangeHistory = (data) => {
+  try {
+    localStorage.setItem('keylogistics_change_history', JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving change history to localStorage:', e);
+  }
+};
+
 const createInitialTransformedRoutes = () => {
   if (PRELOADED_EXCEL_ROUTES && PRELOADED_EXCEL_ROUTES.length > 0) {
     return PRELOADED_EXCEL_ROUTES;
@@ -469,6 +530,9 @@ export const usePlanningStore = create((set, get) => ({
   // Historial de guardados para "Histórico Disponibilización"
   savedHistoryList: loadPersistedHistory(),
 
+  // Historial de cambios y auditoría para "Histórico de cambios" (Requisito 2)
+  changeHistoryList: loadPersistedChangeHistory(),
+
   // Set Raw Rows imported from Excel Sheet1
   setRawRows: (rows, name = '') => {
     set({
@@ -494,7 +558,8 @@ export const usePlanningStore = create((set, get) => ({
       rawRows.forEach((row, idx) => {
         const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
         const ruta = String(rutaRaw).trim();
-        if (!ruta) return;
+        // Requisito 1: Considerar sólo rutas con 4 dígitos y que NO partan con 0
+        if (!/^[1-9]\d{3}$/.test(ruta)) return;
 
         const nombreRuta = String(row['Nombre Ruta'] || row.nombre_ruta || row.NombreRuta || row.Cliente || '').trim();
         const destino = String(row.Destino || row.destino || '').trim();
@@ -1013,6 +1078,125 @@ export const usePlanningStore = create((set, get) => ({
     });
 
     toast.success(`¡Disponibilización del ${fecha} guardada y transmitida a Ruteo!`);
+    return true;
+  },
+
+  // REGISTRAR AUDITORÍA DE CAMBIOS (Requisito 2)
+  recordChangeAudit: (entries) => {
+    if (!entries || !Array.isArray(entries) || entries.length === 0) return;
+    const current = get().changeHistoryList || [];
+    const updated = [...entries, ...current];
+    persistChangeHistory(updated);
+    set({ changeHistoryList: updated });
+    return true;
+  },
+
+  // Limpiar historial de cambios
+  clearChangeHistory: () => {
+    persistChangeHistory([]);
+    set({ changeHistoryList: [] });
+    toast.info('Histórico de cambios vaciado');
+  },
+
+  // APERTURAR RUTA EN DISPONIBILIZACIÓN (Requisito 1)
+  // Permite tomar paradas/filas completas de una ruta en Disponibilización y moverlas a una nueva ruta con numeración propia
+  aperturarRutaEnDisponibilizacion: (fecha, sourceRowId, newRouteNumber, newRouteName, newTransportista, selectedParadaIds, selectedAmbientes = []) => {
+    const { transmittedAssignments } = get();
+    const cleanNewNumber = String(newRouteNumber || '').trim();
+    if (!cleanNewNumber) {
+      toast.error('Debes ingresar una numeración para la nueva ruta (Ej: 1611-B, 1700)');
+      return false;
+    }
+
+    const currentRows = transmittedAssignments[fecha] || [];
+    const sourceIndex = currentRows.findIndex(r => r.id === sourceRowId || String(r.ruta).trim() === String(sourceRowId).trim());
+    if (sourceIndex < 0) {
+      toast.error('No se encontró la ruta de origen en Disponibilización');
+      return false;
+    }
+
+    const source = currentRows[sourceIndex];
+    const sourceParadas = source.paradas || [];
+    const idSet = new Set(selectedParadaIds.map(x => String(x)));
+
+    const movedParadas = [];
+    const remainingParadas = [];
+
+    sourceParadas.forEach((p, idx) => {
+      const matchId = String(p.id || `${source.ruta}-${idx}`);
+      if (idSet.has(matchId)) {
+        movedParadas.push(p);
+      } else {
+        remainingParadas.push(p);
+      }
+    });
+
+    if (movedParadas.length === 0) {
+      toast.error('Debes seleccionar al menos una parada para mover a la nueva ruta');
+      return false;
+    }
+
+    // Actualizar ruta origen con métricas recalculadas
+    const updatedSource = {
+      ...source,
+      paradas: remainingParadas,
+      locales: new Set(remainingParadas.map(p => p.destino)).size,
+      m3: Number(remainingParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0).toFixed(4)),
+      peso: Number(remainingParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0).toFixed(2)),
+      cantCJ: Math.round(remainingParadas.reduce((a, b) => a + (parseFloat(b.cantCJ) || 0), 0)),
+      isModified: true
+    };
+
+    // Crear nueva ruta aperturada con dotación y camión listos para asignar
+    const newRow = {
+      id: `disp-aperturada-${fecha}-${cleanNewNumber}-${Date.now()}`,
+      fecha: fecha,
+      conductor_name: '',
+      conductor_rut: '',
+      aux1_name: '',
+      aux1_rut: '',
+      aux2_name: '',
+      aux2_rut: '',
+      camion: '',
+      tipo_equipo: '',
+      rampla: '',
+      n_vuelta: '',
+      tipo_servicio: source.tipo_servicio || 'Distribución',
+      ruta: cleanNewNumber,
+      cliente: String(newRouteName || '').trim() || `${source.cliente} (Aperturada)`,
+      transportista: String(newTransportista || '').trim() || source.transportista || 'T300',
+      referencia: `Aperturada desde Ruta ${source.ruta}`,
+      locales: new Set(movedParadas.map(p => p.destino)).size,
+      m3: Number(movedParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0).toFixed(4)),
+      peso: Number(movedParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0).toFixed(2)),
+      cantCJ: Math.round(movedParadas.reduce((a, b) => a + (parseFloat(b.cantCJ) || 0), 0)),
+      paradas: movedParadas.map((p, pIdx) => ({
+        ...p,
+        id: `p-${cleanNewNumber}-${pIdx + 1}`,
+        secuencia: p.secuencia || pIdx + 1
+      })),
+      isModified: true,
+      isAperturada: true,
+      parentRuta: source.ruta
+    };
+
+    const nextAssignments = { ...transmittedAssignments };
+    const nextRows = [...currentRows];
+    nextRows[sourceIndex] = updatedSource;
+    nextRows.splice(sourceIndex + 1, 0, newRow);
+    nextAssignments[fecha] = nextRows;
+
+    persistAssignments(nextAssignments);
+
+    // Sincronizar en tiempo real con savedRuteo y savedHistory
+    const synced = syncHistoryAndSavedForDate(get(), fecha, nextRows);
+
+    set({
+      transmittedAssignments: nextAssignments,
+      ...synced
+    });
+
+    toast.success(`¡Ruta ${cleanNewNumber} aperturada con éxito en Disponibilización con ${movedParadas.length} parada(s)!`);
     return true;
   }
 }));

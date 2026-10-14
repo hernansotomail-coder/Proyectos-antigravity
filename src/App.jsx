@@ -16,6 +16,7 @@ import FleetDashboard from './components/FleetDashboard';
 import DailyPlanning from './components/DailyPlanning';
 import RuteoView from './components/RuteoView';
 import Briefing from './components/Briefing';
+import ChangeHistory from './components/ChangeHistory';
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
           <Route path="manage-fleet" element={<Login><ManageFleet /></Login>} />
           <Route path="daily-planning" element={<Login><DailyPlanning /></Login>} />
           <Route path="ruteo" element={<Login><RuteoView /></Login>} />
+          <Route path="change-history" element={<Login><ChangeHistory /></Login>} />
           <Route path="briefing" element={<Login><Briefing /></Login>} />
           <Route path="planning" element={<Navigate to="/daily-planning" replace />} />
           <Route path="add-staff" element={<Login><AddStaff /></Login>} />

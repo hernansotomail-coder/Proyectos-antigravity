@@ -54,16 +54,6 @@ export default function DailyPlanning() {
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Estados para Modal "Aperturar Ruta" (Requisitos 2, 3 y 4)
-  const [isAperturarModalOpen, setIsAperturarModalOpen] = useState(false);
-  const [selectedSourceRouteId, setSelectedSourceRouteId] = useState('');
-  const [newRouteNumber, setNewRouteNumber] = useState('');
-  const [newRouteName, setNewRouteName] = useState('');
-  const [newTransportista, setNewTransportista] = useState('');
-  const [selectedParadaIds, setSelectedParadaIds] = useState([]);
-  const [selectedAmbientes, setSelectedAmbientes] = useState(['C', 'R', 'S']);
-  const [filterTableAmbiente, setFilterTableAmbiente] = useState('TODOS');
-
   // Handle Excel file upload
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
@@ -82,16 +72,35 @@ export default function DailyPlanning() {
         const ws = wb.Sheets[sheetName];
         
         // Convert to JSON
-        const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const rawData = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
-        if (!data || data.length === 0) {
+        if (!rawData || rawData.length === 0) {
           toast.error('El archivo Excel no contiene filas o está vacío.');
           setIsLoading(false);
           return;
         }
 
-        setRawRows(data, file.name);
-        toast.success(`Archivo cargado: ${data.length} filas leídas de "${sheetName}"`);
+        // Requisito 1: Considerar sólo rutas con 4 dígitos y que NO partan con 0 (/^[1-9]\d{3}$/)
+        const validRows = rawData.filter(row => {
+          const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
+          const rutaStr = String(rutaRaw).trim();
+          return /^[1-9]\d{3}$/.test(rutaStr);
+        });
+
+        if (validRows.length === 0) {
+          toast.error('No se encontraron filas con rutas válidas de 4 dígitos (sin iniciar en 0).');
+          setIsLoading(false);
+          return;
+        }
+
+        const discardedCount = rawData.length - validRows.length;
+        setRawRows(validRows, file.name);
+
+        if (discardedCount > 0) {
+          toast.success(`Archivo cargado: ${validRows.length} filas válidas de 4 dígitos. Se omitieron ${discardedCount} filas con rutas no válidas.`);
+        } else {
+          toast.success(`Archivo cargado: ${validRows.length} filas leídas de "${sheetName}"`);
+        }
         setActiveTab('carga');
       } catch (err) {
         console.error('Error al leer Excel:', err);
@@ -152,93 +161,6 @@ export default function DailyPlanning() {
       return;
     }
     handleTransmitSpecific(modified.map(r => r.id));
-  };
-
-  // Aperturar Ruta Modal Handlers (Requisitos 2, 3 y 4)
-  const handleOpenAperturarModal = (preselectedRoute = null) => {
-    const source = preselectedRoute || transformedRoutes[0] || null;
-    if (source) {
-      setSelectedSourceRouteId(source.id);
-      setNewRouteNumber(`${source.ruta}-B`);
-      setNewRouteName(`${source.nombreRuta} (Aperturada)`);
-      setNewTransportista(source.transportista || '');
-      setSelectedParadaIds([]);
-      const sourceAmbs = Array.from(new Set((source.paradas || []).map(p => p.ambiente))).filter(Boolean);
-      setSelectedAmbientes(sourceAmbs.length > 0 ? sourceAmbs : ['C', 'R', 'S']);
-      setFilterTableAmbiente('TODOS');
-    } else {
-      setSelectedSourceRouteId('');
-      setNewRouteNumber('');
-      setNewRouteName('');
-      setNewTransportista('');
-      setSelectedParadaIds([]);
-      setSelectedAmbientes(['C', 'R', 'S']);
-      setFilterTableAmbiente('TODOS');
-    }
-    setIsAperturarModalOpen(true);
-  };
-
-  const currentSourceRoute = useMemo(() => {
-    return transformedRoutes.find(r => r.id === selectedSourceRouteId) || transformedRoutes[0] || null;
-  }, [transformedRoutes, selectedSourceRouteId]);
-
-  const toggleSelectParada = (paradaId) => {
-    setSelectedParadaIds(prev => 
-      prev.includes(paradaId) ? prev.filter(id => id !== paradaId) : [...prev, paradaId]
-    );
-  };
-
-  const handleSelectAllParadas = () => {
-    if (!currentSourceRoute?.paradas) return;
-    const allIds = currentSourceRoute.paradas.map((p, idx) => p.id || `${currentSourceRoute.ruta}-${idx}`);
-    setSelectedParadaIds(allIds);
-  };
-
-  const handleClearAllParadas = () => {
-    setSelectedParadaIds([]);
-  };
-
-  const handleSelectParadasByAmbiente = (amb) => {
-    if (!currentSourceRoute?.paradas) return;
-    const matchingIds = currentSourceRoute.paradas
-      .filter(p => !amb || amb === 'TODOS' || p.ambiente === amb)
-      .map((p, idx) => p.id || `${currentSourceRoute.ruta}-${idx}`);
-    setSelectedParadaIds(prev => Array.from(new Set([...prev, ...matchingIds])));
-  };
-
-  const handleConfirmAperturar = () => {
-    if (!currentSourceRoute) {
-      toast.error('Selecciona una ruta de origen');
-      return;
-    }
-    if (!newRouteNumber.trim()) {
-      toast.error('Ingresa una nueva numeración para la ruta (Ej: 1611-B)');
-      return;
-    }
-    if (selectedParadaIds.length === 0) {
-      toast.error('Debes seleccionar al menos una fila/parada para mover a la nueva ruta');
-      return;
-    }
-
-    const selectedParadasAmbientes = Array.from(new Set(
-      (currentSourceRoute.paradas || [])
-        .filter(p => selectedParadaIds.includes(p.id || `${currentSourceRoute.ruta}-${p.secuencia}`))
-        .map(p => p.ambiente)
-    ));
-
-    const ok = aperturarRuta(
-      currentSourceRoute.id,
-      newRouteNumber.trim(),
-      newRouteName.trim(),
-      newTransportista.trim(),
-      selectedParadaIds,
-      selectedParadasAmbientes
-    );
-
-    if (ok) {
-      setIsAperturarModalOpen(false);
-      setExpandedRoute(currentSourceRoute.id);
-    }
   };
 
   // Filter transformed routes
@@ -509,16 +431,6 @@ export default function DailyPlanning() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Botón Aperturar Ruta (Requisito 4) */}
-                <Button 
-                  onClick={() => handleOpenAperturarModal()}
-                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm"
-                  title="Dividir o aperturar una ruta quitando filas/paradas hacia una nueva numeración"
-                >
-                  <Scissors size={14} />
-                  Aperturar Ruta
-                </Button>
-
                 {/* Botón Transmitir Modificadas (Requisito 4) */}
                 {countModified > 0 && (
                   <Button 
@@ -606,17 +518,8 @@ export default function DailyPlanning() {
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 type="button"
-                                onClick={() => handleOpenAperturarModal(route)}
-                                className="flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-lg border border-blue-200 transition-colors"
-                                title="Aperturar / quitar paradas de esta ruta para crear una nueva"
-                              >
-                                <Scissors size={12} />
-                                Aperturar
-                              </button>
-                              <button
-                                type="button"
                                 onClick={() => handleTransmitSpecific([route.id])}
-                                className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 transition-colors"
+                                className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 transition-colors shadow-2xs"
                                 title="Transmitir solo esta ruta a Disponibilización manteniendo el resto intacto"
                               >
                                 <Send size={11} />
@@ -636,14 +539,6 @@ export default function DailyPlanning() {
                                     <MapPin size={14} className="text-red-500" />
                                     Detalle de Destinos / Paradas de Ruta {route.ruta} ({route.paradas.length} paradas):
                                   </h5>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenAperturarModal(route)}
-                                    className="text-xs font-bold text-blue-700 hover:text-blue-900 flex items-center gap-1 bg-white px-2.5 py-1 rounded-lg border border-blue-200 shadow-2xs hover:bg-blue-50"
-                                  >
-                                    <Scissors size={13} />
-                                    Aperturar ruta desde aquí
-                                  </button>
                                 </div>
                                 <div className="max-h-60 overflow-auto">
                                   <table className="w-full text-left text-[11px] whitespace-nowrap">
@@ -700,269 +595,6 @@ export default function DailyPlanning() {
                   )}
                 </tbody>
               </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* POP-UP MODAL APERTURAR RUTA (Requisito 4) */}
-      {isAperturarModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full p-5 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <Scissors size={20} />
-                </div>
-                <div>
-                  <h3 className="font-bold text-base text-slate-800">Aperturar / Dividir Ruta</h3>
-                  <p className="text-xs text-slate-500">
-                    Selecciona una ruta de origen, quita filas/paradas y asígnalas a una nueva ruta con su propia numeración.
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsAperturarModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto py-3 space-y-3 min-h-0">
-              
-              {/* Form Controls */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Ruta de Origen</label>
-                  <select
-                    value={selectedSourceRouteId}
-                    onChange={(e) => {
-                      setSelectedSourceRouteId(e.target.value);
-                      const r = transformedRoutes.find(x => x.id === e.target.value);
-                      if (r) {
-                        setNewRouteNumber(`${r.ruta}-B`);
-                        setNewRouteName(`${r.nombreRuta} (Aperturada)`);
-                        setNewTransportista(r.transportista || '');
-                        setSelectedParadaIds([]);
-                        setFilterTableAmbiente('TODOS');
-                      }
-                    }}
-                    className="w-full text-xs font-bold border border-slate-200 rounded-lg p-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    {transformedRoutes.map(r => (
-                      <option key={r.id} value={r.id}>
-                        Ruta {r.ruta} - {r.nombreRuta} ({r.paradas?.length || 0} paradas)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-bold text-blue-700 uppercase">Nueva Numeración *</label>
-                  <input
-                    type="text"
-                    value={newRouteNumber}
-                    onChange={(e) => setNewRouteNumber(e.target.value)}
-                    placeholder="Ej: 1611-B o 1700"
-                    className="w-full text-xs font-black border border-blue-300 rounded-lg p-1.5 bg-white text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Nombre / Cliente</label>
-                  <input
-                    type="text"
-                    value={newRouteName}
-                    onChange={(e) => setNewRouteName(e.target.value)}
-                    placeholder="Cliente de la nueva ruta"
-                    className="w-full text-xs border border-slate-200 rounded-lg p-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Transportista</label>
-                  <input
-                    type="text"
-                    value={newTransportista}
-                    onChange={(e) => setNewTransportista(e.target.value)}
-                    placeholder="Ej: T300 o T405"
-                    className="w-full text-xs border border-slate-200 rounded-lg p-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Table of Paradas to transfer */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5 flex-wrap gap-2">
-                  <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    Selecciona las filas / paradas a transferir a la nueva Ruta {newRouteNumber || '...'}:
-                  </span>
-                  <div className="flex items-center gap-2 text-xs flex-wrap">
-                    {/* Filtro por Ambiente para la tabla */}
-                    <div className="flex items-center gap-1 text-[10px] bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-                      <span className="text-slate-400 font-semibold px-1">Ver:</span>
-                      {['TODOS', 'C', 'R', 'S'].map(amb => (
-                        <button
-                          key={amb}
-                          type="button"
-                          onClick={() => setFilterTableAmbiente(amb)}
-                          className={`px-1.5 py-0.5 rounded font-black transition-colors ${
-                            filterTableAmbiente === amb 
-                              ? 'bg-white text-blue-700 shadow-2xs' 
-                              : 'text-slate-500 hover:text-slate-800'
-                          }`}
-                        >
-                          {amb}
-                        </button>
-                      ))}
-                    </div>
-
-                    <span className="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      onClick={handleSelectAllParadas}
-                      className="text-blue-600 hover:text-blue-800 font-semibold"
-                    >
-                      Todas
-                    </button>
-                    <span className="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectParadasByAmbiente('C')}
-                      className="text-sky-700 hover:text-sky-900 font-bold"
-                      title="Seleccionar paradas de Congelado (C)"
-                    >
-                      +Solo C
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectParadasByAmbiente('R')}
-                      className="text-amber-700 hover:text-amber-900 font-bold"
-                      title="Seleccionar paradas de Refrigerado (R)"
-                    >
-                      +Solo R
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSelectParadasByAmbiente('S')}
-                      className="text-emerald-700 hover:text-emerald-900 font-bold"
-                      title="Seleccionar paradas de Seco (S)"
-                    >
-                      +Solo S
-                    </button>
-                    <span className="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      onClick={handleClearAllParadas}
-                      className="text-slate-500 hover:text-red-600 font-semibold"
-                    >
-                      Deseleccionar
-                    </button>
-                  </div>
-                </div>
-
-                <div className="border border-slate-200 rounded-xl overflow-hidden max-h-60 overflow-y-auto">
-                  <table className="w-full text-left text-xs whitespace-nowrap">
-                    <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-10 text-[11px]">
-                      <tr>
-                        <th className="px-2.5 py-1.5 w-8 text-center">✓</th>
-                        <th className="px-2 py-1.5">Sec</th>
-                        <th className="px-2 py-1.5 text-center">Ambiente</th>
-                        <th className="px-2 py-1.5">Destino</th>
-                        <th className="px-2 py-1.5">Dirección</th>
-                        <th className="px-2 py-1.5">Comuna</th>
-                        <th className="px-2 py-1.5">Horario</th>
-                        <th className="px-2 py-1.5 text-right">m³</th>
-                        <th className="px-2 py-1.5 text-right">Peso (kg)</th>
-                        <th className="px-2 py-1.5 text-right">CJ</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {(currentSourceRoute?.paradas || [])
-                        .filter(p => filterTableAmbiente === 'TODOS' || p.ambiente === filterTableAmbiente)
-                        .map((p, pIdx) => {
-                          const pId = p.id || `${currentSourceRoute.ruta}-${pIdx}`;
-                          const isChecked = selectedParadaIds.includes(pId);
-                          return (
-                            <tr 
-                              key={pId} 
-                              onClick={() => toggleSelectParada(pId)}
-                              className={`cursor-pointer transition-colors ${
-                                isChecked ? 'bg-blue-50/90 font-medium' : 'hover:bg-slate-50'
-                              }`}
-                            >
-                              <td className="px-2.5 py-1 text-center" onClick={(e) => e.stopPropagation()}>
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => toggleSelectParada(pId)}
-                                  className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
-                                />
-                              </td>
-                              <td className="px-2 py-1 font-mono text-slate-500 text-[11px]">{p.secuencia}</td>
-                              <td className="px-2 py-1 text-center">
-                                <AmbienteBadge ambiente={p.ambiente} />
-                              </td>
-                              <td className="px-2 py-1 font-bold text-slate-800">{p.destino}</td>
-                              <td className="px-2 py-1 text-slate-500 max-w-[150px] truncate">{p.direccion}</td>
-                              <td className="px-2 py-1 text-slate-600">{p.comuna}</td>
-                              <td className="px-2 py-1 text-slate-500 font-mono text-[11px]">
-                                {p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '-'}
-                              </td>
-                              <td className="px-2 py-1 text-right font-mono font-bold text-emerald-700">{p.volumen}</td>
-                              <td className="px-2 py-1 text-right font-mono text-slate-600">{p.peso}</td>
-                              <td className="px-2 py-1 text-right font-mono text-slate-600">{p.cantCJ}</td>
-                            </tr>
-                          );
-                        })}
-                      {(currentSourceRoute?.paradas || []).length === 0 && (
-                        <tr>
-                          <td colSpan="10" className="p-4 text-center text-slate-400 italic">
-                            Esta ruta no tiene paradas registradas.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Counter / Balance preview */}
-                <div className="bg-blue-50/60 border border-blue-200 rounded-xl p-2.5 mt-2 flex items-center justify-between text-xs text-blue-900 flex-wrap gap-2">
-                  <div>
-                    <span className="font-semibold">A transferir a Ruta {newRouteNumber || 'Nueva'}: </span>
-                    <strong className="text-blue-800 font-bold">{selectedParadaIds.length} parada(s)</strong>
-                  </div>
-                  <div>
-                    <span className="font-semibold">Quedarán en Ruta {currentSourceRoute?.ruta}: </span>
-                    <strong className="text-slate-800 font-bold">
-                      {Math.max(0, (currentSourceRoute?.paradas?.length || 0) - selectedParadaIds.length)} parada(s)
-                    </strong>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Footer Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 shrink-0">
-              <Button 
-                variant="outline" 
-                onClick={() => setIsAperturarModalOpen(false)}
-                className="text-xs"
-              >
-                Cancelar
-              </Button>
-              <Button 
-                onClick={handleConfirmAperturar}
-                disabled={selectedParadaIds.length === 0 || !newRouteNumber.trim()}
-                className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm"
-              >
-                <Scissors size={14} />
-                Confirmar y Crear Ruta {newRouteNumber || ''}
-              </Button>
             </div>
           </div>
         </div>
