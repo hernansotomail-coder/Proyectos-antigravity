@@ -163,17 +163,26 @@ function MultiSelectFilter({ label, options, selectedValues, onChange, placehold
 }
 
 export default function HistoricalAssignment() {
-  const { savedHistoryList, savedRuteoByDate } = usePlanningStore();
+  const { savedHistoryList, savedRuteoByDate, transmittedAssignments } = usePlanningStore();
 
   // Fechas disponibles en el historial
   const historyDates = useMemo(() => {
     const set = new Set();
-    savedHistoryList.forEach(h => set.add(h.fecha));
+    (savedHistoryList || []).forEach(h => set.add(h.fecha));
     Object.keys(savedRuteoByDate || {}).forEach(f => set.add(f));
+    Object.keys(transmittedAssignments || {}).forEach(f => set.add(f));
     return Array.from(set).sort().reverse();
-  }, [savedHistoryList, savedRuteoByDate]);
+  }, [savedHistoryList, savedRuteoByDate, transmittedAssignments]);
 
   const [selectedDate, setSelectedDate] = useState(historyDates[0] || '14-10-2026');
+
+  // Mantener fecha válida si cambian las fechas
+  useEffect(() => {
+    if (historyDates.length > 0 && !historyDates.includes(selectedDate)) {
+      setSelectedDate(historyDates[0]);
+    }
+  }, [historyDates, selectedDate]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedKeys, setExpandedKeys] = useState({});
 
@@ -184,14 +193,17 @@ export default function HistoricalAssignment() {
   const [selectedCamiones, setSelectedCamiones] = useState([]);
   const [selectedVueltas, setSelectedVueltas] = useState([]);
 
-  // Filas base de la fecha seleccionada
+  // Filas base de la fecha seleccionada (Sincronizado en tiempo real con Disponibilización)
   const activeRecords = useMemo(() => {
-    const histEntry = savedHistoryList.find(h => h.fecha === selectedDate);
-    if (histEntry && histEntry.rows) {
+    if (transmittedAssignments && transmittedAssignments[selectedDate] && transmittedAssignments[selectedDate].length > 0) {
+      return transmittedAssignments[selectedDate];
+    }
+    const histEntry = (savedHistoryList || []).find(h => h.fecha === selectedDate);
+    if (histEntry && histEntry.rows && histEntry.rows.length > 0) {
       return histEntry.rows;
     }
-    return savedRuteoByDate[selectedDate] || [];
-  }, [savedHistoryList, savedRuteoByDate, selectedDate]);
+    return (savedRuteoByDate && savedRuteoByDate[selectedDate]) || [];
+  }, [transmittedAssignments, savedHistoryList, savedRuteoByDate, selectedDate]);
 
   // Listas de opciones para los multi-filtros
   const conductoresList = useMemo(() => {

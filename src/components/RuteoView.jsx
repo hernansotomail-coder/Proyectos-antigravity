@@ -184,10 +184,12 @@ export default function RuteoView() {
   // Rutas de la fecha activa (con fallback automático a ensureRowTransportista)
   const currentRoutes = useMemo(() => {
     let routes = [];
-    if (savedRuteoByDate && savedRuteoByDate[activeDate] && savedRuteoByDate[activeDate].length > 0) {
+    if (transmittedAssignments && transmittedAssignments[activeDate] && transmittedAssignments[activeDate].length > 0) {
+      routes = transmittedAssignments[activeDate];
+    } else if (savedRuteoByDate && savedRuteoByDate[activeDate] && savedRuteoByDate[activeDate].length > 0) {
       routes = savedRuteoByDate[activeDate];
     } else {
-      routes = transmittedAssignments[activeDate] || [];
+      routes = [];
     }
     return routes.map(r => ({
       ...r,

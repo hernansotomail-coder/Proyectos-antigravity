@@ -1364,50 +1364,52 @@ export default function AssignmentControl() {
                             )}
                           </div>
 
-                          {/* Comentario flotante con Destino, Dirección y Comuna */}
-                          <div className="hidden group-hover/route:block absolute left-full top-0 ml-2 z-50 bg-slate-900 text-white rounded-xl shadow-2xl p-3 border border-slate-700 min-w-[280px] max-w-[380px] pointer-events-none animate-in fade-in zoom-in-95">
-                            <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
-                              <div className="flex items-center gap-1.5">
-                                <MapPin size={13} className="text-red-400" />
-                                <span className="font-bold text-xs text-white">Ruta {row.ruta}</span>
+                          {/* Comentario flotante con Destino, Dirección y Comuna (Permite interactuar y hacer scroll) */}
+                          <div className="hidden group-hover/route:block hover:block absolute left-full top-0 pl-1.5 z-50">
+                            <div className="bg-slate-900 text-white rounded-xl shadow-2xl p-3 border border-slate-700 min-w-[300px] max-w-[400px] pointer-events-auto animate-in fade-in zoom-in-95">
+                              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
+                                <div className="flex items-center gap-1.5">
+                                  <MapPin size={13} className="text-red-400 shrink-0" />
+                                  <span className="font-bold text-xs text-white">Ruta {row.ruta}</span>
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-medium truncate max-w-[180px]">{row.cliente}</span>
                               </div>
-                              <span className="text-[10px] text-slate-400 font-medium truncate max-w-[180px]">{row.cliente}</span>
-                            </div>
 
-                            {row.paradas && row.paradas.length > 0 ? (
-                              <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
-                                {row.paradas.map((p, pIdx) => (
-                                  <div key={p.id || pIdx} className="text-[11px] pb-1.5 border-b border-slate-800 last:border-0 last:pb-0">
-                                    <div className="flex items-center justify-between gap-1">
-                                      <span className="font-bold text-slate-100 truncate">
-                                        {p.secuencia ? `${p.secuencia}. ` : ''}{p.destino}
-                                      </span>
-                                      {p.ambiente && (
-                                        <span className={`px-1 py-0.2 rounded text-[9px] font-black ${
-                                          p.ambiente === 'C' ? 'bg-sky-900 text-sky-200' :
-                                          p.ambiente === 'R' ? 'bg-amber-900 text-amber-200' : 'bg-emerald-900 text-emerald-200'
-                                        }`}>
-                                          {p.ambiente}
+                              {row.paradas && row.paradas.length > 0 ? (
+                                <div className="max-h-60 overflow-y-auto space-y-2 pr-1.5">
+                                  {row.paradas.map((p, pIdx) => (
+                                    <div key={p.id || pIdx} className="text-[11px] pb-1.5 border-b border-slate-800 last:border-0 last:pb-0">
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className="font-bold text-slate-100 truncate">
+                                          {p.secuencia ? `${p.secuencia}. ` : ''}{p.destino}
                                         </span>
-                                      )}
+                                        {p.ambiente && (
+                                          <span className={`px-1 py-0.2 rounded text-[9px] font-black shrink-0 ${
+                                            p.ambiente === 'C' ? 'bg-sky-900 text-sky-200' :
+                                            p.ambiente === 'R' ? 'bg-amber-900 text-amber-200' : 'bg-emerald-900 text-emerald-200'
+                                          }`}>
+                                            {p.ambiente}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[10px] text-slate-300 mt-0.5">
+                                        <span className="text-slate-400">Dir: </span>{p.direccion || 'Sin dirección'}
+                                      </div>
+                                      <div className="text-[10px] text-slate-300">
+                                        <span className="text-slate-400">Comuna: </span>
+                                        <strong className="text-blue-300">{p.comuna || 'Sin comuna'}</strong>
+                                      </div>
                                     </div>
-                                    <div className="text-[10px] text-slate-300 mt-0.5">
-                                      <span className="text-slate-400">Dir: </span>{p.direccion || 'Sin dirección'}
-                                    </div>
-                                    <div className="text-[10px] text-slate-300">
-                                      <span className="text-slate-400">Comuna: </span>
-                                      <strong className="text-blue-300">{p.comuna || 'Sin comuna'}</strong>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="text-[11px] text-slate-300 space-y-1">
-                                <div><span className="text-slate-400">Destino: </span>{row.cliente || 'Centralizado'}</div>
-                                <div><span className="text-slate-400">Dirección: </span>Centro de Distribución</div>
-                                <div><span className="text-slate-400">Comuna: </span><strong className="text-blue-300">Santiago</strong></div>
-                              </div>
-                            )}
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="text-[11px] text-slate-300 space-y-1">
+                                  <div><span className="text-slate-400">Destino: </span>{row.cliente || 'Centralizado'}</div>
+                                  <div><span className="text-slate-400">Dirección: </span>Centro de Distribución</div>
+                                  <div><span className="text-slate-400">Comuna: </span><strong className="text-blue-300">Santiago</strong></div>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </td>
 

@@ -234,6 +234,53 @@ const persistSavedRuteo = (data) => {
   }
 };
 
+const persistHistory = (data) => {
+  try {
+    localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving history to localStorage:', e);
+  }
+};
+
+const syncHistoryAndSavedForDate = (state, fecha, updatedRows) => {
+  const clonedRows = JSON.parse(JSON.stringify(updatedRows || [])).map(r => ({
+    ...r,
+    transportista: ensureRowTransportista(r)
+  }));
+  const updatedSaved = {
+    ...(state.savedRuteoByDate || {}),
+    [fecha]: clonedRows
+  };
+  const totalServicios = clonedRows.length;
+  const totalM3 = clonedRows.reduce((acc, r) => acc + (parseFloat(r.m3) || 0), 0).toFixed(2);
+  const totalLocales = clonedRows.reduce((acc, r) => acc + (parseInt(r.locales, 10) || 0), 0);
+  const totalPeso = clonedRows.reduce((acc, r) => acc + (parseFloat(r.peso) || 0), 0).toFixed(2);
+  const totalCajas = clonedRows.reduce((acc, r) => acc + (parseInt(r.cantCJ, 10) || 0), 0);
+
+  const historyEntry = {
+    id: `hist-${fecha}-${Date.now()}`,
+    fecha,
+    savedAt: new Date().toLocaleString('es-CL'),
+    totalServicios,
+    totalM3,
+    totalLocales,
+    totalPeso,
+    totalCajas,
+    rows: clonedRows
+  };
+
+  const filteredHistory = (state.savedHistoryList || []).filter(h => h.fecha !== fecha);
+  const updatedHistory = [historyEntry, ...filteredHistory];
+
+  persistSavedRuteo(updatedSaved);
+  persistHistory(updatedHistory);
+
+  return {
+    savedRuteoByDate: updatedSaved,
+    savedHistoryList: updatedHistory
+  };
+};
+
 const loadPersistedHistory = () => {
   try {
     const saved = localStorage.getItem('keylogistics_saved_history_list');
@@ -751,11 +798,13 @@ export const usePlanningStore = create((set, get) => ({
     persistAssignments(newAssignmentsByDate);
 
     const targetDate = targetRoutes[0]?.fecha || Object.keys(newAssignmentsByDate)[0] || '14-10-2026';
+    const synced = syncHistoryAndSavedForDate(get(), targetDate, newAssignmentsByDate[targetDate] || []);
 
     set({
       transmittedAssignments: newAssignmentsByDate,
       transformedRoutes: nextTransformed,
-      selectedDisponibilizarDate: targetDate
+      selectedDisponibilizarDate: targetDate,
+      ...synced
     });
 
     toast.success(`Transmitido a Disponibilización: ${totalAdded} ruta(s) nueva(s), ${totalUpdated} actualizada(s). El resto se mantuvo intacto.`);
@@ -772,18 +821,22 @@ export const usePlanningStore = create((set, get) => ({
     set({ selectedRuteoDate: date });
   },
 
-  // Update a single field in an assignment row
+  // Update a single field in an assignment row (Sincroniza en tiempo real con Histórico y Ruteo)
   updateAssignmentField: (fecha, rowId, field, value) => {
     set((state) => {
       const rows = state.transmittedAssignments[fecha] || [];
       const updatedRows = rows.map((r) => (r.id === rowId ? { ...r, [field]: value } : r));
       const updatedMap = { ...state.transmittedAssignments, [fecha]: updatedRows };
       persistAssignments(updatedMap);
-      return { transmittedAssignments: updatedMap };
+      const synced = syncHistoryAndSavedForDate(state, fecha, updatedRows);
+      return { 
+        transmittedAssignments: updatedMap,
+        ...synced
+      };
     });
   },
 
-  // Batch update fields on multiple rows
+  // Batch update fields on multiple rows (Sincroniza en tiempo real con Histórico y Ruteo)
   batchUpdateRows: (fecha, rowIds, updates) => {
     set((state) => {
       const rows = state.transmittedAssignments[fecha] || [];
@@ -791,7 +844,11 @@ export const usePlanningStore = create((set, get) => ({
       const updatedRows = rows.map((r) => (idSet.has(r.id) ? { ...r, ...updates } : r));
       const updatedMap = { ...state.transmittedAssignments, [fecha]: updatedRows };
       persistAssignments(updatedMap);
-      return { transmittedAssignments: updatedMap };
+      const synced = syncHistoryAndSavedForDate(state, fecha, updatedRows);
+      return { 
+        transmittedAssignments: updatedMap,
+        ...synced
+      };
     });
   },
 
@@ -862,7 +919,7 @@ export const usePlanningStore = create((set, get) => ({
 
   // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo" y guarda en histórico
   saveDisponibilizacion: (fecha) => {
-    const { transmittedAssignments, savedRuteoByDate, savedHistoryList } = get();
+    const { transmittedAssignments } = get();
     const rows = transmittedAssignments[fecha] || [];
 
     if (rows.length === 0) {
@@ -870,45 +927,10 @@ export const usePlanningStore = create((set, get) => ({
       return false;
     }
 
-    const clonedRows = JSON.parse(JSON.stringify(rows)).map(r => ({
-      ...r,
-      transportista: ensureRowTransportista(r)
-    }));
-
-    const updatedSaved = {
-      ...savedRuteoByDate,
-      [fecha]: clonedRows
-    };
-
-    // Calculate totals for history
-    const totalServicios = clonedRows.length;
-    const totalM3 = clonedRows.reduce((acc, r) => acc + (parseFloat(r.m3) || 0), 0).toFixed(2);
-    const totalLocales = clonedRows.reduce((acc, r) => acc + (parseInt(r.locales, 10) || 0), 0);
-    const totalPeso = clonedRows.reduce((acc, r) => acc + (parseFloat(r.peso) || 0), 0).toFixed(2);
-    const totalCajas = clonedRows.reduce((acc, r) => acc + (parseInt(r.cantCJ, 10) || 0), 0);
-
-    const historyEntry = {
-      id: `hist-${Date.now()}`,
-      fecha,
-      savedAt: new Date().toLocaleString('es-CL'),
-      totalServicios,
-      totalM3,
-      totalLocales,
-      totalPeso,
-      totalCajas,
-      rows: clonedRows
-    };
-
-    // Replace if same fecha already exists in history or prepend
-    const filteredHistory = savedHistoryList.filter(h => h.fecha !== fecha);
-    const updatedHistory = [historyEntry, ...filteredHistory];
-
-    persistSavedRuteo(updatedSaved);
-    persistHistory(updatedHistory);
+    const synced = syncHistoryAndSavedForDate(get(), fecha, rows);
 
     set({
-      savedRuteoByDate: updatedSaved,
-      savedHistoryList: updatedHistory,
+      ...synced,
       selectedRuteoDate: fecha
     });
 

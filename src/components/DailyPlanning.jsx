@@ -206,12 +206,6 @@ export default function DailyPlanning() {
     setSelectedParadaIds(prev => Array.from(new Set([...prev, ...matchingIds])));
   };
 
-  const handleToggleAmbienteForNewRoute = (amb) => {
-    setSelectedAmbientes(prev => 
-      prev.includes(amb) ? prev.filter(a => a !== amb) : [...prev, amb]
-    );
-  };
-
   const handleConfirmAperturar = () => {
     if (!currentSourceRoute) {
       toast.error('Selecciona una ruta de origen');
@@ -226,13 +220,19 @@ export default function DailyPlanning() {
       return;
     }
 
+    const selectedParadasAmbientes = Array.from(new Set(
+      (currentSourceRoute.paradas || [])
+        .filter(p => selectedParadaIds.includes(p.id || `${currentSourceRoute.ruta}-${p.secuencia}`))
+        .map(p => p.ambiente)
+    ));
+
     const ok = aperturarRuta(
       currentSourceRoute.id,
       newRouteNumber.trim(),
       newRouteName.trim(),
       newTransportista.trim(),
       selectedParadaIds,
-      selectedAmbientes
+      selectedParadasAmbientes
     );
 
     if (ok) {
@@ -733,8 +733,8 @@ export default function DailyPlanning() {
             {/* Body */}
             <div className="flex-1 overflow-y-auto py-3 space-y-3 min-h-0">
               
-              {/* Form Controls con Multi-Filtro de Ambientes (Requisito 3) */}
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
+              {/* Form Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 bg-slate-50 p-3 rounded-xl border border-slate-200">
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase">Ruta de Origen</label>
                   <select
@@ -747,8 +747,6 @@ export default function DailyPlanning() {
                         setNewRouteName(`${r.nombreRuta} (Aperturada)`);
                         setNewTransportista(r.transportista || '');
                         setSelectedParadaIds([]);
-                        const sourceAmbs = Array.from(new Set((r.paradas || []).map(p => p.ambiente))).filter(Boolean);
-                        setSelectedAmbientes(sourceAmbs.length > 0 ? sourceAmbs : ['C', 'R', 'S']);
                         setFilterTableAmbiente('TODOS');
                       }
                     }}
@@ -793,35 +791,6 @@ export default function DailyPlanning() {
                     placeholder="Ej: T300 o T405"
                     className="w-full text-xs border border-slate-200 rounded-lg p-1.5 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                </div>
-
-                {/* Multi-Filtro / Selección de Ambientes para la Nueva Ruta (Requisito 3) */}
-                <div>
-                  <label className="text-[10px] font-bold text-indigo-700 uppercase">Ambiente(s) Nueva Ruta</label>
-                  <div className="flex items-center gap-1 mt-1">
-                    {[
-                      { id: 'C', label: 'C', title: 'Congelado (C)', activeClass: 'bg-sky-100 text-sky-800 border-sky-300 ring-1 ring-sky-400' },
-                      { id: 'R', label: 'R', title: 'Refrigerado (R)', activeClass: 'bg-amber-100 text-amber-800 border-amber-300 ring-1 ring-amber-400' },
-                      { id: 'S', label: 'S', title: 'Seco (S)', activeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300 ring-1 ring-emerald-400' }
-                    ].map(amb => {
-                      const isSel = selectedAmbientes.includes(amb.id);
-                      return (
-                        <button
-                          key={amb.id}
-                          type="button"
-                          onClick={() => handleToggleAmbienteForNewRoute(amb.id)}
-                          className={`flex-1 py-1 text-[11px] font-black rounded-lg border transition-all text-center ${
-                            isSel 
-                              ? `${amb.activeClass} shadow-2xs` 
-                              : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'
-                          }`}
-                          title={`Seleccionar/deseleccionar ambiente ${amb.title}`}
-                        >
-                          {isSel ? '✓ ' : ''}{amb.label}
-                        </button>
-                      );
-                    })}
-                  </div>
                 </div>
               </div>
 
