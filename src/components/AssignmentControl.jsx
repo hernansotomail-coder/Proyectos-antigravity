@@ -1366,41 +1366,86 @@ export default function AssignmentControl() {
 
                           {/* Comentario flotante con Destino, Dirección y Comuna (Permite interactuar y hacer scroll) */}
                           <div className="hidden group-hover/route:block hover:block absolute left-full top-0 pl-1.5 z-50">
-                            <div className="bg-slate-900 text-white rounded-xl shadow-2xl p-3 border border-slate-700 min-w-[300px] max-w-[400px] pointer-events-auto animate-in fade-in zoom-in-95">
-                              <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
-                                <div className="flex items-center gap-1.5">
-                                  <MapPin size={13} className="text-red-400 shrink-0" />
-                                  <span className="font-bold text-xs text-white">Ruta {row.ruta}</span>
-                                </div>
-                                <span className="text-[10px] text-slate-400 font-medium truncate max-w-[180px]">{row.cliente}</span>
-                              </div>
+                            <div className="bg-slate-900 text-white rounded-xl shadow-2xl p-3 border border-slate-700 min-w-[320px] max-w-[430px] pointer-events-auto animate-in fade-in zoom-in-95">
+                              {(() => {
+                                const paradasList = row.paradas || [];
+                                const distinctAmbientes = Array.from(
+                                  new Set(paradasList.map(p => String(p.ambiente || '').trim().toUpperCase()).filter(Boolean))
+                                ).sort();
+                                return (
+                                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <MapPin size={13} className="text-red-400 shrink-0" />
+                                      <span className="font-bold text-xs text-white">Ruta {row.ruta}</span>
+                                      {distinctAmbientes.length > 0 && (
+                                        <div className="flex items-center gap-1 ml-1">
+                                          {distinctAmbientes.map(amb => (
+                                            <span
+                                              key={amb}
+                                              className={`px-1.5 py-0.2 rounded text-[9px] font-black uppercase tracking-wider ${
+                                                amb === 'C'
+                                                  ? 'bg-sky-500/30 text-sky-200 border border-sky-400/50'
+                                                  : amb === 'R'
+                                                    ? 'bg-amber-500/30 text-amber-200 border border-amber-400/50'
+                                                    : 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/50'
+                                              }`}
+                                              title={`Ambiente de la ruta: ${amb === 'C' ? 'Congelado' : amb === 'R' ? 'Refrigerado' : 'Seco'}`}
+                                            >
+                                              {amb}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                    <span className="text-[10px] text-slate-400 font-medium truncate max-w-[150px]">{row.cliente}</span>
+                                  </div>
+                                );
+                              })()}
 
                               {row.paradas && row.paradas.length > 0 ? (
                                 <div className="max-h-60 overflow-y-auto space-y-2 pr-1.5">
-                                  {row.paradas.map((p, pIdx) => (
-                                    <div key={p.id || pIdx} className="text-[11px] pb-1.5 border-b border-slate-800 last:border-0 last:pb-0">
-                                      <div className="flex items-center justify-between gap-1">
-                                        <span className="font-bold text-slate-100 truncate">
-                                          {p.secuencia ? `${p.secuencia}. ` : ''}{p.destino}
-                                        </span>
-                                        {p.ambiente && (
-                                          <span className={`px-1 py-0.2 rounded text-[9px] font-black shrink-0 ${
-                                            p.ambiente === 'C' ? 'bg-sky-900 text-sky-200' :
-                                            p.ambiente === 'R' ? 'bg-amber-900 text-amber-200' : 'bg-emerald-900 text-emerald-200'
-                                          }`}>
-                                            {p.ambiente}
+                                  {row.paradas.map((p, pIdx) => {
+                                    const amb = String(p.ambiente || 'S').trim().toUpperCase();
+                                    const badgeStyle = 
+                                      amb === 'C' 
+                                        ? 'bg-sky-500/25 text-sky-200 border border-sky-400/40 shadow-xs' 
+                                        : amb === 'R' 
+                                          ? 'bg-amber-500/25 text-amber-200 border border-amber-400/40 shadow-xs' 
+                                          : 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40 shadow-xs';
+                                    const ambLabel = amb === 'C' ? 'Congelado' : amb === 'R' ? 'Refrigerado' : 'Seco';
+
+                                    return (
+                                      <div key={p.id || pIdx} className="text-[11px] pb-1.5 border-b border-slate-800 last:border-0 last:pb-0">
+                                        <div className="flex items-center justify-between gap-1">
+                                          <span className="font-bold text-slate-100 truncate">
+                                            {p.secuencia ? `${p.secuencia}. ` : ''}{p.destino}
                                           </span>
-                                        )}
+                                          <span 
+                                            className={`px-1.5 py-0.2 rounded text-[9px] font-black shrink-0 tracking-wider ${badgeStyle}`}
+                                            title={`Ambiente: ${ambLabel} (${amb})`}
+                                          >
+                                            {amb}
+                                          </span>
+                                        </div>
+                                        <div className="text-[10px] text-slate-300 mt-0.5">
+                                          <span className="text-slate-400">Dir: </span>{p.direccion || 'Sin dirección'}
+                                        </div>
+                                        <div className="text-[10px] text-slate-300 flex items-center justify-between gap-2">
+                                          <div>
+                                            <span className="text-slate-400">Comuna: </span>
+                                            <strong className="text-blue-300">{p.comuna || 'Sin comuna'}</strong>
+                                          </div>
+                                          {(p.volumen > 0 || p.peso > 0 || p.cantCJ > 0) && (
+                                            <div className="text-[9px] text-slate-400 flex items-center gap-1.5 shrink-0">
+                                              {p.volumen > 0 && <span>{Number(p.volumen).toFixed(3)} m³</span>}
+                                              {p.peso > 0 && <span>{Number(p.peso).toFixed(1)} kg</span>}
+                                              {p.cantCJ > 0 && <span>{p.cantCJ} CJ</span>}
+                                            </div>
+                                          )}
+                                        </div>
                                       </div>
-                                      <div className="text-[10px] text-slate-300 mt-0.5">
-                                        <span className="text-slate-400">Dir: </span>{p.direccion || 'Sin dirección'}
-                                      </div>
-                                      <div className="text-[10px] text-slate-300">
-                                        <span className="text-slate-400">Comuna: </span>
-                                        <strong className="text-blue-300">{p.comuna || 'Sin comuna'}</strong>
-                                      </div>
-                                    </div>
-                                  ))}
+                                    );
+                                  })}
                                 </div>
                               ) : (
                                 <div className="text-[11px] text-slate-300 space-y-1">

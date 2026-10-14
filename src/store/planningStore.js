@@ -1,5 +1,44 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
+import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
+
+const PRELOADED_ROUTES_MAP = new Map();
+(PRELOADED_EXCEL_ROUTES || []).forEach(r => {
+  PRELOADED_ROUTES_MAP.set(String(r.ruta).trim(), r);
+});
+
+export const healParadasWithPreloaded = (routeNumber, currentParadas) => {
+  const cleanRuta = String(routeNumber || '').trim();
+  const preloaded = PRELOADED_ROUTES_MAP.get(cleanRuta);
+
+  if (!preloaded || !preloaded.paradas || preloaded.paradas.length === 0) {
+    return (currentParadas || []).map(p => ({
+      ...p,
+      ambiente: String(p.ambiente || (cleanRuta === '1401' ? 'C' : 'S')).trim().toUpperCase()
+    }));
+  }
+
+  const normalizedCurrent = (currentParadas || []).map(p => ({
+    ...p,
+    ambiente: String(p.ambiente || '').trim().toUpperCase()
+  }));
+
+  const currentAmbientes = new Set(normalizedCurrent.map(p => p.ambiente).filter(Boolean));
+  const preloadedAmbientes = new Set(preloaded.ambientes || []);
+
+  const hasOnlySWhenPreloadedHasMultiple = 
+    currentAmbientes.size <= 1 && 
+    (currentAmbientes.has('S') || currentAmbientes.size === 0) && 
+    preloadedAmbientes.size > 1;
+
+  const hasUnconsolidated = normalizedCurrent.length > preloaded.paradas.length;
+
+  if (hasOnlySWhenPreloadedHasMultiple || hasUnconsolidated || normalizedCurrent.length === 0) {
+    return JSON.parse(JSON.stringify(preloaded.paradas));
+  }
+
+  return normalizedCurrent;
+};
 
 // Helper to format/normalize date string to DD-MM-YYYY
 export const normalizeDate = (rawDate) => {
@@ -131,6 +170,30 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
       cantCJ: 400,
       transportista: 'T312',
       paradas: SAMPLE_PARADAS_1612
+    },
+    {
+      id: 'disp-sample-3304',
+      fecha: '14-10-2026',
+      conductor_name: '',
+      conductor_rut: '',
+      aux1_name: '',
+      aux1_rut: '',
+      aux2_name: '',
+      aux2_rut: '',
+      camion: '',
+      tipo_equipo: '',
+      rampla: '',
+      n_vuelta: '1',
+      tipo_servicio: 'Distribución',
+      ruta: '3304',
+      cliente: 'RUTA FAST FOOD -04',
+      referencia: '',
+      locales: 6,
+      m3: 4.41,
+      peso: 1085.33,
+      cantCJ: 464,
+      transportista: 'T300',
+      paradas: healParadasWithPreloaded('3304', [])
     }
   ]
 };
@@ -159,7 +222,8 @@ export const ensureRowTransportista = (row) => {
     '1832': 'T310',
     '1833': 'T310',
     '1834': 'T310',
-    '1835': 'T310'
+    '1835': 'T310',
+    '3304': 'T300'
   };
   const rKey = String(row.ruta || '').trim();
   if (ROUTE_TRANSP_MAP[rKey]) {
@@ -182,10 +246,7 @@ const loadPersistedAssignments = () => {
           parsed[dateKey] = parsed[dateKey].map(r => ({
             ...r,
             transportista: ensureRowTransportista(r),
-            paradas: (r.paradas || []).map(p => ({
-              ...p,
-              ambiente: p.ambiente || (r.ruta === '1401' ? 'C' : 'S')
-            }))
+            paradas: healParadasWithPreloaded(r.ruta, r.paradas)
           }));
         });
         return parsed;
@@ -214,7 +275,8 @@ const loadPersistedSavedRuteo = () => {
       Object.keys(parsed).forEach(dateKey => {
         parsed[dateKey] = parsed[dateKey].map(r => ({
           ...r,
-          transportista: ensureRowTransportista(r)
+          transportista: ensureRowTransportista(r),
+          paradas: healParadasWithPreloaded(r.ruta, r.paradas)
         }));
       });
       return parsed;
@@ -290,7 +352,8 @@ const loadPersistedHistory = () => {
         ...h,
         rows: (h.rows || []).map(r => ({
           ...r,
-          transportista: ensureRowTransportista(r)
+          transportista: ensureRowTransportista(r),
+          paradas: healParadasWithPreloaded(r.ruta, r.paradas)
         }))
       }));
     }
@@ -302,6 +365,9 @@ const loadPersistedHistory = () => {
 };
 
 const createInitialTransformedRoutes = () => {
+  if (PRELOADED_EXCEL_ROUTES && PRELOADED_EXCEL_ROUTES.length > 0) {
+    return PRELOADED_EXCEL_ROUTES;
+  }
   return [
     {
       id: 'trans-1401-sample',
@@ -353,9 +419,21 @@ export const loadPersistedTransformedRoutes = () => {
     const saved = localStorage.getItem('keylogistics_transformed_routes_v2');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.map(r => {
+          const paradas = healParadasWithPreloaded(r.ruta, r.paradas);
+          const distinctAmbientes = Array.from(new Set(paradas.map(p => p.ambiente))).sort();
+          return {
+            ...r,
+            ambientes: distinctAmbientes.length > 0 ? distinctAmbientes : (r.ambientes || ['S']),
+            paradas
+          };
+        });
+      }
     }
-    return createInitialTransformedRoutes();
+    return PRELOADED_EXCEL_ROUTES && PRELOADED_EXCEL_ROUTES.length > 0 
+      ? PRELOADED_EXCEL_ROUTES 
+      : createInitialTransformedRoutes();
   } catch (e) {
     console.error('Error loading transformed routes from localStorage:', e);
     return createInitialTransformedRoutes();
