@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Filter, Search, RefreshCw, User, Truck, MapPin, 
@@ -9,9 +9,126 @@ import {
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore } from '../store/fleetStore';
-import { usePlanningStore } from '../store/planningStore';
+import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { Button } from './ui/Button';
+
+// COMPONENTE MULTI-SELECT DROPDOWN COMPACTO (Requisito 2)
+function CompactMultiSelect({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    if (!searchTerm) return options;
+    return options.filter(opt => String(opt).toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [options, searchTerm]);
+
+  const toggleOption = (opt) => {
+    if (selectedValues.includes(opt)) {
+      onChange(selectedValues.filter(v => v !== opt));
+    } else {
+      onChange([...selectedValues, opt]);
+    }
+  };
+
+  const buttonText = useMemo(() => {
+    if (selectedValues.length === 0) return `${label}: ${placeholder}`;
+    if (selectedValues.length === options.length && options.length > 0) return `${label}: Todos (${options.length})`;
+    if (selectedValues.length === 1) return `${label}: ${selectedValues[0]}`;
+    return `${label}: ${selectedValues.length} sel.`;
+  }, [selectedValues, options, label, placeholder]);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center justify-between gap-1 px-2.5 py-1 text-xs rounded-lg border transition-all text-left h-7.5 ${
+          selectedValues.length > 0 
+            ? 'bg-blue-50 border-blue-400 text-blue-900 font-bold shadow-2xs' 
+            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white'
+        }`}
+      >
+        <span className="truncate max-w-[110px]">{buttonText}</span>
+        <ChevronDown size={12} className={`text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between pb-1 mb-1 border-b border-slate-100 text-[11px]">
+            <span className="font-bold text-slate-800">{label}</span>
+            <div className="flex items-center gap-1.5 text-[10px]">
+              <button
+                type="button"
+                onClick={() => onChange([...options])}
+                className="text-blue-600 hover:text-blue-800 font-semibold"
+              >
+                Todos
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="text-slate-500 hover:text-red-600 font-semibold"
+              >
+                Limpiar
+              </button>
+            </div>
+          </div>
+
+          {options.length > 5 && (
+            <div className="relative mb-1">
+              <Search className="absolute left-2 top-1.5 text-slate-400" size={11} />
+              <input
+                type="text"
+                placeholder={`Buscar...`}
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="w-full pl-6 pr-1.5 py-0.5 text-[10px] border border-slate-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
+              />
+            </div>
+          )}
+
+          <div className="max-h-48 overflow-y-auto space-y-0.5 pr-0.5">
+            {filteredOptions.map((opt) => {
+              const isChecked = selectedValues.includes(opt);
+              return (
+                <label
+                  key={opt}
+                  className={`flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[11px] cursor-pointer select-none transition-colors ${
+                    isChecked ? 'bg-blue-50 text-blue-900 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => toggleOption(opt)}
+                    className="rounded text-blue-600 focus:ring-blue-500 h-3 w-3 shrink-0"
+                  />
+                  <span className="truncate">{opt}</span>
+                </label>
+              );
+            })}
+            {filteredOptions.length === 0 && (
+              <p className="text-[10px] text-slate-400 text-center py-2">Sin opciones</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Colores para tipos de servicio
 const SERVICE_COLORS = {
@@ -206,10 +323,34 @@ export default function AssignmentControl() {
   const [selectedRowIds, setSelectedRowIds] = useState([]);
   const [quickVuelta, setQuickVuelta] = useState('1');
 
-  // Filtros de búsqueda en la matriz
-  const [matrixFilterRuta, setMatrixFilterRuta] = useState('');
+  // Filtros de búsqueda en la matriz (Requisitos 2 y 3)
+  const [selectedRutas, setSelectedRutas] = useState([]);
+  const [selectedTransportistas, setSelectedTransportistas] = useState([]);
   const [matrixFilterCliente, setMatrixFilterCliente] = useState('');
   const [matrixFilterEstado, setMatrixFilterEstado] = useState('Todos');
+
+  // Opciones únicas para Multi-selects (Requisito 2)
+  const availableRutas = useMemo(() => {
+    const setR = new Set();
+    (transmittedAssignments[activeDate] || []).forEach(r => {
+      if (r.ruta) setR.add(String(r.ruta).trim());
+    });
+    return Array.from(setR).sort((a, b) => {
+      const nA = parseInt(a, 10);
+      const nB = parseInt(b, 10);
+      if (!isNaN(nA) && !isNaN(nB)) return nA - nB;
+      return a.localeCompare(b);
+    });
+  }, [transmittedAssignments, activeDate]);
+
+  const availableTransportistas = useMemo(() => {
+    const setT = new Set();
+    (transmittedAssignments[activeDate] || []).forEach(r => {
+      const trans = ensureRowTransportista(r);
+      if (trans && trans !== 'Sin Transportista') setT.add(trans);
+    });
+    return Array.from(setT).sort();
+  }, [transmittedAssignments, activeDate]);
 
   // Pop-up modal de confirmación al guardar
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
@@ -385,7 +526,19 @@ export default function AssignmentControl() {
         }
       }
 
-      if (matrixFilterRuta && !String(a.ruta).toLowerCase().includes(matrixFilterRuta.toLowerCase())) return false;
+      // Multi-filtro Ruta (Requisito 2)
+      if (selectedRutas.length > 0 && !selectedRutas.includes(String(a.ruta).trim())) {
+        return false;
+      }
+
+      // Multi-filtro Transportista (Requisito 2)
+      if (selectedTransportistas.length > 0) {
+        const trans = ensureRowTransportista(a);
+        if (!selectedTransportistas.includes(trans)) {
+          return false;
+        }
+      }
+
       if (matrixFilterCliente && !String(a.cliente).toLowerCase().includes(matrixFilterCliente.toLowerCase())) return false;
       if (matrixFilterEstado === 'Conductor asignado' && !a.conductor_name) return false;
       if (matrixFilterEstado === 'Sin conductor' && a.conductor_name) return false;
@@ -393,7 +546,7 @@ export default function AssignmentControl() {
       if (matrixFilterEstado === 'Sin camion' && a.camion) return false;
       return true;
     });
-  }, [assignmentsForDate, matrixFilterRuta, matrixFilterCliente, matrixFilterEstado, focusedEntity]);
+  }, [assignmentsForDate, selectedRutas, selectedTransportistas, matrixFilterCliente, matrixFilterEstado, focusedEntity]);
 
   // RESUMEN AGRUPADO POR CONDUCTOR + N° DE VUELTA
   // "lo que no tienen 'Conductor' no debería aparecer en esta tabla resumen hasta que tenga"
@@ -417,6 +570,18 @@ export default function AssignmentControl() {
           if (!matchCam) return;
         }
       }
+
+      // Multi-filtro Ruta (Requisito 2)
+      if (selectedRutas.length > 0 && !selectedRutas.includes(String(row.ruta).trim())) return;
+
+      // Multi-filtro Transportista (Requisito 2)
+      if (selectedTransportistas.length > 0) {
+        const trans = ensureRowTransportista(row);
+        if (!selectedTransportistas.includes(trans)) return;
+      }
+
+      // Filtro Cliente
+      if (matrixFilterCliente && !String(row.cliente).toLowerCase().includes(matrixFilterCliente.toLowerCase())) return;
 
       const vueltaKey = row.n_vuelta ? `Vuelta ${row.n_vuelta}` : 'Sin Vuelta';
       const groupKey = `${row.conductor_name}:::${vueltaKey}`;
@@ -455,7 +620,7 @@ export default function AssignmentControl() {
       totalM3: Number(g.totalM3.toFixed(4)),
       totalPeso: Number(g.totalPeso.toFixed(2))
     }));
-  }, [assignmentsForDate, focusedEntity]);
+  }, [assignmentsForDate, focusedEntity, selectedRutas, selectedTransportistas, matrixFilterCliente]);
 
   const toggleExpandSummary = (groupKey) => {
     setExpandedSummaryKeys(prev => ({
@@ -745,39 +910,63 @@ export default function AssignmentControl() {
 
         {/* Filtros rápidos + Botón Guardar Disponibilización */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <div className="relative">
-            <Search className="absolute left-2 top-1.5 text-slate-400" size={12} />
-            <input 
-              type="text" 
-              placeholder="Ruta..." 
-              value={matrixFilterRuta}
-              onChange={e => setMatrixFilterRuta(e.target.value)}
-              className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-20 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
+          {/* Multi-Filtro Ruta (Requisito 2) */}
+          <CompactMultiSelect 
+            label="Ruta"
+            options={availableRutas}
+            selectedValues={selectedRutas}
+            onChange={setSelectedRutas}
+            placeholder="Todas"
+          />
+
+          {/* Multi-Filtro Transportista (Requisito 2) */}
+          <CompactMultiSelect 
+            label="Transp."
+            options={availableTransportistas}
+            selectedValues={selectedTransportistas}
+            onChange={setSelectedTransportistas}
+            placeholder="Todos"
+          />
 
           <div className="relative">
-            <Search className="absolute left-2 top-1.5 text-slate-400" size={12} />
+            <Search className="absolute left-2 top-2 text-slate-400" size={12} />
             <input 
               type="text" 
               placeholder="Cliente..." 
               value={matrixFilterCliente}
               onChange={e => setMatrixFilterCliente(e.target.value)}
-              className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-24 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-24 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 h-7.5"
             />
           </div>
 
+          {/* Filtro Asignación (Requisito 3: dice 'Asignación' en lugar de 'Todos') */}
           <select
             value={matrixFilterEstado}
             onChange={e => setMatrixFilterEstado(e.target.value)}
-            className="text-xs border border-slate-200 rounded-lg p-1 bg-slate-50 text-slate-700 focus:outline-none"
+            className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 text-slate-700 focus:outline-none h-7.5 font-medium"
+            title="Filtrar por estado de asignación"
           >
-            <option value="Todos">Todos</option>
+            <option value="Todos">Asignación</option>
             <option value="Conductor asignado">Con Chofer</option>
             <option value="Sin conductor">Sin Chofer</option>
             <option value="Camion asignado">Con Camión</option>
             <option value="Sin camion">Sin Camión</option>
           </select>
+
+          {(selectedRutas.length > 0 || selectedTransportistas.length > 0 || matrixFilterCliente || matrixFilterEstado !== 'Todos') && (
+            <button
+              onClick={() => {
+                setSelectedRutas([]);
+                setSelectedTransportistas([]);
+                setMatrixFilterCliente('');
+                setMatrixFilterEstado('Todos');
+              }}
+              className="text-[10px] text-red-600 hover:text-red-800 font-bold px-1.5 py-1 hover:bg-red-50 rounded"
+              title="Limpiar todos los filtros"
+            >
+              × Limpiar
+            </button>
+          )}
 
           <Button 
             onClick={handlePreSave}
@@ -966,8 +1155,6 @@ export default function AssignmentControl() {
                 cardBgClass = 'bg-blue-100/90 border-blue-500 ring-2 ring-blue-500 shadow-sm';
               } else if (isSelected) {
                 cardBgClass = 'bg-blue-50 border-blue-400 ring-1 ring-blue-300 shadow-xs';
-              } else if (attStyle) {
-                cardBgClass = attStyle.cardClass;
               }
 
               return (
@@ -1638,18 +1825,12 @@ export default function AssignmentControl() {
                 (focusedEntity.plate && (focusedEntity.plate === truck.plate || truck.identifier.includes(focusedEntity.plate)))
               );
               
-              // Color de la tarjeta de acuerdo al estado documental (Requisito 3)
+              // Color de la tarjeta de acuerdo al estado documental (Requisito 1: colores solo en las etiquetas)
               let cardBgClass = 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50';
               if (isFocused) {
                 cardBgClass = 'bg-emerald-100/90 border-emerald-500 ring-2 ring-emerald-500 shadow-sm';
               } else if (isSelected) {
                 cardBgClass = 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300 shadow-xs';
-              } else if (truck.health?.worst === 'red') {
-                cardBgClass = 'bg-red-50/80 border-red-300 ring-1 ring-red-400/50 hover:bg-red-100/70';
-              } else if (truck.health?.worst === 'orange') {
-                cardBgClass = 'bg-orange-50/80 border-orange-300 ring-1 ring-orange-400/50 hover:bg-orange-100/70';
-              } else if (truck.health?.worst === 'yellow') {
-                cardBgClass = 'bg-yellow-50/80 border-yellow-300 ring-1 ring-yellow-400/50 hover:bg-yellow-100/70';
               }
 
               return (

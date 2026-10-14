@@ -251,11 +251,72 @@ const loadPersistedHistory = () => {
   }
 };
 
-const persistHistory = (data) => {
+const createInitialTransformedRoutes = () => {
+  return [
+    {
+      id: 'trans-1401-sample',
+      ruta: '1401',
+      nombreRuta: 'RUTA SBARRO COPEC 01',
+      fecha: '14-10-2026',
+      transportista: 'T311',
+      recuentoDestino: 1,
+      sumaVolumen: 0.345,
+      sumaPeso: 145,
+      sumaCantCJ: 16,
+      paradas: SAMPLE_PARADAS_1401.map((p, idx) => ({ ...p, id: `1401-p-${idx}`, transportista: 'T311' })),
+      isModified: false,
+      isAperturada: false
+    },
+    {
+      id: 'trans-1611-sample',
+      ruta: '1611',
+      nombreRuta: 'RUTA CANTABRIA 02',
+      fecha: '14-10-2026',
+      transportista: 'T405',
+      recuentoDestino: 7,
+      sumaVolumen: 3.0401,
+      sumaPeso: 1527.26,
+      sumaCantCJ: 323,
+      paradas: SAMPLE_PARADAS_1611.map((p, idx) => ({ ...p, id: `1611-p-${idx}`, transportista: 'T405' })),
+      isModified: false,
+      isAperturada: false
+    },
+    {
+      id: 'trans-1612-sample',
+      ruta: '1612',
+      nombreRuta: 'RUTA CANTABRIA 03',
+      fecha: '14-10-2026',
+      transportista: 'T405',
+      recuentoDestino: 7,
+      sumaVolumen: 3.5664,
+      sumaPeso: 1464.83,
+      sumaCantCJ: 400,
+      paradas: SAMPLE_PARADAS_1612.map((p, idx) => ({ ...p, id: `1612-p-${idx}`, transportista: 'T405' })),
+      isModified: false,
+      isAperturada: false
+    }
+  ];
+};
+
+export const loadPersistedTransformedRoutes = () => {
   try {
-    localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(data));
+    const saved = localStorage.getItem('keylogistics_transformed_routes');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+    return createInitialTransformedRoutes();
   } catch (e) {
-    console.error('Error saving history to localStorage:', e);
+    console.error('Error loading transformed routes from localStorage:', e);
+    return createInitialTransformedRoutes();
+  }
+};
+
+export const persistTransformedRoutes = (data) => {
+  try {
+    localStorage.setItem('keylogistics_transformed_routes', JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving transformed routes to localStorage:', e);
   }
 };
 
@@ -266,8 +327,8 @@ export const usePlanningStore = create((set, get) => ({
   uploadDate: null,
 
   // Transformed dynamic table (Hoja1 / Ruteo)
-  transformedRoutes: [],
-  isTransformed: false,
+  transformedRoutes: loadPersistedTransformedRoutes(),
+  isTransformed: true,
 
   // Transmitted data into Disponibilización: { [fecha]: Array<AssignmentRow> }
   transmittedAssignments: loadPersistedAssignments(),
@@ -383,6 +444,8 @@ export const usePlanningStore = create((set, get) => ({
         return a.ruta.localeCompare(b.ruta);
       });
 
+      persistTransformedRoutes(transformed);
+
       set({
         transformedRoutes: transformed,
         isTransformed: true
@@ -474,6 +537,189 @@ export const usePlanningStore = create((set, get) => ({
     });
 
     toast.success(`¡${totalTransmitted} rutas transmitidas a Disponibilización exitosamente!`);
+    return true;
+  },
+
+  // APERTURAR RUTA: Permite tomar paradas/filas completas de una ruta y moverlas a una nueva ruta con nueva numeración
+  aperturarRuta: (sourceRouteId, newRouteNumber, newRouteName, newTransportista, selectedParadaIds) => {
+    const { transformedRoutes } = get();
+    const cleanNewNumber = String(newRouteNumber || '').trim();
+    if (!cleanNewNumber) {
+      toast.error('Debes ingresar una numeración para la nueva ruta (Ej: 1611-B, 1700)');
+      return false;
+    }
+
+    const sourceIndex = transformedRoutes.findIndex(r => r.id === sourceRouteId || String(r.ruta).trim() === String(sourceRouteId).trim());
+    if (sourceIndex < 0) {
+      toast.error('No se encontró la ruta de origen seleccionada');
+      return false;
+    }
+
+    const source = transformedRoutes[sourceIndex];
+    const sourceParadas = source.paradas || [];
+    const idSet = new Set(selectedParadaIds.map(x => String(x)));
+
+    // Separar paradas a mover y paradas que quedan
+    const movedParadas = [];
+    const remainingParadas = [];
+
+    sourceParadas.forEach((p, idx) => {
+      const matchId = String(p.id || `${source.ruta}-${idx}`);
+      const matchSec = String(p.secuencia);
+      const matchDestino = String(p.destino);
+
+      if (idSet.has(matchId) || idSet.has(matchSec) || idSet.has(matchDestino)) {
+        movedParadas.push(p);
+      } else {
+        remainingParadas.push(p);
+      }
+    });
+
+    if (movedParadas.length === 0) {
+      toast.error('Debes seleccionar al menos una parada para mover a la nueva ruta');
+      return false;
+    }
+
+    // Actualizar ruta origen
+    const updatedSource = {
+      ...source,
+      paradas: remainingParadas,
+      recuentoDestino: new Set(remainingParadas.map(p => p.destino)).size,
+      sumaVolumen: Number(remainingParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0).toFixed(4)),
+      sumaPeso: Number(remainingParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0).toFixed(2)),
+      sumaCantCJ: Math.round(remainingParadas.reduce((a, b) => a + (parseFloat(b.cantCJ) || 0), 0)),
+      isModified: true
+    };
+
+    // Crear la nueva ruta aperturada
+    const newRoute = {
+      id: `trans-aperturada-${cleanNewNumber}-${Date.now()}`,
+      ruta: cleanNewNumber,
+      nombreRuta: String(newRouteName || '').trim() || `${source.nombreRuta} (Aperturada)`,
+      fecha: source.fecha || '14-10-2026',
+      transportista: String(newTransportista || '').trim() || source.transportista || 'T300',
+      recuentoDestino: new Set(movedParadas.map(p => p.destino)).size,
+      sumaVolumen: Number(movedParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0).toFixed(4)),
+      sumaPeso: Number(movedParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0).toFixed(2)),
+      sumaCantCJ: Math.round(movedParadas.reduce((a, b) => a + (parseFloat(b.cantCJ) || 0), 0)),
+      paradas: movedParadas.map((p, pIdx) => ({
+        ...p,
+        id: `p-${cleanNewNumber}-${pIdx + 1}`,
+        secuencia: pIdx + 1
+      })),
+      isModified: true,
+      isAperturada: true,
+      parentRuta: source.ruta
+    };
+
+    const nextRoutes = [...transformedRoutes];
+    nextRoutes[sourceIndex] = updatedSource;
+    // Insertar la nueva ruta aperturada inmediatamente después
+    nextRoutes.splice(sourceIndex + 1, 0, newRoute);
+
+    persistTransformedRoutes(nextRoutes);
+    set({ transformedRoutes: nextRoutes });
+
+    toast.success(`¡Ruta ${cleanNewNumber} aperturada con éxito con ${movedParadas.length} parada(s)!`);
+    return true;
+  },
+
+  // TRANSMITIR SOLO RUTAS ESPECÍFICAS O MODIFICADAS A DISPONIBILIZACIÓN
+  // Mantiene intacto todo lo que ya fue asignado o modificado en las otras rutas de Disponibilización
+  transmitSpecificRoutesToDisponibilizacion: (routeIdsToTransmit) => {
+    const { transformedRoutes, transmittedAssignments } = get();
+    if (!routeIdsToTransmit || routeIdsToTransmit.length === 0) {
+      toast.warning('No se indicaron rutas para transmitir.');
+      return false;
+    }
+
+    const idsSet = new Set(routeIdsToTransmit.map(x => String(x).trim()));
+    const targetRoutes = transformedRoutes.filter(r => idsSet.has(String(r.id).trim()) || idsSet.has(String(r.ruta).trim()));
+
+    if (targetRoutes.length === 0) {
+      toast.error('No se encontraron las rutas indicadas en la planificación.');
+      return false;
+    }
+
+    const newAssignmentsByDate = JSON.parse(JSON.stringify(transmittedAssignments));
+    let totalUpdated = 0;
+    let totalAdded = 0;
+
+    targetRoutes.forEach((route) => {
+      const fecha = route.fecha || 'Sin Fecha';
+      if (!newAssignmentsByDate[fecha]) {
+        newAssignmentsByDate[fecha] = [];
+      }
+
+      const existingIdx = newAssignmentsByDate[fecha].findIndex(
+        (a) => String(a.ruta).trim() === String(route.ruta).trim()
+      );
+
+      if (existingIdx >= 0) {
+        // Actualizar SOLO métricas y paradas, preservando conductor, chofer, camión, rampla y vuelta ya asignados
+        const old = newAssignmentsByDate[fecha][existingIdx];
+        newAssignmentsByDate[fecha][existingIdx] = {
+          ...old,
+          locales: route.recuentoDestino,
+          m3: route.sumaVolumen,
+          peso: route.sumaPeso || old.peso || 0,
+          cantCJ: route.sumaCantCJ || old.cantCJ || 0,
+          cliente: route.nombreRuta || old.cliente,
+          transportista: route.transportista || old.transportista || ensureRowTransportista(route),
+          paradas: route.paradas || old.paradas || []
+        };
+        totalUpdated++;
+      } else {
+        // Nueva ruta aperturada -> Crear registro en Disponibilización con campos de dotación y camión listos para asignar
+        const assignmentRow = {
+          id: `disp-${fecha}-${route.ruta}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          fecha: fecha,
+          conductor_name: '',
+          conductor_rut: '',
+          aux1_name: '',
+          aux1_rut: '',
+          aux2_name: '',
+          aux2_rut: '',
+          camion: '',
+          tipo_equipo: '',
+          rampla: '',
+          n_vuelta: '',
+          tipo_servicio: 'Distribución',
+          ruta: route.ruta,
+          cliente: route.nombreRuta,
+          transportista: route.transportista || ensureRowTransportista(route),
+          referencia: route.isAperturada ? `Aperturada desde Ruta ${route.parentRuta || ''}` : '',
+          locales: route.recuentoDestino,
+          m3: route.sumaVolumen,
+          peso: route.sumaPeso || 0,
+          cantCJ: route.sumaCantCJ || 0,
+          paradas: route.paradas || []
+        };
+        newAssignmentsByDate[fecha].push(assignmentRow);
+        totalAdded++;
+      }
+    });
+
+    // Marcar en transformedRoutes como no pendientes de transmisión
+    const nextTransformed = transformedRoutes.map(r => {
+      if (idsSet.has(String(r.id).trim()) || idsSet.has(String(r.ruta).trim())) {
+        return { ...r, isModified: false, isTransmitted: true };
+      }
+      return r;
+    });
+
+    persistTransformedRoutes(nextTransformed);
+    persistAssignments(newAssignmentsByDate);
+
+    const targetDate = targetRoutes[0]?.fecha || Object.keys(newAssignmentsByDate)[0] || '14-10-2026';
+
+    set({
+      transmittedAssignments: newAssignmentsByDate,
+      transformedRoutes: nextTransformed,
+      selectedDisponibilizarDate: targetDate
+    });
+
+    toast.success(`Transmitido a Disponibilización: ${totalAdded} ruta(s) nueva(s), ${totalUpdated} actualizada(s). El resto se mantuvo intacto.`);
     return true;
   },
 
