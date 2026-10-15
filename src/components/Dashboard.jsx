@@ -69,9 +69,9 @@ export default function Dashboard() {
     loadData();
   }, [selectedYear, selectedMonth, fetchAttendanceByDateRange]);
 
-  // Data processing
+  // Data processing - Solo considerar dotación Propia en Dashboard según requerimiento
   const filteredStaff = useMemo(() => {
-    let list = staffList;
+    let list = (staffList || []).filter(s => (s.tipo_dotacion || 'Propia').toLowerCase() === 'propia');
     if (roleFilters.length > 0) {
       list = list.filter(s => roleFilters.includes(s.role));
     }

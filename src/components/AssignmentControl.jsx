@@ -4,7 +4,7 @@ import {
   Filter, Search, RefreshCw, User, Truck, MapPin, 
   ChevronUp, ChevronDown, ChevronRight, CheckCircle2, Circle, Check,
   Calendar, Layers, Trash2, ArrowRight, UserCheck, Shield, Sparkles,
-  Save, Eye, Download, Send, AlertTriangle, X, Scissors, History, CheckSquare
+  Save, Eye, Download, Send, AlertTriangle, X, Scissors, History, CheckSquare, Plus
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
@@ -338,6 +338,7 @@ export default function AssignmentControl() {
   
   // Filtro de estado de asistencia para dotación (Requisito 2)
   const [staffAttendanceFilter, setStaffAttendanceFilter] = useState('todos'); // 'todos' | 'disponibles' | 'novedades'
+  const [staffTipoFilter, setStaffTipoFilter] = useState('todos'); // 'todos' | 'Propia' | 'Externo'
 
   // Filtro de estado documental para camiones (Requisito 3)
   const [truckDocFilter, setTruckDocFilter] = useState('todos'); // 'todos' | 'al_dia' | 'alertas'
@@ -598,6 +599,12 @@ export default function AssignmentControl() {
       const search = (staffSearch || '').toLowerCase();
       if (!isActive || (!sName.includes(search) && !sRut.includes(search))) return false;
 
+      // Filtro por tipo de dotación (Propia / Externo)
+      if (staffTipoFilter !== 'todos') {
+        const staffTipo = (s.tipo_dotacion || 'Propia').toLowerCase();
+        if (staffTipo !== staffTipoFilter.toLowerCase()) return false;
+      }
+
       // Filtro de condición de asistencia para descartar no disponibles
       const att = attendanceMap[s.id];
       const isUnavailable = att && ATTENDANCE_STYLES[att]?.isAlert;
@@ -626,7 +633,7 @@ export default function AssignmentControl() {
       conductores: conds.sort(sortByViajes),
       auxiliares: auxs.sort(sortByViajes)
     };
-  }, [staffList, sortVueltasAsc, staffSearch, viajesPorPersona, attendanceMap, staffAttendanceFilter]);
+  }, [staffList, sortVueltasAsc, staffSearch, viajesPorPersona, attendanceMap, staffAttendanceFilter, staffTipoFilter]);
 
   // Camiones clasificados en 3 categorías con evaluación de salud documental (Requisito 3)
   const { camionesList, tractosList, semirremolquesList } = useMemo(() => {
@@ -1458,17 +1465,29 @@ export default function AssignmentControl() {
                 className="w-full pl-5 pr-1.5 py-0.5 text-[10px] border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
               />
             </div>
-            {/* Filtro por condición de asistencia (Requisito 2) */}
-            <select
-              value={staffAttendanceFilter}
-              onChange={e => setStaffAttendanceFilter(e.target.value)}
-              className="w-full text-[9px] font-bold border border-slate-200 rounded p-1 bg-slate-50 text-slate-700 focus:outline-none"
-              title="Filtrar por condición de asistencia"
-            >
-              <option value="todos">Todos los trabajadores</option>
-              <option value="disponibles">Solo disponibles / aptos</option>
-              <option value="novedades">Con novedades (Vac/Lic/Aus)</option>
-            </select>
+            {/* Filtros de asistencia y tipo de dotación */}
+            <div className="grid grid-cols-2 gap-1">
+              <select
+                value={staffAttendanceFilter}
+                onChange={e => setStaffAttendanceFilter(e.target.value)}
+                className="w-full text-[9px] font-bold border border-slate-200 rounded p-1 bg-slate-50 text-slate-700 focus:outline-none"
+                title="Filtrar por condición de asistencia"
+              >
+                <option value="todos">Asistencia: Todos</option>
+                <option value="disponibles">Solo disponibles</option>
+                <option value="novedades">Con novedades</option>
+              </select>
+              <select
+                value={staffTipoFilter}
+                onChange={e => setStaffTipoFilter(e.target.value)}
+                className="w-full text-[9px] font-bold border border-slate-200 rounded p-1 bg-slate-50 text-slate-700 focus:outline-none"
+                title="Filtrar por tipo de dotación"
+              >
+                <option value="todos">Tipo: Todos</option>
+                <option value="Propia">Solo Propia</option>
+                <option value="Externo">Solo Externo</option>
+              </select>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-1 space-y-1">
@@ -1502,9 +1521,19 @@ export default function AssignmentControl() {
                       <p className="text-[11px] font-bold text-slate-800 truncate" title={staff.name}>
                         {staff.name}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-0.5">
+                      <div className="flex items-center gap-1 mt-0.5 flex-wrap">
                         <span className="text-[9px] text-slate-400 font-mono">
                           {staff.rut || 'S/RUT'}
+                        </span>
+                        <span 
+                          className={`px-1 py-0.2 rounded text-[8px] font-semibold ${
+                            staff.tipo_dotacion === 'Externo'
+                              ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                              : 'bg-blue-50 text-blue-600 border border-blue-200'
+                          }`}
+                          title={`Tipo dotación: ${staff.tipo_dotacion || 'Propia'}`}
+                        >
+                          {staff.tipo_dotacion === 'Externo' ? 'Ext' : 'Prop'}
                         </span>
                         {attStyle && (
                           <span 
@@ -1798,7 +1827,14 @@ export default function AssignmentControl() {
                         >
                           {row.conductor_name ? (
                             <span className="flex items-center justify-between gap-1">
-                              <span className="truncate">{row.conductor_name}</span>
+                              <span className="truncate flex items-center gap-1">
+                                <span className="truncate">{row.conductor_name}</span>
+                                {staffList.find(s => s.name === row.conductor_name)?.tipo_dotacion === 'Externo' && (
+                                  <span className="px-1 py-0.2 rounded text-[7px] font-black bg-purple-100 text-purple-700 border border-purple-200 shrink-0" title="Dotación Externa">
+                                    EXT
+                                  </span>
+                                )}
+                              </span>
                               <button 
                                 onClick={() => updateAssignmentField(activeDate, row.id, 'conductor_name', '')}
                                 className="text-slate-400 hover:text-red-500 text-[10px]"
@@ -1820,7 +1856,14 @@ export default function AssignmentControl() {
                         >
                           {row.aux1_name ? (
                             <span className="flex items-center justify-between gap-1">
-                              <span className="truncate font-medium">{row.aux1_name}</span>
+                              <span className="truncate font-medium flex items-center gap-1">
+                                <span className="truncate">{row.aux1_name}</span>
+                                {staffList.find(s => s.name === row.aux1_name)?.tipo_dotacion === 'Externo' && (
+                                  <span className="px-1 py-0.2 rounded text-[7px] font-black bg-purple-100 text-purple-700 border border-purple-200 shrink-0" title="Dotación Externa">
+                                    EXT
+                                  </span>
+                                )}
+                              </span>
                               <button 
                                 onClick={() => updateAssignmentField(activeDate, row.id, 'aux1_name', '')}
                                 className="text-slate-400 hover:text-red-500 text-[10px]"

@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 
 export default function ManageStaff() {
-  const { staffList, fetchStaff, isLoading } = useStaffStore();
+  const { staffList, fetchStaff, isLoading, updateStaffTipoDotacion } = useStaffStore();
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modal State
@@ -32,7 +32,7 @@ export default function ManageStaff() {
 
   // Actions
   const handleEditClick = (staff) => {
-    setEditingStaff({ ...staff });
+    setEditingStaff({ ...staff, tipo_dotacion: staff.tipo_dotacion || 'Propia' });
     setIsModalOpen(true);
   };
 
@@ -77,16 +77,36 @@ export default function ManageStaff() {
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     try {
-      const { error } = await supabase
-        .from('staff')
-        .update({
-          name: editingStaff.name,
-          role: editingStaff.role,
-          status: editingStaff.status
-        })
-        .eq('id', editingStaff.id);
+      const tipo = editingStaff.tipo_dotacion || 'Propia';
+      if (updateStaffTipoDotacion) {
+        await updateStaffTipoDotacion(editingStaff.id, tipo);
+      }
 
-      if (error) throw error;
+      try {
+        const { error } = await supabase
+          .from('staff')
+          .update({
+            name: editingStaff.name,
+            role: editingStaff.role,
+            status: editingStaff.status,
+            tipo_dotacion: tipo
+          })
+          .eq('id', editingStaff.id);
+
+        if (error) throw error;
+      } catch (subErr) {
+        // Fallback si la columna tipo_dotacion no existe en la base de datos
+        const { error } = await supabase
+          .from('staff')
+          .update({
+            name: editingStaff.name,
+            role: editingStaff.role,
+            status: editingStaff.status
+          })
+          .eq('id', editingStaff.id);
+
+        if (error) throw error;
+      }
       
       toast.success('Datos actualizados correctamente');
       setIsModalOpen(false);
@@ -123,6 +143,7 @@ export default function ManageStaff() {
               <th className="px-4 py-3 font-medium">RUT</th>
               <th className="px-4 py-3 font-medium">Nombre</th>
               <th className="px-4 py-3 font-medium">Cargo</th>
+              <th className="px-4 py-3 font-medium">Tipo</th>
               <th className="px-4 py-3 font-medium">Estado</th>
               <th className="px-4 py-3 font-medium text-right">Acciones</th>
             </tr>
@@ -130,13 +151,13 @@ export default function ManageStaff() {
           <tbody className="divide-y divide-slate-100">
             {isLoading && staffList.length === 0 ? (
               <tr>
-                <td colSpan="5" className="px-4 py-8 text-center text-slate-500">
+                <td colSpan="6" className="px-4 py-8 text-center text-slate-500">
                   Cargando dotación...
                 </td>
               </tr>
             ) : filteredStaff.length === 0 ? (
               <tr>
-                <td colSpan="5" className="px-4 py-8 text-center text-slate-500">
+                <td colSpan="6" className="px-4 py-8 text-center text-slate-500">
                   No se encontraron registros
                 </td>
               </tr>
@@ -146,6 +167,15 @@ export default function ManageStaff() {
                   <td className="px-4 py-3 text-slate-600 font-medium">{staff.rut}</td>
                   <td className="px-4 py-3 text-slate-900">{staff.name}</td>
                   <td className="px-4 py-3 text-slate-600">{staff.role}</td>
+                  <td className="px-4 py-3">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                      staff.tipo_dotacion === 'Externo'
+                        ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                        : 'bg-blue-100 text-blue-700 border border-blue-200'
+                    }`}>
+                      {staff.tipo_dotacion || 'Propia'}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                       staff.status === 'Activo' 
@@ -233,6 +263,15 @@ export default function ManageStaff() {
                   { value: 'Movilizador A4 Día', label: 'Movilizador A4 Día' }
                 ]}
                 required
+              />
+              <Select 
+                label="Tipo de Dotación"
+                value={editingStaff.tipo_dotacion || 'Propia'}
+                onChange={(e) => setEditingStaff({...editingStaff, tipo_dotacion: e.target.value})}
+                options={[
+                  { value: 'Propia', label: 'Propia' },
+                  { value: 'Externo', label: 'Externo' }
+                ]}
               />
               <Select 
                 label="Estado"

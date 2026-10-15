@@ -23,7 +23,7 @@ export default function AddStaff() {
   const [activeTab, setActiveTab] = useState('manual');
   
   // Tab 1: Carga Manual
-  const [formData, setFormData] = useState({ rut: '', name: '', role: '', status: 'Activo' });
+  const [formData, setFormData] = useState({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia' });
   const { addStaff, addStaffBulk, isLoading } = useStaffStore();
 
   const handleManualSubmit = async (e) => {
@@ -34,7 +34,7 @@ export default function AddStaff() {
     }
     const success = await addStaff(formData);
     if (success) {
-      setFormData({ rut: '', name: '', role: '', status: 'Activo' });
+      setFormData({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia' });
     }
   };
 
@@ -72,6 +72,17 @@ export default function AddStaff() {
           const rawName = getValue(row, ['conductor/auxiliar', 'nombre', 'empleado']);
           const rawRole = getValue(row, ['cargo', 'puesto']);
           let rawStatus = getValue(row, ['estado', 'status', 'vigencia']);
+          const rawTipo = getValue(row, ['tipo de dotación', 'tipo de dotacion', 'tipo dotacion', 'tipo dotación', 'tipo', 'dotacion', 'dotación']);
+
+          let tipoDotacion = 'Propia';
+          if (rawTipo) {
+            const s = rawTipo.toString().toLowerCase().trim();
+            if (s.includes('ext')) {
+              tipoDotacion = 'Externo';
+            } else if (s.includes('prop')) {
+              tipoDotacion = 'Propia';
+            }
+          }
 
           if (rawStatus && rawStatus.toString().toUpperCase().includes('VIGENTE')) {
             rawStatus = 'Activo';
@@ -89,6 +100,7 @@ export default function AddStaff() {
             name: rawName || '',
             role: role,
             status: rawStatus,
+            tipo_dotacion: tipoDotacion,
             isValid: !!formattedRut && !!rawName && !!role
           };
         });
@@ -117,11 +129,12 @@ export default function AddStaff() {
   });
 
   const handleBulkSubmit = async () => {
-    const validData = previewData.filter(d => d.isValid).map(({ rut, name, role, status }) => ({
+    const validData = previewData.filter(d => d.isValid).map(({ rut, name, role, status, tipo_dotacion }) => ({
       rut: String(rut).trim(),
       name: String(name).trim(),
       role: String(role).trim(),
-      status: String(status).trim()
+      status: String(status).trim(),
+      tipo_dotacion: tipo_dotacion || 'Propia'
     }));
     
     if (validData.length === 0) {
@@ -192,6 +205,15 @@ export default function AddStaff() {
             required
           />
           <Select 
+            label="Tipo de Dotación"
+            value={formData.tipo_dotacion || 'Propia'}
+            onChange={(e) => setFormData({...formData, tipo_dotacion: e.target.value})}
+            options={[
+              { value: 'Propia', label: 'Propia' },
+              { value: 'Externo', label: 'Externo' }
+            ]}
+          />
+          <Select 
             label="Estado"
             value={formData.status}
             onChange={(e) => setFormData({...formData, status: e.target.value})}
@@ -222,8 +244,8 @@ export default function AddStaff() {
               <p className="text-slate-600 font-medium">Arrastra y suelta tu archivo Excel aquí</p>
               <p className="text-xs text-slate-400 mt-2">O haz clic para seleccionar un archivo (.xlsx)</p>
               <div className="mt-4 p-4 bg-yellow-50 rounded-lg text-left text-sm text-yellow-800">
-                <span className="font-semibold block mb-1">Columnas obligatorias en el Excel:</span>
-                "Rut", "Conductor/Auxiliar", "Cargo", "Estado"
+                <span className="font-semibold block mb-1">Columnas en el Excel:</span>
+                "Rut", "Conductor/Auxiliar", "Cargo", "Estado", "Tipo Dotación" (Propia / Externo - Opcional)
               </div>
             </div>
           )}
@@ -248,6 +270,7 @@ export default function AddStaff() {
                       <th className="px-4 py-3 font-medium">RUT</th>
                       <th className="px-4 py-3 font-medium">Nombre</th>
                       <th className="px-4 py-3 font-medium">Cargo</th>
+                      <th className="px-4 py-3 font-medium">Tipo Dotación</th>
                       <th className="px-4 py-3 font-medium">Status</th>
                     </tr>
                   </thead>
@@ -263,6 +286,11 @@ export default function AddStaff() {
                         <td className="px-4 py-3 text-slate-600">{row.rut || '-'}</td>
                         <td className="px-4 py-3 font-medium text-slate-900">{row.name || '-'}</td>
                         <td className="px-4 py-3 text-slate-600">{row.role || '-'}</td>
+                        <td className="px-4 py-3 text-slate-600">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${row.tipo_dotacion === 'Externo' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {row.tipo_dotacion || 'Propia'}
+                          </span>
+                        </td>
                         <td className="px-4 py-3 text-slate-600">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${row.status === 'Activo' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'}`}>
                             {row.status}
