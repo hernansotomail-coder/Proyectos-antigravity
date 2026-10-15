@@ -277,7 +277,8 @@ export default function AssignmentControl() {
     clearSlotFromRows,
     saveDisponibilizacion,
     recordChangeAudit,
-    aperturarRutaEnDisponibilizacion
+    aperturarRutaEnDisponibilizacion,
+    addExtraServices
   } = usePlanningStore();
 
   const availableDates = useMemo(() => {
@@ -417,6 +418,126 @@ export default function AssignmentControl() {
     targetRole: 'conductor',
     condition: ''
   });
+
+  // Modal de Servicios Extras (Requisito 5)
+  const [isExtraServicesModalOpen, setIsExtraServicesModalOpen] = useState(false);
+  const [extraServiceRows, setExtraServiceRows] = useState([
+    {
+      id: 1,
+      fecha: activeDate || '14-10-2026',
+      conductor_name: '',
+      conductor_rut: '',
+      aux1_name: '',
+      aux1_rut: '',
+      camion: '',
+      tipo_equipo: 'Camión',
+      rampla: '',
+      servicio: 'Retiro camión',
+      nota: ''
+    }
+  ]);
+
+  const handleOpenExtraServicesModal = () => {
+    setExtraServiceRows([
+      {
+        id: Date.now(),
+        fecha: activeDate || '14-10-2026',
+        conductor_name: '',
+        conductor_rut: '',
+        aux1_name: '',
+        aux1_rut: '',
+        camion: '',
+        tipo_equipo: 'Camión',
+        rampla: '',
+        servicio: 'Retiro camión',
+        nota: ''
+      }
+    ]);
+    setIsExtraServicesModalOpen(true);
+  };
+
+  const handleAddExtraServiceRow = () => {
+    setExtraServiceRows(prev => [
+      ...prev,
+      {
+        id: Date.now() + Math.random(),
+        fecha: activeDate || '14-10-2026',
+        conductor_name: '',
+        conductor_rut: '',
+        aux1_name: '',
+        aux1_rut: '',
+        camion: '',
+        tipo_equipo: 'Camión',
+        rampla: '',
+        servicio: 'Retiro camión',
+        nota: ''
+      }
+    ]);
+  };
+
+  const handleRemoveExtraServiceRow = (rowId) => {
+    if (extraServiceRows.length === 1) {
+      toast.warning('Debe haber al menos una fila de servicio.');
+      return;
+    }
+    setExtraServiceRows(prev => prev.filter(r => r.id !== rowId));
+  };
+
+  const handleUpdateExtraServiceRow = (rowId, field, value) => {
+    setExtraServiceRows(prev => prev.map(r => {
+      if (r.id !== rowId) return r;
+      const updated = { ...r, [field]: value };
+      if (field === 'conductor_name') {
+        const found = staffList.find(s => s.name === value);
+        if (found) updated.conductor_rut = found.rut || '';
+      }
+      if (field === 'aux1_name') {
+        const found = staffList.find(s => s.name === value);
+        if (found) updated.aux1_rut = found.rut || '';
+      }
+      if (field === 'camion') {
+        const found = fleetList.find(t => {
+          const id = t.internal_number ? `${t.internal_number} (${t.plate})` : t.plate;
+          return id === value || t.plate === value || t.internal_number === value;
+        });
+        if (found) updated.tipo_equipo = found.type || 'Camión';
+      }
+      return updated;
+    }));
+  };
+
+  const handleConfirmSaveExtraServices = () => {
+    const invalid = extraServiceRows.filter(r => !r.conductor_name || !r.camion || !r.servicio);
+    if (invalid.length > 0) {
+      toast.error('Completa los campos obligatorios: Conductor, Camión y Servicio en todas las filas.');
+      return;
+    }
+
+    const payload = extraServiceRows.map((r, idx) => ({
+      fecha: r.fecha || activeDate,
+      conductor_name: r.conductor_name,
+      conductor_rut: r.conductor_rut || '',
+      aux1_name: r.aux1_name || '',
+      aux1_rut: r.aux1_rut || '',
+      camion: r.camion,
+      tipo_equipo: r.tipo_equipo || 'Camión',
+      rampla: r.rampla || '',
+      servicio: r.servicio === 'Otro' ? (r.nota || 'Servicio especial') : (r.nota ? `${r.servicio} - ${r.nota}` : r.servicio),
+      ruta: `EXTRA-${idx + 1}`,
+      nota: r.nota || ''
+    }));
+
+    const ok = addExtraServices(payload);
+    if (ok) {
+      setIsExtraServicesModalOpen(false);
+      toast.success('Servicios extras guardados y transmitidos al Histórico de Disponibilización exitosamente.', {
+        action: {
+          label: 'Ver Histórico',
+          onClick: () => navigate('/history')
+        }
+      });
+    }
+  };
 
   // Entidad enfocada (al pinchar en Dotación o Camión para ver solo sus rutas asignadas - Requisito 4)
   const [focusedEntity, setFocusedEntity] = useState(null);
@@ -1030,11 +1151,8 @@ export default function AssignmentControl() {
 
       if (parsed.type === 'staff') {
         const staff = parsed.data;
-        const roleLower = (staff.role || '').toLowerCase();
-        let targetSlot = slotPreference;
-        if (slotPreference === 'conductor' && (roleLower.includes('auxiliar') || roleLower.includes('movilizador'))) {
-          targetSlot = 'auxiliar';
-        }
+        // Requisito 2: Permitir arrastrar Auxiliares como Conductor en la columna Conductor
+        const targetSlot = slotPreference;
         handleRequestAssignStaff(staff, targetSlot, targetIds);
       } else if (parsed.type === 'truck' || parsed.type === 'rampla') {
         // En la columna Rampla o Camión se pueden arrastrar camiones indistintamente (Requisito 5)
@@ -1165,6 +1283,16 @@ export default function AssignmentControl() {
           >
             <Scissors size={13} />
             Aperturar Ruta
+          </Button>
+
+          {/* Botón Registrar Servicio Extra (Requisito 5) */}
+          <Button 
+            onClick={() => handleOpenExtraServicesModal()}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl"
+            title="Registrar servicios extras (Retiro camión, Taller, Vulcanización, Traspasos, Apoyo Centro, etc.)"
+          >
+            <Plus size={13} />
+            Servicio Extra
           </Button>
 
           <Button 
@@ -1482,10 +1610,8 @@ export default function AssignmentControl() {
                         title="Seleccionar todas"
                       />
                     </th>
-                    <th className="px-2.5 py-2">Fecha</th>
-                    
-                    {/* N° de vuelta al lado de Fecha, vacía inicialmente con lista 1 al 8 */}
-                    <th className="px-2.5 py-2 text-center bg-amber-50/70 text-amber-900 border-x border-amber-200">
+                    {/* N° de vuelta, vacía inicialmente con lista 1 al 8 */}
+                    <th className="px-2.5 py-2 text-center bg-amber-50/70 text-amber-900 border-r border-amber-200">
                       N° de vuelta
                     </th>
 
@@ -1499,7 +1625,6 @@ export default function AssignmentControl() {
                     <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar 2</th>
                     <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Camión</th>
                     <th className="px-2.5 py-2 text-teal-700 bg-teal-50/40">Rampla</th>
-                    <th className="px-2.5 py-2">Tipo de servicio</th>
                     <th className="px-2.5 py-2">Cliente</th>
                     <th className="px-2.5 py-2">Referencia</th>
                     <th className="px-2.5 py-2 text-center">Cantidad de Locales</th>
@@ -1528,11 +1653,8 @@ export default function AssignmentControl() {
                           />
                         </td>
 
-                        {/* 1. Fecha */}
-                        <td className="px-2.5 py-2 font-semibold text-slate-600">{row.fecha}</td>
-
-                        {/* 2. N° de vuelta (Ubicada al lado de Fecha, vacía inicialmente, lista 1 al 8) */}
-                        <td className="px-2 py-2 text-center bg-amber-50/30 border-x border-amber-100">
+                        {/* N° de vuelta (vacía inicialmente, lista 1 al 8) */}
+                        <td className="px-2 py-2 text-center bg-amber-50/30 border-r border-amber-100">
                           <select
                             value={row.n_vuelta || ''}
                             onChange={(e) => updateAssignmentField(activeDate, row.id, 'n_vuelta', e.target.value)}
@@ -1796,25 +1918,6 @@ export default function AssignmentControl() {
                               </button>
                             )}
                           </div>
-                        </td>
-
-                        {/* 10. Tipo de servicio */}
-                        <td className="px-2.5 py-2">
-                          <select
-                            value={row.tipo_servicio || 'Centralizado'}
-                            onChange={(e) => updateAssignmentField(activeDate, row.id, 'tipo_servicio', e.target.value)}
-                            className={`text-[10px] font-bold border rounded-full px-2 py-0.5 ${
-                              SERVICE_COLORS[row.tipo_servicio] || 'bg-slate-100 text-slate-700'
-                            }`}
-                          >
-                            <option value="Centralizado">Centralizado</option>
-                            <option value="Distribución">Distribución</option>
-                            <option value="Carga Consolidada">Carga Consolidada</option>
-                            <option value="Carretera">Carretera</option>
-                            <option value="CDKL">CDKL</option>
-                            <option value="Servicios distribución">Servicios distribución</option>
-                            <option value="Servicio especial">Servicio especial</option>
-                          </select>
                         </td>
 
                         {/* 11. Cliente */}
@@ -2787,6 +2890,228 @@ export default function AssignmentControl() {
               >
                 Sí, asignar de todas formas
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL PARA AGREGAR SERVICIOS EXTRAS (Requisito 5) */}
+      {isExtraServicesModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-5xl w-full p-5 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                  <Plus size={22} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 leading-tight">
+                    Registrar Servicios Extras — Disponibilización
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Completa las filas de servicios operativos adicionales (Taller, Vulcanización, Traspasos, etc.) y transmítelos al Histórico.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsExtraServicesModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Datalists para autocompletado y escritura libre */}
+            <datalist id="conductores-extra-datalist">
+              {staffList.filter(s => (s.role || '').toLowerCase().includes('conductor')).map(s => (
+                <option key={s.id} value={s.name}>{s.name} ({s.rut || 'S/RUT'})</option>
+              ))}
+            </datalist>
+
+            <datalist id="auxiliares-extra-datalist">
+              {staffList.filter(s => !(s.role || '').toLowerCase().includes('conductor')).map(s => (
+                <option key={s.id} value={s.name}>{s.name} ({s.rut || 'S/RUT'})</option>
+              ))}
+            </datalist>
+
+            <datalist id="camiones-extra-datalist">
+              {fleetList.map(t => {
+                const id = t.internal_number ? `${t.internal_number} (${t.plate})` : t.plate;
+                return <option key={t.id} value={id}>{id} - {t.type || 'Camión'}</option>;
+              })}
+            </datalist>
+
+            <datalist id="ramplas-extra-datalist">
+              {fleetList.filter(t => (t.type || '').toLowerCase().includes('semirremolque') || (t.type || '').toLowerCase().includes('rampla')).map(t => {
+                const id = t.internal_number || t.plate;
+                return <option key={t.id} value={id}>{id}</option>;
+              })}
+            </datalist>
+
+            {/* Tabla interactiva de filas de servicios extras */}
+            <div className="flex-1 overflow-auto border border-slate-200 rounded-xl my-3 bg-slate-50/40 p-2 min-h-0">
+              <table className="w-full text-left text-xs whitespace-nowrap">
+                <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-10 border-b border-slate-200 text-[11px]">
+                  <tr>
+                    <th className="px-2 py-2 w-7 text-center">#</th>
+                    <th className="px-2.5 py-2 w-28">Fecha</th>
+                    <th className="px-2.5 py-2">Conductor *</th>
+                    <th className="px-2.5 py-2">Auxiliar</th>
+                    <th className="px-2.5 py-2">Camión *</th>
+                    <th className="px-2.5 py-2 w-28">Rampla (opcional)</th>
+                    <th className="px-2.5 py-2">Servicio *</th>
+                    <th className="px-2.5 py-2">Anotación / Detalle</th>
+                    <th className="px-2 py-2 w-10 text-center"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/80 bg-white">
+                  {extraServiceRows.map((row, idx) => (
+                    <tr key={row.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-2 py-2 text-center text-slate-400 font-mono text-[11px]">
+                        {idx + 1}
+                      </td>
+
+                      {/* Fecha */}
+                      <td className="px-2 py-1.5">
+                        <input 
+                          type="text"
+                          value={row.fecha}
+                          onChange={(e) => handleUpdateExtraServiceRow(row.id, 'fecha', e.target.value)}
+                          placeholder="DD-MM-YYYY"
+                          className="w-24 px-2 py-1 text-xs font-semibold border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                        />
+                      </td>
+
+                      {/* Conductor */}
+                      <td className="px-2 py-1.5">
+                        <input 
+                          type="text"
+                          list="conductores-extra-datalist"
+                          value={row.conductor_name}
+                          onChange={(e) => handleUpdateExtraServiceRow(row.id, 'conductor_name', e.target.value)}
+                          placeholder="Elegir o escribir chofer..."
+                          className="w-48 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white font-medium"
+                        />
+                      </td>
+
+                      {/* Auxiliar */}
+                      <td className="px-2 py-1.5">
+                        <input 
+                          type="text"
+                          list="auxiliares-extra-datalist"
+                          value={row.aux1_name}
+                          onChange={(e) => handleUpdateExtraServiceRow(row.id, 'aux1_name', e.target.value)}
+                          placeholder="Auxiliar opcional..."
+                          className="w-40 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                        />
+                      </td>
+
+                      {/* Camión */}
+                      <td className="px-2 py-1.5">
+                        <input 
+                          type="text"
+                          list="camiones-extra-datalist"
+                          value={row.camion}
+                          onChange={(e) => handleUpdateExtraServiceRow(row.id, 'camion', e.target.value)}
+                          placeholder="Elegir camión..."
+                          className="w-36 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white font-medium"
+                        />
+                      </td>
+
+                      {/* Rampla */}
+                      <td className="px-2 py-1.5">
+                        <input 
+                          type="text"
+                          list="ramplas-extra-datalist"
+                          value={row.rampla}
+                          onChange={(e) => handleUpdateExtraServiceRow(row.id, 'rampla', e.target.value)}
+                          placeholder="Rampla..."
+                          className="w-28 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                        />
+                      </td>
+
+                      {/* Servicio Dropdown */}
+                      <td className="px-2 py-1.5">
+                        <select
+                          value={row.servicio}
+                          onChange={(e) => handleUpdateExtraServiceRow(row.id, 'servicio', e.target.value)}
+                          className="px-2 py-1 text-xs font-bold border border-indigo-300 rounded-lg bg-indigo-50/50 text-indigo-900 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
+                        >
+                          <option value="Retiro camión">Retiro camión</option>
+                          <option value="Servicio de taller">Servicio de taller</option>
+                          <option value="Servicio de vulcanización">Servicio de vulcanización</option>
+                          <option value="Traspasos">Traspasos</option>
+                          <option value="Apoyo Centro">Apoyo Centro</option>
+                          <option value="Otro">Otro (anotar personalización)</option>
+                        </select>
+                      </td>
+
+                      {/* Anotación libre */}
+                      <td className="px-2 py-1.5">
+                        <input 
+                          type="text"
+                          value={row.nota}
+                          onChange={(e) => handleUpdateExtraServiceRow(row.id, 'nota', e.target.value)}
+                          placeholder="Anotar detalle opcional..."
+                          className="w-48 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                        />
+                      </td>
+
+                      {/* Eliminar fila */}
+                      <td className="px-2 py-1.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveExtraServiceRow(row.id)}
+                          className="text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-50 transition-colors"
+                          title="Eliminar fila"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Botón para agregar más filas */}
+            <div className="flex items-center justify-between pb-3 shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleAddExtraServiceRow}
+                className="flex items-center gap-1.5 text-xs text-indigo-700 border-indigo-200 hover:bg-indigo-50"
+              >
+                <Plus size={14} />
+                + Agregar otra fila de servicio
+              </Button>
+              <span className="text-xs text-slate-400">
+                {extraServiceRows.length} fila(s) de servicio
+              </span>
+            </div>
+
+            {/* Footer actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 shrink-0">
+              <span className="text-[11px] text-slate-500">
+                Se guardará con la fecha indicada y quedará registrado en <strong className="text-slate-700">Histórico de Disponibilización</strong>.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsExtraServicesModalOpen(false)}
+                  className="text-xs"
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleConfirmSaveExtraServices}
+                  className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+                >
+                  <Save size={14} />
+                  Guardar y Transmitir a Histórico
+                </Button>
+              </div>
             </div>
           </div>
         </div>

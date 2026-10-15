@@ -582,8 +582,8 @@ export const usePlanningStore = create((set, get) => ({
       rawRows.forEach((row, idx) => {
         const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
         const ruta = String(rutaRaw).trim();
-        // Requisito 1: Considerar sólo rutas con 4 dígitos y que NO partan con 0
-        if (!/^[1-9]\d{3}$/.test(ruta)) return;
+        // Requisito 1: Permitir todas las rutas (incluyendo más de 4 dígitos o que partan con 0)
+        if (!ruta) return;
 
         const nombreRuta = String(row['Nombre Ruta'] || row.nombre_ruta || row.NombreRuta || row.Cliente || '').trim();
         const destino = String(row.Destino || row.destino || '').trim();
@@ -678,11 +678,13 @@ export const usePlanningStore = create((set, get) => ({
           fecha: g.fecha,
           transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
           ambientes: Array.from(ambientesSet),
-          recuentoDestino: g.destinosSet.size,
+          recuentoDestino: g.destinosSet.size || (new Set(sortedParadas.map(p => p.destino)).size) || 1,
           sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
           sumaPeso: Number(g.sumaPeso.toFixed(2)),
           sumaCantCJ: Math.round(g.sumaCantCJ),
-          paradas: sortedParadas
+          paradas: sortedParadas,
+          isStandard4Digit: /^[1-9]\d{3}$/.test(g.ruta),
+          isSpecialRoute: !/^[1-9]\d{3}$/.test(g.ruta)
         };
       });
 
@@ -1264,6 +1266,77 @@ export const usePlanningStore = create((set, get) => ({
     });
 
     toast.success(`¡Ruta ${cleanNewNumber} aperturada con éxito en Disponibilización con ${movedParadas.length} parada(s)!`);
+    return true;
+  },
+
+  // AGREGAR SERVICIOS EXTRAS (Requisito 5)
+  // Permite agregar filas de servicios operativos adicionales (Retiro camión, Taller, Vulcanización, Traspasos, Apoyo Centro, etc.)
+  // y transmitirlos a Histórico de Disponibilización con su fecha de registro.
+  addExtraServices: (extraRows) => {
+    if (!extraRows || !Array.isArray(extraRows) || extraRows.length === 0) {
+      toast.warning('No hay servicios extras para guardar.');
+      return false;
+    }
+
+    const { transmittedAssignments } = get();
+    const nextAssignments = { ...transmittedAssignments };
+    const affectedDates = new Set();
+
+    extraRows.forEach((item, idx) => {
+      const fecha = normalizeDate(item.fecha) || '14-10-2026';
+      affectedDates.add(fecha);
+
+      if (!nextAssignments[fecha]) {
+        nextAssignments[fecha] = [];
+      }
+
+      const newId = `extra-${fecha}-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`;
+      const extraAssignmentRow = {
+        id: newId,
+        fecha: fecha,
+        conductor_name: item.conductor_name || '',
+        conductor_rut: item.conductor_rut || '',
+        aux1_name: item.aux1_name || '',
+        aux1_rut: item.aux1_rut || '',
+        aux2_name: item.aux2_name || '',
+        aux2_rut: item.aux2_rut || '',
+        camion: item.camion || '',
+        tipo_equipo: item.tipo_equipo || 'Camión',
+        rampla: item.rampla || '',
+        n_vuelta: item.n_vuelta || '1',
+        tipo_servicio: item.servicio || 'Servicio especial',
+        ruta: item.ruta || `EXT-${nextAssignments[fecha].length + 1}`,
+        cliente: item.servicio || 'Servicio Extra',
+        referencia: item.nota || 'Servicio Extra Operativo',
+        locales: 1,
+        m3: 0,
+        peso: 0,
+        cantCJ: 0,
+        transportista: item.transportista || '',
+        isExtraService: true,
+        paradas: []
+      };
+
+      nextAssignments[fecha].push(extraAssignmentRow);
+    });
+
+    persistAssignments(nextAssignments);
+
+    // Sincronizar cada fecha afectada con savedRuteo y savedHistory
+    let currentStoreState = { ...get(), transmittedAssignments: nextAssignments };
+    affectedDates.forEach(f => {
+      const rowsForF = nextAssignments[f] || [];
+      const synced = syncHistoryAndSavedForDate(currentStoreState, f, rowsForF);
+      currentStoreState = { ...currentStoreState, ...synced };
+    });
+
+    set({
+      transmittedAssignments: nextAssignments,
+      savedRuteoByDate: currentStoreState.savedRuteoByDate,
+      savedHistoryList: currentStoreState.savedHistoryList
+    });
+
+    toast.success(`¡${extraRows.length} servicio(s) extra(s) guardado(s) y transmitido(s) a Histórico de Disponibilización!`);
     return true;
   }
 }));

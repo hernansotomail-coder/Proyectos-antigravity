@@ -55,6 +55,17 @@ export default function DailyPlanning() {
   const [expandedRoute, setExpandedRoute] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [routeTypeFilter, setRouteTypeFilter] = useState('all'); // 'all' | 'standard' | 'special'
+  const [selectedRouteIds, setSelectedRouteIds] = useState([]);
+
+  // Mantener seleccionadas por defecto las rutas cargadas
+  React.useEffect(() => {
+    if (transformedRoutes.length > 0) {
+      setSelectedRouteIds(transformedRoutes.map(r => r.id));
+    } else {
+      setSelectedRouteIds([]);
+    }
+  }, [transformedRoutes]);
 
   // Pop-up modal de Confirmación y Alerta de Transmisión a Disponibilización (Requisito 3)
   const [isTransmitModalOpen, setIsTransmitModalOpen] = useState(false);
@@ -91,27 +102,20 @@ export default function DailyPlanning() {
           return;
         }
 
-        // Requisito 1: Considerar sólo rutas con 4 dígitos y que NO partan con 0 (/^[1-9]\d{3}$/)
+        // Requisito 1: Aceptar todas las rutas válidas (incluyendo >4 dígitos y las que parten con 0)
         const validRows = rawData.filter(row => {
           const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
-          const rutaStr = String(rutaRaw).trim();
-          return /^[1-9]\d{3}$/.test(rutaStr);
+          return String(rutaRaw).trim().length > 0;
         });
 
         if (validRows.length === 0) {
-          toast.error('No se encontraron filas con rutas válidas de 4 dígitos (sin iniciar en 0).');
+          toast.error('No se encontraron filas con número o nombre de ruta en el archivo.');
           setIsLoading(false);
           return;
         }
 
-        const discardedCount = rawData.length - validRows.length;
         setRawRows(validRows, file.name);
-
-        if (discardedCount > 0) {
-          toast.success(`Archivo cargado: ${validRows.length} filas válidas de 4 dígitos. Se omitieron ${discardedCount} filas con rutas no válidas.`);
-        } else {
-          toast.success(`Archivo cargado: ${validRows.length} filas leídas de "${sheetName}"`);
-        }
+        toast.success(`Archivo cargado: ${validRows.length} filas leídas de "${sheetName}"`);
         setActiveTab('carga');
       } catch (err) {
         console.error('Error al leer Excel:', err);
@@ -136,6 +140,58 @@ export default function DailyPlanning() {
     if (ok) {
       setActiveTab('ruteo');
     }
+  };
+
+  // Manejadores de selección de rutas (Requisito 1)
+  const handleSelectAllRoutes = () => {
+    setSelectedRouteIds(transformedRoutes.map(r => r.id));
+  };
+
+  const handleSelectStandardRoutes = () => {
+    const stdIds = transformedRoutes
+      .filter(r => /^[1-9]\d{3}$/.test(String(r.ruta).trim()))
+      .map(r => r.id);
+    setSelectedRouteIds(stdIds);
+  };
+
+  const handleSelectSpecialRoutes = () => {
+    const specIds = transformedRoutes
+      .filter(r => !/^[1-9]\d{3}$/.test(String(r.ruta).trim()))
+      .map(r => r.id);
+    setSelectedRouteIds(specIds);
+  };
+
+  const handleClearRouteSelection = () => {
+    setSelectedRouteIds([]);
+  };
+
+  const toggleSelectRoute = (routeId) => {
+    setSelectedRouteIds(prev => 
+      prev.includes(routeId) ? prev.filter(id => id !== routeId) : [...prev, routeId]
+    );
+  };
+
+  // Abrir Modal de Confirmación para Transmitir Seleccionadas (Requisito 1)
+  const promptTransmitSelected = () => {
+    if (!transformedRoutes || transformedRoutes.length === 0) {
+      toast.error('No hay rutas transformadas para transmitir.');
+      return;
+    }
+    const idsToTransmit = selectedRouteIds.length > 0 ? selectedRouteIds : transformedRoutes.map(r => r.id);
+    const targetRoutes = transformedRoutes.filter(r => idsToTransmit.includes(r.id));
+    
+    if (targetRoutes.length === 0) {
+      toast.warning('Selecciona al menos una ruta para transmitir.');
+      return;
+    }
+
+    setTransmitModalData({
+      type: idsToTransmit.length === transformedRoutes.length ? 'all' : 'specific',
+      routeIds: idsToTransmit,
+      routes: targetRoutes,
+      fecha: targetRoutes[0]?.fecha || '14-10-2026'
+    });
+    setIsTransmitModalOpen(true);
   };
 
   // Abrir Modal de Confirmación para Transmitir Todo (Requisito 3)
@@ -211,18 +267,42 @@ export default function DailyPlanning() {
     }
   };
 
-  // Filter transformed routes
-  const filteredRoutes = transformedRoutes.filter(r => 
-    r.ruta.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.nombreRuta.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    r.fecha.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter transformed routes (soporte para filtro estándar vs especiales)
+  const filteredRoutes = useMemo(() => {
+    return transformedRoutes.filter(r => {
+      const isStandard = /^[1-9]\d{3}$/.test(String(r.ruta).trim());
+      if (routeTypeFilter === 'standard' && !isStandard) return false;
+      if (routeTypeFilter === 'special' && isStandard) return false;
 
-  // Aggregated KPI numbers for Ruteo
+      if (searchTerm) {
+        const lower = searchTerm.toLowerCase();
+        const matchRuta = String(r.ruta).toLowerCase().includes(lower);
+        const matchNombre = String(r.nombreRuta || '').toLowerCase().includes(lower);
+        const matchFecha = String(r.fecha || '').toLowerCase().includes(lower);
+        if (!matchRuta && !matchNombre && !matchFecha) return false;
+      }
+      return true;
+    });
+  }, [transformedRoutes, routeTypeFilter, searchTerm]);
+
+  // Conteo de rutas estándar vs especiales (Requisito 1)
+  const standardRoutesCount = useMemo(() => {
+    return transformedRoutes.filter(r => /^[1-9]\d{3}$/.test(String(r.ruta).trim())).length;
+  }, [transformedRoutes]);
+  const specialRoutesCount = transformedRoutes.length - standardRoutesCount;
+
+  // Aggregated KPI numbers for Ruteo (Requisito 7: TOTAL LOCALES = suma de todos los "Recuento distinto de destino" cargados)
   const totalRutas = transformedRoutes.length;
-  const totalLocales = transformedRoutes.reduce((acc, r) => acc + (r.recuentoDestino || 0), 0);
-  const totalVolumen = transformedRoutes.reduce((acc, r) => acc + (r.sumaVolumen || 0), 0).toFixed(2);
-  const totalCajas = transformedRoutes.reduce((acc, r) => acc + (r.sumaCantCJ || 0), 0);
+  const totalLocales = useMemo(() => {
+    return transformedRoutes.reduce((acc, r) => {
+      const count = (r.recuentoDestino !== undefined && r.recuentoDestino !== null)
+        ? Number(r.recuentoDestino)
+        : (new Set((r.paradas || []).map(p => p.destino).filter(Boolean)).size || 1);
+      return acc + (isNaN(count) ? 0 : count);
+    }, 0);
+  }, [transformedRoutes]);
+  const totalVolumen = transformedRoutes.reduce((acc, r) => acc + (parseFloat(r.sumaVolumen) || 0), 0).toFixed(2);
+  const totalCajas = transformedRoutes.reduce((acc, r) => acc + (parseInt(r.sumaCantCJ, 10) || 0), 0);
   const countModified = transformedRoutes.filter(r => r.isModified).length;
 
   return (
@@ -462,7 +542,7 @@ export default function DailyPlanning() {
           {/* Ruteo Pivot Table */}
           <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
             <div className="p-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
                   <input 
@@ -470,42 +550,123 @@ export default function DailyPlanning() {
                     placeholder="Filtrar por Ruta o Nombre..." 
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 w-64 bg-white"
+                    className="pl-9 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 w-52 bg-white"
                   />
                 </div>
-                <span className="text-xs text-slate-500">
-                  {filteredRoutes.length} de {transformedRoutes.length} rutas
-                </span>
+
+                {/* Filtro por Tipo de Ruta (Requisito 1: Permitir ver y elegir rutas >4 dígitos y que parten con 0) */}
+                <div className="flex items-center bg-slate-200/60 p-0.5 rounded-xl text-[11px] font-bold">
+                  <button
+                    type="button"
+                    onClick={() => setRouteTypeFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg transition-all ${
+                      routeTypeFilter === 'all'
+                        ? 'bg-white text-blue-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Todas ({transformedRoutes.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRouteTypeFilter('standard')}
+                    className={`px-2.5 py-1 rounded-lg transition-all ${
+                      routeTypeFilter === 'standard'
+                        ? 'bg-white text-blue-700 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    4 Dígitos ({standardRoutesCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRouteTypeFilter('special')}
+                    className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
+                      routeTypeFilter === 'special'
+                        ? 'bg-amber-50 text-amber-900 border border-amber-300 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Rutas con más de 4 dígitos o que inician con 0"
+                  >
+                    Especiales ({specialRoutesCount})
+                  </button>
+                </div>
+
+                {/* Acciones de selección rápida */}
+                <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                  <span className="font-semibold text-slate-700">
+                    {selectedRouteIds.length} sel.
+                  </span>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={handleSelectAllRoutes}
+                    className="text-blue-600 hover:underline font-bold"
+                  >
+                    Todas
+                  </button>
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={handleSelectStandardRoutes}
+                    className="text-slate-600 hover:text-blue-700 hover:underline"
+                    title="Marcar solo rutas estándar de 4 dígitos"
+                  >
+                    Solo 4 Díg.
+                  </button>
+                  {specialRoutesCount > 0 && (
+                    <>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={handleSelectSpecialRoutes}
+                        className="text-amber-700 hover:underline font-bold"
+                        title="Marcar solo rutas con >4 dígitos o que inicien con 0"
+                      >
+                        Solo Espec.
+                      </button>
+                    </>
+                  )}
+                  <span className="text-slate-300">|</span>
+                  <button
+                    type="button"
+                    onClick={handleClearRouteSelection}
+                    className="text-slate-400 hover:text-red-600 hover:underline"
+                  >
+                    Limpiar
+                  </button>
+                </div>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Botón Transmitir Modificadas (Requisito 4) */}
+                {/* Botón Transmitir Modificadas */}
                 {countModified > 0 && (
                   <Button 
                     onClick={promptTransmitModified}
-                    className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm animate-pulse"
-                    title="Transmite solo las rutas que fueron aperturadas o modificadas, manteniendo el resto en Disponibilización intacto"
+                    className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl shadow-sm animate-pulse"
+                    title="Transmite solo las rutas que fueron aperturadas o modificadas"
                   >
-                    <Sparkles size={14} />
-                    Transmitir Modificadas ({countModified})
+                    <Sparkles size={13} />
+                    Modificadas ({countModified})
                   </Button>
                 )}
 
+                {/* Botón Transmitir Seleccionadas (Requisito 1: elegir cuáles transmitir) */}
                 <Button 
-                  onClick={promptTransmitAll}
-                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm"
-                  title="Transmite todas las rutas a Disponibilización"
+                  onClick={promptTransmitSelected}
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl shadow-sm"
+                  title="Transmite las rutas que estén seleccionadas mediante las casillas"
                 >
-                  <Send size={14} />
-                  Transmitir Todo
+                  <Send size={13} />
+                  Transmitir a Disponibilización ({selectedRouteIds.length})
                 </Button>
 
                 <Button 
                   variant="outline" 
                   onClick={() => navigate('/assignment')}
-                  className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-blue-700"
+                  className="flex items-center gap-1 text-xs text-slate-600 hover:text-blue-700 py-1.5"
                 >
-                  Ver Disponibilización <ArrowRight size={14} />
+                  Ver Disponibilización <ArrowRight size={13} />
                 </Button>
               </div>
             </div>
@@ -514,33 +675,61 @@ export default function DailyPlanning() {
               <table className="w-full text-left text-xs whitespace-nowrap">
                 <thead className="bg-slate-50 text-slate-600 font-semibold sticky top-0 z-10 shadow-sm border-b border-slate-200">
                   <tr>
-                    <th className="px-3 py-2.5 w-10 text-center"></th>
-                    <th className="px-4 py-2.5">Fecha</th>
-                    <th className="px-4 py-2.5">Ruta</th>
+                    <th className="px-2 py-2.5 w-8 text-center">
+                      <input 
+                        type="checkbox" 
+                        checked={transformedRoutes.length > 0 && selectedRouteIds.length === transformedRoutes.length}
+                        onChange={(e) => e.target.checked ? handleSelectAllRoutes() : handleClearRouteSelection()}
+                        className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                        title="Seleccionar / deseleccionar todas las rutas"
+                      />
+                    </th>
+                    <th className="px-2 py-2.5 w-8 text-center"></th>
+                    <th className="px-3 py-2.5">Fecha</th>
+                    <th className="px-3 py-2.5">Ruta</th>
                     <th className="px-4 py-2.5">Nombre Ruta (Cliente)</th>
                     <th className="px-4 py-2.5 text-center">Recuento distinto de Destino</th>
                     <th className="px-4 py-2.5 text-right">Suma de Volumen (m³)</th>
                     <th className="px-4 py-2.5 text-right">Suma de Peso (kg)</th>
                     <th className="px-4 py-2.5 text-right">Suma de cantCJ</th>
-                    <th className="px-4 py-2.5 text-center">Acciones</th>
+                    <th className="px-3 py-2.5 text-center">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {filteredRoutes.map((route) => {
                     const isExpanded = expandedRoute === route.id;
+                    const isSelected = selectedRouteIds.includes(route.id);
+                    const isSpecial = !/^[1-9]\d{3}$/.test(String(route.ruta).trim());
+
                     return (
                       <React.Fragment key={route.id}>
                         <tr 
                           onClick={() => setExpandedRoute(isExpanded ? null : route.id)}
-                          className="hover:bg-blue-50/40 cursor-pointer transition-colors"
+                          className={`hover:bg-blue-50/40 cursor-pointer transition-colors ${
+                            isSelected ? 'bg-blue-50/20' : ''
+                          }`}
                         >
-                          <td className="px-3 py-2 text-center text-slate-400">
-                            {isExpanded ? <ChevronDown size={16} className="text-blue-600" /> : <ChevronRight size={16} />}
+                          <td className="px-2 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input 
+                              type="checkbox" 
+                              checked={isSelected}
+                              onChange={() => toggleSelectRoute(route.id)}
+                              className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5"
+                              title={isSelected ? "Deseleccionar ruta para no transmitirla" : "Seleccionar ruta para transmitirla"}
+                            />
                           </td>
-                          <td className="px-4 py-2 font-medium text-blue-700">{route.fecha}</td>
-                          <td className="px-4 py-2 font-black text-slate-800 text-sm">
-                            <div className="flex items-center gap-1.5">
+                          <td className="px-2 py-2 text-center text-slate-400">
+                            {isExpanded ? <ChevronDown size={15} className="text-blue-600" /> : <ChevronRight size={15} />}
+                          </td>
+                          <td className="px-3 py-2 font-medium text-blue-700">{route.fecha}</td>
+                          <td className="px-3 py-2 font-black text-slate-800 text-sm">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span>{route.ruta}</span>
+                              {isSpecial && (
+                                <span className="bg-amber-100 text-amber-800 border border-amber-300 text-[9px] font-black px-1.5 py-0.2 rounded" title="Ruta especial: más de 4 dígitos o inicia en 0">
+                                  {String(route.ruta).trim().startsWith('0') ? 'Inicia en 0' : '>4 Dígitos'}
+                                </span>
+                              )}
                               {route.isAperturada && (
                                 <span className="bg-emerald-100 text-emerald-800 text-[9px] font-black px-1.5 py-0.2 rounded-full" title={`Aperturada desde Ruta ${route.parentRuta || ''}`}>
                                   Aperturada
@@ -556,18 +745,18 @@ export default function DailyPlanning() {
                           <td className="px-4 py-2 font-semibold text-slate-700">{route.nombreRuta}</td>
                           <td className="px-4 py-2 text-center font-bold">
                             <span className="inline-block bg-slate-100 text-slate-800 px-2.5 py-0.5 rounded-full text-xs">
-                              {route.recuentoDestino}
+                              {route.recuentoDestino || (new Set(route.paradas.map(p => p.destino)).size)}
                             </span>
                           </td>
                           <td className="px-4 py-2 text-right font-mono font-bold text-emerald-700">{route.sumaVolumen}</td>
                           <td className="px-4 py-2 text-right font-mono text-slate-600">{route.sumaPeso}</td>
                           <td className="px-4 py-2 text-right font-mono text-slate-600">{route.sumaCantCJ}</td>
-                          <td className="px-4 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                          <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => promptTransmitSpecific([route.id])}
-                                className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg border border-emerald-200 transition-colors shadow-2xs"
+                                className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded-lg border border-emerald-200 transition-colors shadow-2xs"
                                 title="Transmitir solo esta ruta a Disponibilización manteniendo el resto intacto"
                               >
                                 <Send size={11} />
@@ -577,15 +766,15 @@ export default function DailyPlanning() {
                           </td>
                         </tr>
 
-                        {/* Paradas Detail Accordion */}
+                        {/* Paradas Detail Accordion (Requisito 6: en "Paradas" considerar el mismo número que en "Recuento distinto de destino") */}
                         {isExpanded && (
                           <tr className="bg-slate-50/80">
-                            <td colSpan="9" className="p-3 pl-12">
+                            <td colSpan="10" className="p-3 pl-12">
                               <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-inner">
                                 <div className="flex items-center justify-between mb-2">
                                   <h5 className="font-bold text-xs text-slate-700 flex items-center gap-1.5">
                                     <MapPin size={14} className="text-red-500" />
-                                    Detalle de Destinos / Paradas de Ruta {route.ruta} ({route.paradas.length} paradas):
+                                    Detalle de Destinos / Paradas de Ruta {route.ruta} ({route.recuentoDestino || (new Set(route.paradas.map(p => p.destino)).size)} {Number(route.recuentoDestino || (new Set(route.paradas.map(p => p.destino)).size)) === 1 ? 'parada' : 'paradas'}):
                                   </h5>
                                 </div>
                                 <div className="max-h-60 overflow-auto">
@@ -634,7 +823,7 @@ export default function DailyPlanning() {
 
                   {filteredRoutes.length === 0 && (
                     <tr>
-                      <td colSpan="9" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="10" className="px-4 py-12 text-center text-slate-500">
                         {transformedRoutes.length === 0 
                           ? 'No se han transformado rutas aún. Ve a "1. Importar Sheet1" y haz clic en "Transformar".' 
                           : 'No se encontraron rutas con el filtro ingresado.'}
