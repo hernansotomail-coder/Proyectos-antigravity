@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
   LogOut, ChevronDown, ChevronRight, ChevronLeft, Truck, Key, Layers, 
-  FileText, FileSpreadsheet, History, Shield, Wrench
+  FileText, FileSpreadsheet, History, Shield, Wrench, Send
 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '../store/authStore';
@@ -38,6 +38,7 @@ export default function Layout() {
   const transporteItems = [
     { name: 'Disponibilización', path: '/assignment', icon: Truck },
     { name: 'Histórico disponibilización', path: '/historical-assignment', icon: History },
+    { name: 'Envío de rutas', path: '/route-dispatch', icon: Send },
   ];
 
   // 3. Menú Administración Flota (Nuevo menú - Requisito 5)
