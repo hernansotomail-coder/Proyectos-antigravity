@@ -73,12 +73,37 @@ export const extractDateOnly = (val) => {
   return parsed.split(' ')[0];
 };
 
+// Helper para convertir string de fecha a timestamp numérico para comparar rangos (Requisito 4)
+export const parseDateStrToTime = (s) => {
+  if (!s) return null;
+  const clean = String(s).trim().split(' ')[0].split('T')[0];
+  const parts = clean.split(/[-/]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime();
+    } else {
+      // DD-MM-YYYY o DD/MM/YYYY
+      return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
+    }
+  }
+  const d = new Date(clean);
+  return isNaN(d.getTime()) ? null : d.getTime();
+};
+
 export default function FleetWashes() {
   const { fleetList, fetchFleet, updateFleetWashes, updateSingleFleetWash, isLoading } = useFleetStore();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('Todos');
+  const [regionFilter, setRegionFilter] = useState('Todas');
   const [certFilter, setCertFilter] = useState('Todos');
+
+  // Regiones únicas de flota (Requisito 3)
+  const regions = useMemo(() => {
+    const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
+    return ['Todas', ...Array.from(rSet).sort()];
+  }, [fleetList]);
 
   // ------------------------------------------------------------------
   // 1. ESTADO: CARGA EXCEL 1 - CERTIFICACIONES (con selector de hoja)
@@ -93,7 +118,7 @@ export default function FleetWashes() {
   const [certRawRows, setCertRawRows] = useState([]);
 
   // ------------------------------------------------------------------
-  // 2. ESTADO: CARGA EXCEL 2 - LAVADOS (Código de camión vs N° Interno)
+  // 2. ESTADO: CARGA EXCEL / CSV 2 - LAVADOS (Código de camión vs N° Interno)
   // ------------------------------------------------------------------
   const [isWashModalOpen, setIsWashModalOpen] = useState(false);
   const [washWorkbook, setWashWorkbook] = useState(null);
@@ -105,15 +130,18 @@ export default function FleetWashes() {
   const [washPlateCol, setWashPlateCol] = useState('');
   const [washRawRows, setWashRawRows] = useState([]);
 
-  // Opción para seleccionar qué fecha de "Creado" se desea cargar
+  // Opciones para seleccionar qué fecha o rango de "Creado" se desea cargar (Requisito 4)
+  const [washDateFilterMode, setWashDateFilterMode] = useState('todas'); // 'todas', 'rango', 'especifica'
   const [selectedCreadoDate, setSelectedCreadoDate] = useState('todas');
+  const [washDateRangeStart, setWashDateRangeStart] = useState('');
+  const [washDateRangeEnd, setWashDateRangeEnd] = useState('');
 
   // Pantalla de registros no coincidentes para editar o eliminar (Requisito 2)
   const [isUnmatchedModalOpen, setIsUnmatchedModalOpen] = useState(false);
   const [unmatchedRows, setUnmatchedRows] = useState([]); // Array de items no coincidentes editables
   const [matchedWashUpdates, setMatchedWashUpdates] = useState([]); // Array de items que sí coincidieron
 
-  // Fechas únicas disponibles en la columna "Creado"
+  // Fechas únicas disponibles en la columna "Creado" (orden descendente)
   const availableCreadoDates = useMemo(() => {
     if (!washCreadoCol || washRawRows.length === 0) return [];
     const dateCounts = {};
@@ -124,20 +152,50 @@ export default function FleetWashes() {
       }
     });
 
-    const parseDMY = (s) => {
-      const parts = s.split(/[-/]/);
-      if (parts.length === 3) {
-        if (parts[0].length === 4) return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime();
-        return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
-      }
-      return 0;
-    };
-
     return Object.entries(dateCounts).map(([date, count]) => ({
       date,
-      count
-    })).sort((a, b) => parseDMY(b.date) - parseDMY(a.date));
+      count,
+      timestamp: parseDateStrToTime(date) || 0
+    })).sort((a, b) => b.timestamp - a.timestamp);
   }, [washCreadoCol, washRawRows]);
+
+  // Fechas ordenadas cronológicamente (más antigua primero) para selectores de rango
+  const chronologicalCreadoDates = useMemo(() => {
+    return [...availableCreadoDates].sort((a, b) => a.timestamp - b.timestamp);
+  }, [availableCreadoDates]);
+
+  // Función para determinar si una fila de lavado cumple con el filtro de fecha
+  const isRowMatchingDateFilter = (row) => {
+    if (!washCreadoCol) return true;
+    if (washDateFilterMode === 'todas') return true;
+
+    const rawVal = row[washCreadoCol];
+    const d = extractDateOnly(rawVal);
+    if (!d) return false;
+
+    if (washDateFilterMode === 'especifica') {
+      return d === selectedCreadoDate;
+    }
+
+    if (washDateFilterMode === 'rango') {
+      const rowTime = parseDateStrToTime(d);
+      if (rowTime === null) return false;
+      const startTime = washDateRangeStart ? parseDateStrToTime(washDateRangeStart) : null;
+      const endTime = washDateRangeEnd ? parseDateStrToTime(washDateRangeEnd) : null;
+
+      if (startTime !== null && rowTime < startTime) return false;
+      if (endTime !== null && rowTime > endTime) return false;
+      return true;
+    }
+
+    return true;
+  };
+
+  // Cantidad de registros filtrados según el modo y fechas seleccionadas
+  const filteredWashRowsCount = useMemo(() => {
+    if (!washCreadoCol || washRawRows.length === 0) return 0;
+    return washRawRows.filter(isRowMatchingDateFilter).length;
+  }, [washRawRows, washCreadoCol, washDateFilterMode, selectedCreadoDate, washDateRangeStart, washDateRangeEnd]);
 
   // Estado para Edición Manual Individual
   const [editingTruck, setEditingTruck] = useState(null);
@@ -169,6 +227,9 @@ export default function FleetWashes() {
         if (typeFilter === 'Semirremolques' && (!t.includes('rampla') && !t.includes('semi'))) return false;
       }
 
+      // Filtro por Región (Requisito 3)
+      if (regionFilter !== 'Todas' && f.region !== regionFilter) return false;
+
       if (certFilter === 'con_cert' && !f.ultima_certificacion) return false;
       if (certFilter === 'sin_cert' && f.ultima_certificacion) return false;
       if (certFilter === 'con_lavado' && !f.fecha_ultimo_lavado) return false;
@@ -179,12 +240,13 @@ export default function FleetWashes() {
         const mInternal = f.internal_number?.toLowerCase().includes(lower);
         const mPlate = f.plate?.toLowerCase().includes(lower);
         const mBrand = f.brand?.toLowerCase().includes(lower);
-        if (!mInternal && !mPlate && !mBrand) return false;
+        const mRegion = f.region?.toLowerCase().includes(lower);
+        if (!mInternal && !mPlate && !mBrand && !mRegion) return false;
       }
 
       return true;
     });
-  }, [fleetList, typeFilter, certFilter, searchTerm]);
+  }, [fleetList, typeFilter, regionFilter, certFilter, searchTerm]);
 
   // ------------------------------------------------------------------
   // MANEJADORES: CARGA 1 - CERTIFICACIONES
@@ -307,35 +369,57 @@ export default function FleetWashes() {
   };
 
   // ------------------------------------------------------------------
-  // MANEJADORES: CARGA 2 - LAVADOS (Código de camión vs N° Interno)
+  // MANEJADORES: CARGA 2 - LAVADOS (Excel o CSV)
   // ------------------------------------------------------------------
-  const onDropWashExcel = (acceptedFiles) => {
+  const onDropWashExcel = async (acceptedFiles) => {
     const file = acceptedFiles[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = e.target.result;
-        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
-        const sheets = workbook.SheetNames || [];
-        if (sheets.length === 0) {
-          toast.error('El archivo no contiene hojas');
-          return;
-        }
+    // Resetear filtros de fecha de Creado
+    setWashDateFilterMode('todas');
+    setSelectedCreadoDate('todas');
+    setWashDateRangeStart('');
+    setWashDateRangeEnd('');
 
-        setWashWorkbook(workbook);
-        setWashSheets(sheets);
-        const initialSheet = sheets[0];
-        setSelectedWashSheet(initialSheet);
-        processWashSheet(workbook, initialSheet);
-        toast.success(`Archivo de lavados cargado correctamente`);
-      } catch (err) {
-        console.error(err);
-        toast.error('Error al procesar archivo de lavados');
+    const fileName = (file.name || '').toLowerCase();
+    const isCsv = fileName.endsWith('.csv') || (file.type && file.type.includes('csv'));
+
+    try {
+      let workbook;
+      if (isCsv) {
+        // Lectura robusta de archivo CSV (Requisito 1)
+        const text = await file.text();
+        const firstLine = text.split(/\r?\n/)[0] || '';
+        const semicolonCount = (firstLine.match(/;/g) || []).length;
+        const commaCount = (firstLine.match(/,/g) || []).length;
+        const tabCount = (firstLine.match(/\t/g) || []).length;
+
+        let delimiter = ',';
+        if (semicolonCount > commaCount && semicolonCount > tabCount) delimiter = ';';
+        else if (tabCount > commaCount && tabCount > semicolonCount) delimiter = '\t';
+
+        workbook = XLSX.read(text, { type: 'string', FS: delimiter, cellDates: true });
+      } else {
+        const buffer = await file.arrayBuffer();
+        workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
       }
-    };
-    reader.readAsBinaryString(file);
+
+      const sheets = workbook.SheetNames || [];
+      if (sheets.length === 0) {
+        toast.error('El archivo no contiene hojas ni registros legibles');
+        return;
+      }
+
+      setWashWorkbook(workbook);
+      setWashSheets(sheets);
+      const initialSheet = sheets[0];
+      setSelectedWashSheet(initialSheet);
+      processWashSheet(workbook, initialSheet);
+      toast.success(isCsv ? 'Archivo CSV de lavados cargado correctamente' : 'Archivo Excel de lavados cargado correctamente');
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al procesar archivo de lavados');
+    }
   };
 
   const processWashSheet = (workbook, sheetName) => {
@@ -353,7 +437,10 @@ export default function FleetWashes() {
     const cols = Object.keys(json[0] || {});
     setWashColumns(cols);
     setWashRawRows(json);
+    setWashDateFilterMode('todas');
     setSelectedCreadoDate('todas');
+    setWashDateRangeStart('');
+    setWashDateRangeEnd('');
 
     // Auto-detectar "Código de camión" (según imagen del usuario)
     const detectedCode = cols.find(c => {
@@ -391,15 +478,11 @@ export default function FleetWashes() {
       return;
     }
 
-    // Filtrar por la fecha de Creado seleccionada por el usuario (o todas si seleccionó 'todas')
-    const rowsToProcess = washRawRows.filter(row => {
-      if (selectedCreadoDate === 'todas') return true;
-      const d = extractDateOnly(row[washCreadoCol]);
-      return d === selectedCreadoDate;
-    });
+    // Filtrar por la fecha o rango de Creado seleccionado por el usuario (Requisito 4)
+    const rowsToProcess = washRawRows.filter(isRowMatchingDateFilter);
 
     if (rowsToProcess.length === 0) {
-      toast.warning(`No hay registros para la fecha de Creado "${selectedCreadoDate}"`);
+      toast.warning('No hay registros en el archivo que coincidan con el filtro de fecha seleccionado');
       return;
     }
 
@@ -551,6 +634,7 @@ export default function FleetWashes() {
       'Patente': f.plate || '',
       'Tipo': f.type || '',
       'Marca': f.brand || '',
+      'Región': f.region || 'Sin asignar',
       'Ultima certificación': f.ultima_certificacion || 'Sin registro',
       'Fecha Último Lavado': f.fecha_ultimo_lavado || 'Sin registro'
     }));
@@ -570,7 +654,13 @@ export default function FleetWashes() {
 
   const { getRootProps: getWashRoot, getInputProps: getWashInput, isDragActive: isWashDrag } = useDropzone({
     onDrop: onDropWashExcel,
-    accept: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] },
+    accept: { 
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 
+      'application/vnd.ms-excel': ['.xls'],
+      'text/csv': ['.csv'],
+      'application/csv': ['.csv'],
+      'text/plain': ['.csv']
+    },
     maxFiles: 1
   });
 
@@ -636,6 +726,19 @@ export default function FleetWashes() {
           />
         </div>
 
+        {/* Filtro por Región (Requisito 3) */}
+        <select
+          value={regionFilter}
+          onChange={(e) => setRegionFilter(e.target.value)}
+          className="text-xs font-semibold border border-slate-200 rounded-xl px-3 py-1.5 h-9 bg-slate-50 text-slate-700 outline-none w-full sm:w-auto"
+        >
+          {regions.map(r => (
+            <option key={r} value={r}>
+              {r === 'Todas' ? 'Todas las Regiones' : `Región: ${r}`}
+            </option>
+          ))}
+        </select>
+
         {/* Filtro por Tipo */}
         <select
           value={typeFilter}
@@ -671,6 +774,7 @@ export default function FleetWashes() {
               <th className="px-3.5 py-2.5">Patente</th>
               <th className="px-3.5 py-2.5">Tipo</th>
               <th className="px-3.5 py-2.5">Marca</th>
+              <th className="px-3.5 py-2.5">Región</th>
               <th className="px-3.5 py-2.5 text-blue-900 bg-blue-50/50">Ultima certificación</th>
               <th className="px-3.5 py-2.5 text-emerald-900 bg-emerald-50/50">Fecha Último Lavado</th>
               <th className="px-3.5 py-2.5 text-center">Acciones</th>
@@ -679,7 +783,7 @@ export default function FleetWashes() {
           <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
             {filteredFleet.length === 0 ? (
               <tr>
-                <td colSpan="7" className="py-12 text-center text-slate-400">
+                <td colSpan="8" className="py-12 text-center text-slate-400">
                   <Droplets size={32} className="mx-auto text-slate-300 mb-2" />
                   <p className="font-semibold text-sm">No se encontraron vehículos.</p>
                   <p className="text-xs text-slate-400 mt-0.5">Prueba cambiando los filtros o cargando un archivo Excel.</p>
@@ -712,6 +816,11 @@ export default function FleetWashes() {
                   {/* Marca */}
                   <td className="px-3.5 py-2.5 text-slate-600">
                     {truck.brand || '—'}
+                  </td>
+
+                  {/* Región (Requisito 3) */}
+                  <td className="px-3.5 py-2.5 text-slate-700 font-medium">
+                    {truck.region || <span className="text-slate-400 italic text-[11px]">—</span>}
                   </td>
 
                   {/* Ultima certificación */}
@@ -942,8 +1051,9 @@ export default function FleetWashes() {
                 >
                   <input {...getWashInput()} />
                   <Droplets size={44} className="mx-auto text-emerald-500 mb-2" />
-                  <p className="text-sm font-bold text-slate-700">Arrastra tu archivo Excel de lavados aquí</p>
-                  <p className="text-xs text-slate-400 mt-1">Con columnas como "Creado", "Código de camión", "Patente de camión", etc.</p>
+                  <p className="text-sm font-bold text-slate-700">Arrastra tu archivo Excel o CSV de lavados aquí</p>
+                  <p className="text-xs text-slate-400 mt-1">Formatos compatibles: .xlsx, .xls, .csv</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">Detecta columnas como "Creado", "Código de camión", "Patente de camión", etc.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -967,7 +1077,7 @@ export default function FleetWashes() {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-emerald-800 mb-1">
-                        Columna Código de Camión (en Excel):
+                        Columna Código de Camión (en Excel/CSV):
                       </label>
                       <select
                         value={washCodeCol}
@@ -992,49 +1102,143 @@ export default function FleetWashes() {
                     </div>
                   </div>
 
-                  {/* Selector de Fecha de "Creado" a cargar (Solicitado por el usuario) */}
-                  <div className="p-3 bg-emerald-50/80 border border-emerald-300 rounded-xl space-y-1.5">
-                    <label className="block text-xs font-bold text-emerald-950 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Calendar size={14} className="text-emerald-700" />
-                        ¿Qué fecha de "Creado" deseas cargar al sistema?:
-                      </span>
-                      {selectedCreadoDate !== 'todas' && (
-                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                          Filtro activo: {selectedCreadoDate}
+                  {/* Selector de Modo y Rango de Fechas de "Creado" (Requisito 4) */}
+                  <div className="p-3 bg-emerald-50/80 border border-emerald-300 rounded-xl space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-emerald-950 flex items-center justify-between mb-1.5">
+                        <span className="flex items-center gap-1.5">
+                          <Calendar size={14} className="text-emerald-700" />
+                          Filtro de fecha de "Creado" a cargar:
                         </span>
-                      )}
-                    </label>
-                    <select
-                      value={selectedCreadoDate}
-                      onChange={(e) => setSelectedCreadoDate(e.target.value)}
-                      className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2.5 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-sm"
-                    >
-                      <option value="todas">
-                        Todas las fechas ({washRawRows.length} registros totales en el archivo)
-                      </option>
-                      {availableCreadoDates.map(item => (
-                        <option key={item.date} value={item.date}>
-                          📅 Fecha: {item.date} — ({item.count} {item.count === 1 ? 'registro' : 'registros'})
-                        </option>
-                      ))}
-                    </select>
+                        <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                          {washDateFilterMode === 'todas' && 'Todas las fechas'}
+                          {washDateFilterMode === 'especifica' && `Fecha: ${selectedCreadoDate}`}
+                          {washDateFilterMode === 'rango' && `Rango: ${washDateRangeStart || 'Inicio'} → ${washDateRangeEnd || 'Fin'}`}
+                        </span>
+                      </label>
+
+                      {/* Botones de selección de modo */}
+                      <div className="grid grid-cols-3 gap-1.5 bg-emerald-100/70 p-1 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => setWashDateFilterMode('todas')}
+                          className={`text-xs py-1.5 px-2 rounded-md font-bold transition-all ${
+                            washDateFilterMode === 'todas'
+                              ? 'bg-emerald-700 text-white shadow-xs'
+                              : 'text-emerald-900 hover:bg-emerald-200/60'
+                          }`}
+                        >
+                          Todas las fechas
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWashDateFilterMode('rango');
+                            if (!washDateRangeStart && chronologicalCreadoDates.length > 0) {
+                              setWashDateRangeStart(chronologicalCreadoDates[0].date);
+                            }
+                            if (!washDateRangeEnd && chronologicalCreadoDates.length > 0) {
+                              setWashDateRangeEnd(chronologicalCreadoDates[chronologicalCreadoDates.length - 1].date);
+                            }
+                          }}
+                          className={`text-xs py-1.5 px-2 rounded-md font-bold transition-all ${
+                            washDateFilterMode === 'rango'
+                              ? 'bg-emerald-700 text-white shadow-xs'
+                              : 'text-emerald-900 hover:bg-emerald-200/60'
+                          }`}
+                        >
+                          Rango de fechas
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWashDateFilterMode('especifica');
+                            if (selectedCreadoDate === 'todas' && availableCreadoDates.length > 0) {
+                              setSelectedCreadoDate(availableCreadoDates[0].date);
+                            }
+                          }}
+                          className={`text-xs py-1.5 px-2 rounded-md font-bold transition-all ${
+                            washDateFilterMode === 'especifica'
+                              ? 'bg-emerald-700 text-white shadow-xs'
+                              : 'text-emerald-900 hover:bg-emerald-200/60'
+                          }`}
+                        >
+                          Fecha específica
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Si seleccionó Rango de Fechas (Requisito 4) */}
+                    {washDateFilterMode === 'rango' && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-emerald-200/70">
+                        <div>
+                          <label className="block text-[11px] font-bold text-emerald-950 mb-1">
+                            Fecha Desde (Inicio del rango):
+                          </label>
+                          <select
+                            value={washDateRangeStart}
+                            onChange={(e) => setWashDateRangeStart(e.target.value)}
+                            className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                          >
+                            {chronologicalCreadoDates.map(item => (
+                              <option key={`start-${item.date}`} value={item.date}>
+                                📅 {item.date} ({item.count} reg.)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-bold text-emerald-950 mb-1">
+                            Fecha Hasta (Fin del rango):
+                          </label>
+                          <select
+                            value={washDateRangeEnd}
+                            onChange={(e) => setWashDateRangeEnd(e.target.value)}
+                            className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                          >
+                            {chronologicalCreadoDates.map(item => (
+                              <option key={`end-${item.date}`} value={item.date}>
+                                📅 {item.date} ({item.count} reg.)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Si seleccionó Fecha Específica */}
+                    {washDateFilterMode === 'especifica' && (
+                      <div className="pt-1 border-t border-emerald-200/70">
+                        <label className="block text-[11px] font-bold text-emerald-950 mb-1">
+                          Selecciona la fecha exacta de "Creado":
+                        </label>
+                        <select
+                          value={selectedCreadoDate}
+                          onChange={(e) => setSelectedCreadoDate(e.target.value)}
+                          className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                        >
+                          {availableCreadoDates.map(item => (
+                            <option key={`single-${item.date}`} value={item.date}>
+                              📅 {item.date} — ({item.count} {item.count === 1 ? 'registro' : 'registros'})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <p className="text-[11px] text-emerald-800">
-                      {selectedCreadoDate === 'todas'
-                        ? 'Se procesarán y cruzarán los lavados de todas las fechas encontradas en el archivo.'
-                        : `Solo se cargarán los registros cuya fecha de Creado sea exactamente ${selectedCreadoDate}.`}
+                      {washDateFilterMode === 'todas' && 'Se procesarán y cruzarán los lavados de todas las fechas registradas en el archivo.'}
+                      {washDateFilterMode === 'rango' && `Se cargarán únicamente los registros con fecha de Creado entre el ${washDateRangeStart || 'inicio'} y el ${washDateRangeEnd || 'fin'}.`}
+                      {washDateFilterMode === 'especifica' && `Solo se cargarán los registros cuya fecha de Creado sea exactamente ${selectedCreadoDate}.`}
                     </p>
                   </div>
 
                   <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                     <span>
-                      Registros a procesar:{' '}
-                      <strong>
-                        {selectedCreadoDate === 'todas'
-                          ? washRawRows.length
-                          : (availableCreadoDates.find(d => d.date === selectedCreadoDate)?.count || 0)}
-                      </strong>{' '}
-                      de {washRawRows.length} totales
+                      Registros a procesar: <strong>{filteredWashRowsCount}</strong> de {washRawRows.length} totales en archivo
                     </span>
                     <span>Validando contra <strong>{fleetList.length}</strong> vehículos de flota</span>
                   </div>
@@ -1045,7 +1249,14 @@ export default function FleetWashes() {
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
               {washWorkbook && (
                 <button 
-                  onClick={() => { setWashWorkbook(null); setWashRawRows([]); setSelectedCreadoDate('todas'); }}
+                  onClick={() => { 
+                    setWashWorkbook(null); 
+                    setWashRawRows([]); 
+                    setSelectedCreadoDate('todas'); 
+                    setWashDateFilterMode('todas'); 
+                    setWashDateRangeStart(''); 
+                    setWashDateRangeEnd(''); 
+                  }}
                   className="text-xs text-slate-500 hover:text-slate-700 underline"
                 >
                   Cargar otro archivo
@@ -1088,9 +1299,10 @@ export default function FleetWashes() {
                     Registros de Lavados sin Coincidencia ({unmatchedRows.length})
                   </h3>
                   <p className="text-xs text-slate-500">
-                    {selectedCreadoDate !== 'todas' && (
-                      <span className="inline-block bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] mr-1.5">
-                        Filtro Creado: {selectedCreadoDate}
+                    {washDateFilterMode !== 'todas' && (
+                      <span className="inline-block bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] mr-1.5 border border-emerald-200">
+                        {washDateFilterMode === 'especifica' && `Filtro Creado: ${selectedCreadoDate}`}
+                        {washDateFilterMode === 'rango' && `Filtro Rango: ${washDateRangeStart} → ${washDateRangeEnd}`}
                       </span>
                     )}
                     El "Código de camión" de estas filas no se encontró en la Flota. Puedes <strong>editar</strong> el código para vincularlo a un vehículo existente o <strong>eliminar</strong> la fila.

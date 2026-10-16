@@ -3,22 +3,76 @@ import { useFleetStore } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { 
   Download, ChevronDown, Search, Droplets, ShieldCheck, 
-  AlertTriangle, CheckCircle2, Clock, Truck, Layers, Filter 
+  AlertTriangle, CheckCircle2, Clock, Truck, Layers, Filter, MapPin 
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
-// Helper para calcular la diferencia de días entre la fecha dada y hoy
+// Helper para calcular la fecha de vencimiento sumando 1 MES COMPLETO a la fecha de última certificación
+export const getCertExpirationInfo = (dateStr) => {
+  if (!dateStr) return { expirationDate: null, expirationDateFormatted: null, diffDays: null };
+  const cleanStr = String(dateStr).trim().split(' ')[0].split('T')[0];
+  const parts = cleanStr.split(/[-/]/);
+  let certDate = null;
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      certDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    } else {
+      // DD-MM-YYYY
+      certDate = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+    }
+  } else {
+    certDate = new Date(cleanStr);
+  }
+
+  if (!certDate || isNaN(certDate.getTime())) {
+    return { expirationDate: null, expirationDateFormatted: null, diffDays: null };
+  }
+
+  // Sumar 1 mes completo a partir de la fecha de Última Certificación (Requisito 5)
+  const expDate = new Date(certDate.getTime());
+  const origDay = certDate.getDate();
+  expDate.setMonth(expDate.getMonth() + 1);
+  // Ajuste en caso de desbordamiento de fin de mes (ej: 31 de enero -> febrero)
+  if (expDate.getDate() !== origDay) {
+    expDate.setDate(0);
+  }
+
+  const expDay = String(expDate.getDate()).padStart(2, '0');
+  const expMonth = String(expDate.getMonth() + 1).padStart(2, '0');
+  const expYear = expDate.getFullYear();
+  const expirationDateFormatted = `${expDay}/${expMonth}/${expYear}`;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const targetExp = new Date(expDate);
+  targetExp.setHours(0, 0, 0, 0);
+
+  const diffTime = targetExp - today;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  return {
+    expirationDate: expDate,
+    expirationDateFormatted,
+    diffDays
+  };
+};
+
+// Alias por compatibilidad
 export const getCertDaysDiff = (dateStr) => {
+  return getCertExpirationInfo(dateStr).diffDays;
+};
+
+// Helper para calcular la diferencia de días de lavado respecto a hoy
+export const getWashDaysDiff = (dateStr) => {
   if (!dateStr) return null;
   const cleanStr = String(dateStr).trim().split(' ')[0].split('T')[0];
   const parts = cleanStr.split(/[-/]/);
   let targetDate = null;
   if (parts.length === 3) {
     if (parts[0].length === 4) {
-      // YYYY-MM-DD
       targetDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
     } else {
-      // DD-MM-YYYY
       targetDate = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
     }
   } else {
@@ -35,14 +89,14 @@ export const getCertDaysDiff = (dateStr) => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
-// Determinar el color del N° Interno según regla del usuario (Requisito 3):
-// - Igual o días pasados (<= 0): ROJO
-// - Faltan 1 a 3 días (<= 3): AMARILLO
-// - Mayor a 4 días (>= 4): VERDE
-export const getInternalColorStatus = (days) => {
-  if (days === null) return 'none';
-  if (days <= 0) return 'red';
-  if (days <= 3) return 'yellow';
+// Determinar el color del N° Interno según regla del usuario (contando 1 mes completo):
+// - Igual o días pasados (diffDays <= 0): ROJO (Vencido)
+// - Faltan 1 a 3 días (diffDays <= 3): AMARILLO (Por vencer)
+// - Mayor a 4 días (diffDays >= 4): VERDE (Al día)
+export const getInternalColorStatus = (diffDays) => {
+  if (diffDays === null) return 'none';
+  if (diffDays <= 0) return 'red';
+  if (diffDays <= 3) return 'yellow';
   return 'green';
 };
 
@@ -51,6 +105,7 @@ export default function WashDashboard() {
 
   const [searchFilter, setSearchFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('Todos');
+  const [regionFilter, setRegionFilter] = useState('Todas');
   const [statusFilter, setStatusFilter] = useState('Todos');
   const [activeCard, setActiveCard] = useState('todos');
 
@@ -58,7 +113,13 @@ export default function WashDashboard() {
     fetchFleet();
   }, [fetchFleet]);
 
-  // Enriquecer flota con categorías y estado de semáforo de certificación
+  // Regiones disponibles en flota (Requisito 3)
+  const regions = useMemo(() => {
+    const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
+    return ['Todas', ...Array.from(rSet).sort()];
+  }, [fleetList]);
+
+  // Enriquecer flota con categorías y estado de semáforo de certificación (1 mes de vigencia)
   const enrichedFleet = useMemo(() => {
     return fleetList.map(f => {
       let category = 'Camiones/Camionetas';
@@ -66,60 +127,29 @@ export default function WashDashboard() {
       if (t.includes('tracto')) category = 'Tractos';
       else if (t.includes('rampla') || t.includes('semiremolque') || t.includes('semirremolque')) category = 'Semirremolques';
 
-      const certDays = getCertDaysDiff(f.ultima_certificacion);
-      const colorStatus = getInternalColorStatus(certDays);
-
-      const washDays = getCertDaysDiff(f.fecha_ultimo_lavado);
+      const certInfo = getCertExpirationInfo(f.ultima_certificacion);
+      const colorStatus = getInternalColorStatus(certInfo.diffDays);
+      const washDays = getWashDaysDiff(f.fecha_ultimo_lavado);
 
       return {
         ...f,
         dashboardCategory: category,
-        certDays,
+        certDays: certInfo.diffDays,
+        certExpDate: certInfo.expirationDateFormatted,
         colorStatus,
         washDays
       };
     });
   }, [fleetList]);
 
-  // Estadísticas para las tarjetas superiores (KPIs dinámicos idénticos a Dashboard Flota)
-  const stats = useMemo(() => {
-    let total = enrichedFleet.length;
-    let redCount = 0;
-    let yellowCount = 0;
-    let greenCount = 0;
-    let noCertCount = 0;
-    let washedRecently = 0;
-
-    enrichedFleet.forEach(f => {
-      if (f.colorStatus === 'red') redCount++;
-      else if (f.colorStatus === 'yellow') yellowCount++;
-      else if (f.colorStatus === 'green') greenCount++;
-      else noCertCount++;
-
-      // Lavado reciente si fue en los últimos 7 días
-      if (f.washDays !== null && f.washDays >= -7) {
-        washedRecently++;
-      }
-    });
-
-    return { total, redCount, yellowCount, greenCount, noCertCount, washedRecently };
-  }, [enrichedFleet]);
-
-  // Filtrado de la tabla según filtros y tarjeta activa
-  const filteredVehicles = useMemo(() => {
+  // Flota con filtros base aplicados (Tipo, Región, Búsqueda) para que los KPIs respondan a la región
+  const baseFilteredFleet = useMemo(() => {
     return enrichedFleet.filter(f => {
-      // Filtro de tarjeta activa
-      if (activeCard === 'red' && f.colorStatus !== 'red') return false;
-      if (activeCard === 'yellow' && f.colorStatus !== 'yellow') return false;
-      if (activeCard === 'green' && f.colorStatus !== 'green') return false;
-      if (activeCard === 'nocert' && f.colorStatus !== 'none') return false;
-      if (activeCard === 'washed' && !(f.washDays !== null && f.washDays >= -7)) return false;
-
       // Filtro por Tipo
       if (typeFilter !== 'Todos' && f.dashboardCategory !== typeFilter) return false;
 
-      // Filtro por Estado
-      if (statusFilter !== 'Todos' && f.colorStatus !== statusFilter) return false;
+      // Filtro por Región (Requisito 3)
+      if (regionFilter !== 'Todas' && f.region !== regionFilter) return false;
 
       // Buscador
       if (searchFilter) {
@@ -127,12 +157,47 @@ export default function WashDashboard() {
         const mInternal = f.internal_number?.toLowerCase().includes(lower);
         const mPlate = f.plate?.toLowerCase().includes(lower);
         const mBrand = f.brand?.toLowerCase().includes(lower);
-        if (!mInternal && !mPlate && !mBrand) return false;
+        const mRegion = f.region?.toLowerCase().includes(lower);
+        if (!mInternal && !mPlate && !mBrand && !mRegion) return false;
       }
 
       return true;
     });
-  }, [enrichedFleet, activeCard, typeFilter, statusFilter, searchFilter]);
+  }, [enrichedFleet, typeFilter, regionFilter, searchFilter]);
+
+  // Estadísticas para las 5 tarjetas superiores (Requisito 2: Se quitó tarjeta <7d)
+  const stats = useMemo(() => {
+    let total = baseFilteredFleet.length;
+    let redCount = 0;
+    let yellowCount = 0;
+    let greenCount = 0;
+    let noCertCount = 0;
+
+    baseFilteredFleet.forEach(f => {
+      if (f.colorStatus === 'red') redCount++;
+      else if (f.colorStatus === 'yellow') yellowCount++;
+      else if (f.colorStatus === 'green') greenCount++;
+      else noCertCount++;
+    });
+
+    return { total, redCount, yellowCount, greenCount, noCertCount };
+  }, [baseFilteredFleet]);
+
+  // Filtrado final de la tabla según tarjeta activa y filtro de semáforo
+  const filteredVehicles = useMemo(() => {
+    return baseFilteredFleet.filter(f => {
+      // Filtro de tarjeta activa
+      if (activeCard === 'red' && f.colorStatus !== 'red') return false;
+      if (activeCard === 'yellow' && f.colorStatus !== 'yellow') return false;
+      if (activeCard === 'green' && f.colorStatus !== 'green') return false;
+      if (activeCard === 'nocert' && f.colorStatus !== 'none') return false;
+
+      // Filtro por Estado
+      if (statusFilter !== 'Todos' && f.colorStatus !== statusFilter) return false;
+
+      return true;
+    });
+  }, [baseFilteredFleet, activeCard, statusFilter]);
 
   // Exportar a Excel
   const exportToExcel = () => {
@@ -141,12 +206,14 @@ export default function WashDashboard() {
       'Patente': f.plate || 'N/A',
       'Tipo': f.type || 'N/A',
       'Marca': f.brand || 'N/A',
+      'Región': f.region || 'Sin asignar',
       'Ultima certificación': f.ultima_certificacion || 'Sin registro',
+      'Vencimiento (+1 mes)': f.certExpDate || 'Sin registro',
+      'Días Restantes': f.certDays !== null ? f.certDays : 'N/A',
       'Estado Certificación': 
         f.colorStatus === 'red' ? 'VENCIDA / HOY (ROJO)' :
         f.colorStatus === 'yellow' ? 'POR VENCER (1-3 DÍAS / AMARILLO)' :
         f.colorStatus === 'green' ? 'AL DÍA (≥ 4 DÍAS / VERDE)' : 'SIN CERTIFICACIÓN',
-      'Días Restantes': f.certDays !== null ? f.certDays : 'N/A',
       'Fecha Último Lavado': f.fecha_ultimo_lavado || 'Sin registro'
     }));
 
@@ -167,7 +234,7 @@ export default function WashDashboard() {
             Dashboard de lavados
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Monitoreo y semaforización de certificaciones de flota (Rojo: vencidas/hoy, Amarillo: 1-3 días, Verde: ≥ 4 días).
+            Monitoreo y semaforización de certificaciones a 1 mes de vigencia (Rojo: vencida/hoy, Amarillo: 1 a 3 días restantes, Verde: ≥ 4 días vigentes).
           </p>
         </div>
         
@@ -181,17 +248,18 @@ export default function WashDashboard() {
         </Button>
       </div>
 
-      {/* 2. Tarjetas KPI de Estado (Idénticas en estilo al Dashboard Flota) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {/* 2. Tarjetas KPI de Estado (5 tarjetas - Requisito 2: Quitar tarjeta <7d) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {/* Total Flota */}
         <div 
-          onClick={() => setActiveCard(activeCard === 'todos' ? 'todos' : 'todos')}
+          onClick={() => setActiveCard('todos')}
           className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all transform hover:scale-105 ${
             activeCard === 'todos' ? 'bg-blue-100 border-blue-500 text-blue-900 ring-2 ring-blue-300' : 'bg-slate-50 border-slate-200 text-slate-800'
           }`}
         >
           <p className="text-[10px] font-semibold uppercase text-slate-500">Total Flota</p>
           <p className="text-2xl font-black">{stats.total}</p>
+          <span className="text-[9px] text-slate-400">Vehículos filtrados</span>
         </div>
 
         {/* Vencidos / Hoy (ROJO) */}
@@ -208,7 +276,7 @@ export default function WashDashboard() {
             <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
           </div>
           <p className="text-2xl font-black text-red-800">{stats.redCount}</p>
-          <span className="text-[9px] font-semibold text-red-600">≤ 0 días restantes</span>
+          <span className="text-[9px] font-semibold text-red-600">≤ 0 días (1 mes cumplido)</span>
         </div>
 
         {/* Faltan 1 a 3 días (AMARILLO) */}
@@ -258,37 +326,33 @@ export default function WashDashboard() {
           <p className="text-2xl font-black text-slate-600">{stats.noCertCount}</p>
           <span className="text-[9px] text-slate-400">Sin registro</span>
         </div>
-
-        {/* Lavados Recientes */}
-        <div 
-          onClick={() => setActiveCard(activeCard === 'washed' ? 'todos' : 'washed')}
-          className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all transform hover:scale-105 ${
-            activeCard === 'washed' 
-              ? 'bg-indigo-100 border-indigo-500 text-indigo-900 ring-2 ring-indigo-300' 
-              : 'bg-indigo-50/70 border-indigo-200 text-indigo-800'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <p className="text-[10px] font-bold uppercase text-indigo-700">Lavados &lt;7d</p>
-            <Droplets size={12} className="text-indigo-600" />
-          </div>
-          <p className="text-2xl font-black text-indigo-900">{stats.washedRecently}</p>
-          <span className="text-[9px] font-semibold text-indigo-600">Última semana</span>
-        </div>
       </div>
 
-      {/* 3. Filtros y Búsqueda */}
+      {/* 3. Filtros y Búsqueda (Con Región agregada - Requisito 3) */}
       <div className="flex flex-col sm:flex-row items-center gap-2.5">
         <div className="relative flex-1 w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <input
             type="text"
-            placeholder="Buscar por N° Interno, Patente o Marca..."
+            placeholder="Buscar por N° Interno, Patente, Marca o Región..."
             value={searchFilter}
             onChange={(e) => setSearchFilter(e.target.value)}
             className="w-full pl-9 pr-4 py-2 h-9 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
           />
         </div>
+
+        {/* Filtro por Región (Requisito 3) */}
+        <select
+          value={regionFilter}
+          onChange={(e) => setRegionFilter(e.target.value)}
+          className="text-xs font-semibold border border-slate-200 rounded-xl px-3 py-1.5 h-9 bg-slate-50 text-slate-700 outline-none w-full sm:w-auto"
+        >
+          {regions.map(r => (
+            <option key={r} value={r}>
+              {r === 'Todas' ? 'Todas las Regiones' : `Región: ${r}`}
+            </option>
+          ))}
+        </select>
 
         {/* Filtro por Tipo */}
         <select
@@ -316,16 +380,17 @@ export default function WashDashboard() {
         </select>
       </div>
 
-      {/* 4. Tabla de Dashboard de Lavados (Requisito 3) */}
+      {/* 4. Tabla de Dashboard de Lavados (Requisito 3 & 5) */}
       <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-slate-50 shadow-2xs">
         <table className="w-full text-xs text-left">
           <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
             <tr>
-              <th className="px-4 py-3">N° Interno (Color por Certificación)</th>
+              <th className="px-4 py-3">N° Interno</th>
               <th className="px-4 py-3">Patente</th>
               <th className="px-4 py-3">Tipo</th>
               <th className="px-4 py-3">Marca</th>
-              <th className="px-4 py-3">Ultima certificación</th>
+              <th className="px-4 py-3">Región</th>
+              <th className="px-4 py-3">Última Certificación (+1 mes)</th>
               <th className="px-4 py-3">Fecha Último Lavado</th>
               <th className="px-4 py-3 text-center">Estado Semáforo</th>
             </tr>
@@ -333,7 +398,7 @@ export default function WashDashboard() {
           <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
             {filteredVehicles.length === 0 ? (
               <tr>
-                <td colSpan="7" className="py-12 text-center text-slate-400">
+                <td colSpan="8" className="py-12 text-center text-slate-400">
                   <Droplets size={32} className="mx-auto text-slate-300 mb-2" />
                   <p className="font-semibold text-sm">No se encontraron vehículos para mostrar.</p>
                   <p className="text-xs text-slate-400 mt-0.5">Prueba cambiando los filtros seleccionados.</p>
@@ -341,11 +406,11 @@ export default function WashDashboard() {
               </tr>
             ) : (
               filteredVehicles.map((truck) => {
-                // COLOR DEL N° INTERNO SEGÚN REGLA DEL USUARIO (Requisito 3):
-                // - Igual o días pasados (<= 0): ROJO
+                // COLOR DEL N° INTERNO SEGÚN REGLA DEL USUARIO (Requisito 3 & 5: Contando 1 mes completo):
+                // - Igual o días pasados (diffDays <= 0): ROJO
                 // - Faltan 1 a 3 días: AMARILLO
-                // - Mayor a 4 días (>= 4): VERDE
-                let internalBadgeStyle = 'bg-slate-100 text-slate-700 border-slate-200';
+                // - Mayor a 4 días (diffDays >= 4): VERDE
+                let internalBadgeStyle = 'bg-slate-100 text-slate-700 border border-slate-200';
                 if (truck.colorStatus === 'red') {
                   internalBadgeStyle = 'bg-red-500 text-white font-black shadow-xs ring-1 ring-red-400';
                 } else if (truck.colorStatus === 'yellow') {
@@ -378,21 +443,31 @@ export default function WashDashboard() {
                       {truck.brand || '—'}
                     </td>
 
-                    {/* 5. Ultima certificación */}
+                    {/* 5. Región (Requisito 3) */}
+                    <td className="px-4 py-3 text-slate-700 font-medium">
+                      {truck.region || <span className="text-slate-400 italic text-[11px]">—</span>}
+                    </td>
+
+                    {/* 6. Ultima certificación (Contando 1 mes completo - Requisito 5) */}
                     <td className="px-4 py-3">
                       {truck.ultima_certificacion ? (
-                        <div className="flex flex-col">
-                          <span className="font-mono font-bold text-slate-900">
-                            {truck.ultima_certificacion}
-                          </span>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-slate-900">
+                              {truck.ultima_certificacion}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              → Vence: <strong>{truck.certExpDate}</strong>
+                            </span>
+                          </div>
                           <span className={`text-[10px] font-semibold ${
                             truck.colorStatus === 'red' ? 'text-red-600 font-bold' :
                             truck.colorStatus === 'yellow' ? 'text-amber-700 font-bold' :
                             'text-emerald-600'
                           }`}>
                             {truck.certDays <= 0 
-                              ? (truck.certDays === 0 ? 'Vence hoy' : `Vencida hace ${Math.abs(truck.certDays)} día(s)`) 
-                              : `Faltan ${truck.certDays} día(s)`}
+                              ? (truck.certDays === 0 ? 'Vence hoy (1 mes cumplido)' : `Vencida hace ${Math.abs(truck.certDays)} día(s)`) 
+                              : `Faltan ${truck.certDays} día(s) para cumplir el mes`}
                           </span>
                         </div>
                       ) : (
@@ -400,7 +475,7 @@ export default function WashDashboard() {
                       )}
                     </td>
 
-                    {/* 6. Fecha Último Lavado */}
+                    {/* 7. Fecha Último Lavado */}
                     <td className="px-4 py-3">
                       {truck.fecha_ultimo_lavado ? (
                         <div className="flex flex-col">
@@ -420,7 +495,7 @@ export default function WashDashboard() {
                       )}
                     </td>
 
-                    {/* 7. Estado Semáforo */}
+                    {/* 8. Estado Semáforo */}
                     <td className="px-4 py-3 text-center">
                       {truck.colorStatus === 'red' && (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-700 border border-red-200">
@@ -429,7 +504,7 @@ export default function WashDashboard() {
                       )}
                       {truck.colorStatus === 'yellow' && (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
-                          <Clock size={11} /> PRÓXIMA (1-3 DÍAS)
+                          <Clock size={11} /> POR VENCER (1-3 DÍAS)
                         </span>
                       )}
                       {truck.colorStatus === 'green' && (
@@ -451,12 +526,12 @@ export default function WashDashboard() {
         </table>
       </div>
 
-      <div className="text-xs text-slate-400 flex items-center justify-between">
+      <div className="text-xs text-slate-400 flex flex-col sm:flex-row items-center justify-between gap-2">
         <span>Mostrando <strong>{filteredVehicles.length}</strong> de <strong>{enrichedFleet.length}</strong> vehículos</span>
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500"></span> Rojo: Vencida/Hoy</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Amarillo: 1-3 días</span>
-          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span> Verde: ≥ 4 días</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-red-500"></span> Rojo: Vencida / Hoy (≤ 0 días)</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Amarillo: Por vencer (1-3 días)</span>
+          <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span> Verde: Al día (≥ 4 días)</span>
         </div>
       </div>
 
