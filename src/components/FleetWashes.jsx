@@ -65,6 +65,14 @@ export const parseExcelDateValue = (val) => {
   return str;
 };
 
+// Extraer únicamente la parte de fecha DD/MM/YYYY para agrupar y filtrar
+export const extractDateOnly = (val) => {
+  if (!val) return '';
+  const parsed = parseExcelDateValue(val);
+  if (!parsed) return '';
+  return parsed.split(' ')[0];
+};
+
 export default function FleetWashes() {
   const { fleetList, fetchFleet, updateFleetWashes, updateSingleFleetWash, isLoading } = useFleetStore();
 
@@ -97,10 +105,39 @@ export default function FleetWashes() {
   const [washPlateCol, setWashPlateCol] = useState('');
   const [washRawRows, setWashRawRows] = useState([]);
 
+  // Opción para seleccionar qué fecha de "Creado" se desea cargar
+  const [selectedCreadoDate, setSelectedCreadoDate] = useState('todas');
+
   // Pantalla de registros no coincidentes para editar o eliminar (Requisito 2)
   const [isUnmatchedModalOpen, setIsUnmatchedModalOpen] = useState(false);
   const [unmatchedRows, setUnmatchedRows] = useState([]); // Array de items no coincidentes editables
   const [matchedWashUpdates, setMatchedWashUpdates] = useState([]); // Array de items que sí coincidieron
+
+  // Fechas únicas disponibles en la columna "Creado"
+  const availableCreadoDates = useMemo(() => {
+    if (!washCreadoCol || washRawRows.length === 0) return [];
+    const dateCounts = {};
+    washRawRows.forEach(row => {
+      const d = extractDateOnly(row[washCreadoCol]);
+      if (d) {
+        dateCounts[d] = (dateCounts[d] || 0) + 1;
+      }
+    });
+
+    const parseDMY = (s) => {
+      const parts = s.split(/[-/]/);
+      if (parts.length === 3) {
+        if (parts[0].length === 4) return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime();
+        return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
+      }
+      return 0;
+    };
+
+    return Object.entries(dateCounts).map(([date, count]) => ({
+      date,
+      count
+    })).sort((a, b) => parseDMY(b.date) - parseDMY(a.date));
+  }, [washCreadoCol, washRawRows]);
 
   // Estado para Edición Manual Individual
   const [editingTruck, setEditingTruck] = useState(null);
@@ -316,6 +353,7 @@ export default function FleetWashes() {
     const cols = Object.keys(json[0] || {});
     setWashColumns(cols);
     setWashRawRows(json);
+    setSelectedCreadoDate('todas');
 
     // Auto-detectar "Código de camión" (según imagen del usuario)
     const detectedCode = cols.find(c => {
@@ -353,11 +391,23 @@ export default function FleetWashes() {
       return;
     }
 
+    // Filtrar por la fecha de Creado seleccionada por el usuario (o todas si seleccionó 'todas')
+    const rowsToProcess = washRawRows.filter(row => {
+      if (selectedCreadoDate === 'todas') return true;
+      const d = extractDateOnly(row[washCreadoCol]);
+      return d === selectedCreadoDate;
+    });
+
+    if (rowsToProcess.length === 0) {
+      toast.warning(`No hay registros para la fecha de Creado "${selectedCreadoDate}"`);
+      return;
+    }
+
     const matched = [];
     const unmatched = [];
 
     // Agrupar por código de camión para conservar la fecha de Creado más reciente
-    washRawRows.forEach((row, idx) => {
+    rowsToProcess.forEach((row, idx) => {
       const rawCode = String(row[washCodeCol] || '').trim();
       const rawCreado = row[washCreadoCol];
       const parsedCreado = parseExcelDateValue(rawCreado);
@@ -942,9 +992,51 @@ export default function FleetWashes() {
                     </div>
                   </div>
 
-                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex items-center justify-between">
-                    <span>Total de registros en archivo: <strong>{washRawRows.length}</strong></span>
-                    <span>Se validará relación con los <strong>{fleetList.length}</strong> vehículos de flota</span>
+                  {/* Selector de Fecha de "Creado" a cargar (Solicitado por el usuario) */}
+                  <div className="p-3 bg-emerald-50/80 border border-emerald-300 rounded-xl space-y-1.5">
+                    <label className="block text-xs font-bold text-emerald-950 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Calendar size={14} className="text-emerald-700" />
+                        ¿Qué fecha de "Creado" deseas cargar al sistema?:
+                      </span>
+                      {selectedCreadoDate !== 'todas' && (
+                        <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          Filtro activo: {selectedCreadoDate}
+                        </span>
+                      )}
+                    </label>
+                    <select
+                      value={selectedCreadoDate}
+                      onChange={(e) => setSelectedCreadoDate(e.target.value)}
+                      className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2.5 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                    >
+                      <option value="todas">
+                        Todas las fechas ({washRawRows.length} registros totales en el archivo)
+                      </option>
+                      {availableCreadoDates.map(item => (
+                        <option key={item.date} value={item.date}>
+                          📅 Fecha: {item.date} — ({item.count} {item.count === 1 ? 'registro' : 'registros'})
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-emerald-800">
+                      {selectedCreadoDate === 'todas'
+                        ? 'Se procesarán y cruzarán los lavados de todas las fechas encontradas en el archivo.'
+                        : `Solo se cargarán los registros cuya fecha de Creado sea exactamente ${selectedCreadoDate}.`}
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl text-xs text-emerald-900 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <span>
+                      Registros a procesar:{' '}
+                      <strong>
+                        {selectedCreadoDate === 'todas'
+                          ? washRawRows.length
+                          : (availableCreadoDates.find(d => d.date === selectedCreadoDate)?.count || 0)}
+                      </strong>{' '}
+                      de {washRawRows.length} totales
+                    </span>
+                    <span>Validando contra <strong>{fleetList.length}</strong> vehículos de flota</span>
                   </div>
                 </div>
               )}
@@ -953,7 +1045,7 @@ export default function FleetWashes() {
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
               {washWorkbook && (
                 <button 
-                  onClick={() => { setWashWorkbook(null); setWashRawRows([]); }}
+                  onClick={() => { setWashWorkbook(null); setWashRawRows([]); setSelectedCreadoDate('todas'); }}
                   className="text-xs text-slate-500 hover:text-slate-700 underline"
                 >
                   Cargar otro archivo
@@ -996,6 +1088,11 @@ export default function FleetWashes() {
                     Registros de Lavados sin Coincidencia ({unmatchedRows.length})
                   </h3>
                   <p className="text-xs text-slate-500">
+                    {selectedCreadoDate !== 'todas' && (
+                      <span className="inline-block bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded text-[11px] mr-1.5">
+                        Filtro Creado: {selectedCreadoDate}
+                      </span>
+                    )}
                     El "Código de camión" de estas filas no se encontró en la Flota. Puedes <strong>editar</strong> el código para vincularlo a un vehículo existente o <strong>eliminar</strong> la fila.
                   </p>
                 </div>
