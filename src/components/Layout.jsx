@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
   LogOut, ChevronDown, ChevronRight, ChevronLeft, Truck, Key, Layers, 
-  FileText, FileSpreadsheet, History, Shield, Wrench, Send
+  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles
 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore } from '../store/authStore';
@@ -41,11 +41,13 @@ export default function Layout() {
     { name: 'Envío de rutas', path: '/route-dispatch', icon: Send },
   ];
 
-  // 3. Menú Administración Flota (Nuevo menú - Requisito 5)
+  // 3. Menú Gestión de Flota
   let adminFlotaItems = [
     { name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
+    { name: 'Dashboard de lavados', path: '/wash-dashboard', icon: Sparkles },
     { name: 'Agregar Flota', path: '/fleet', icon: Truck },
     { name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
+    { name: 'Lavados', path: '/fleet-washes', icon: Droplets },
   ];
 
   // 4. Menú Administración dotación (Antes "Administración" - Requisito 5)
@@ -60,8 +62,8 @@ export default function Layout() {
   if (user?.role === 'Administrador') {
     adminDotacionItems.push({ name: 'Usuarios', path: '/users', icon: Key });
   } else if (user?.role === 'Visualizador') {
-    // El usuario Visualizador solo puede ver Dashboard Flota y Dashboard
-    adminFlotaItems = adminFlotaItems.filter(i => i.name === 'Dashboard Flota');
+    // El usuario Visualizador solo puede ver Dashboards
+    adminFlotaItems = adminFlotaItems.filter(i => i.name === 'Dashboard Flota' || i.name === 'Dashboard de lavados');
     adminDotacionItems = adminDotacionItems.filter(i => i.name === 'Dashboard');
   }
 

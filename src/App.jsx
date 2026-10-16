@@ -14,6 +14,8 @@ import RouteDispatch from './components/RouteDispatch';
 import AddFleet from './components/AddFleet';
 import ManageFleet from './components/ManageFleet';
 import FleetDashboard from './components/FleetDashboard';
+import WashDashboard from './components/WashDashboard';
+import FleetWashes from './components/FleetWashes';
 import DailyPlanning from './components/DailyPlanning';
 import RuteoView from './components/RuteoView';
 import Briefing from './components/Briefing';
@@ -29,8 +31,10 @@ function App() {
           <Route path="historical-assignment" element={<Login><HistoricalAssignment /></Login>} />
           <Route path="route-dispatch" element={<Login><RouteDispatch /></Login>} />
           <Route path="fleet-dashboard" element={<Login><FleetDashboard /></Login>} />
+          <Route path="wash-dashboard" element={<Login><WashDashboard /></Login>} />
           <Route path="fleet" element={<Login><AddFleet /></Login>} />
           <Route path="manage-fleet" element={<Login><ManageFleet /></Login>} />
+          <Route path="fleet-washes" element={<Login><FleetWashes /></Login>} />
           <Route path="daily-planning" element={<Login><DailyPlanning /></Login>} />
           <Route path="ruteo" element={<Login><RuteoView /></Login>} />
           <Route path="change-history" element={<Login><ChangeHistory /></Login>} />

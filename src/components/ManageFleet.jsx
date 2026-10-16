@@ -1,26 +1,36 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Edit2, Trash2, Search, X, Check, Truck } from 'lucide-react';
+import { 
+  Edit2, Trash2, Search, X, Check, Truck, UploadCloud, 
+  FileSpreadsheet, ArrowRight, CheckCircle2, AlertCircle, RefreshCw, Layers
+} from 'lucide-react';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
+import { useDropzone } from 'react-dropzone';
 import { useFleetStore } from '../store/fleetStore';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
+import { Button } from './ui/Button';
 
-const COLUMNS = [
-  { key: 'frio', label: 'Frio' },
+// Columnas editables y cargables de flota
+export const FLEET_COLUMNS = [
+  { key: 'plate', label: 'Patente' },
+  { key: 'type', label: 'Tipo' },
   { key: 'brand', label: 'Marca' },
   { key: 'model', label: 'Modelo' },
   { key: 'year', label: 'Año' },
+  { key: 'status', label: 'Estado' },
+  { key: 'rt_date', label: 'RT', type: 'date' },
+  { key: 'gases_date', label: 'Gases', type: 'date' },
+  { key: 'pc_date', label: 'PC', type: 'date' },
+  { key: 'soap_date', label: 'SOAP', type: 'date' },
+  { key: 'carnes_date', label: 'Carnes', type: 'date' },
+  { key: 'frio', label: 'Frío' },
   { key: 'engine_number', label: 'N° Motor' },
   { key: 'chassis_number', label: 'N° Chasis' },
   { key: 'cc', label: 'CC' },
   { key: 'tank_capacity', label: 'Carga Estanque' },
   { key: 'payload', label: 'Carga/Peso' },
   { key: 'state2', label: 'Estado 2' },
-  { key: 'rt_date', label: 'RT', type: 'date' },
-  { key: 'gases_date', label: 'Gases', type: 'date' },
-  { key: 'pc_date', label: 'PC', type: 'date' },
-  { key: 'soap_date', label: 'SOAP', type: 'date' },
-  { key: 'carnes_date', label: 'Carnes', type: 'date' },
   { key: 'resolution', label: 'Resolución' },
   { key: 'type2', label: 'Tipo 2' },
   { key: 'side_doors', label: 'P. Laterales' },
@@ -32,14 +42,63 @@ const COLUMNS = [
   { key: 'tct_copy', label: 'Copia TCT' },
   { key: 'neo_tac', label: 'NEO TAC' },
   { key: 'pallet_capacity', label: 'Cap. Pallet' },
+  { key: 'ultima_certificacion', label: 'Última Certificación', type: 'date' },
+  { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado' }
 ];
 
+export const TABLE_COLUMNS = FLEET_COLUMNS.filter(c => !['plate', 'type', 'status'].includes(c.key));
+
+// Función para normalizar y buscar coincidencia en encabezados de Excel
+const normalizeText = (txt) => {
+  return String(txt || '').toLowerCase().trim()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[._\-/\s]/g, "");
+};
+
+// Formatear fechas desde Excel
+const formatExcelCellValue = (val, colType) => {
+  if (val === null || val === undefined || val === '') return '';
+  if (colType === 'date') {
+    if (val instanceof Date) {
+      const y = val.getFullYear();
+      const m = String(val.getMonth() + 1).padStart(2, '0');
+      const d = String(val.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    if (typeof val === 'number') {
+      const dObj = new Date(Math.round((val - 25569) * 86400 * 1000));
+      const y = dObj.getUTCFullYear();
+      const m = String(dObj.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(dObj.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+    const str = String(val).trim();
+    const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (dmy) {
+      return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+    }
+  }
+  return String(val).trim();
+};
+
 export default function ManageFleet() {
-  const { fleetList, fetchFleet, updateFleet, deleteFleet, isLoading } = useFleetStore();
+  const { fleetList, fetchFleet, updateFleet, deleteFleet, updateFleetBulkColumns, isLoading } = useFleetStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
+
+  // Estado del Modal de Carga Masiva por Columnas (Requisito 1)
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [excelWorkbook, setExcelWorkbook] = useState(null);
+  const [sheetNames, setSheetNames] = useState([]);
+  const [selectedSheet, setSelectedSheet] = useState('');
+  const [excelColumns, setExcelColumns] = useState([]);
+  const [excelRawRows, setExcelRawRows] = useState([]);
+  
+  // Mapeos y columnas seleccionadas por el usuario
+  const [keyInternalColumn, setKeyInternalColumn] = useState('');
+  const [selectedFleetColumns, setSelectedFleetColumns] = useState({}); // { [fleetKey]: excelColName }
 
   useEffect(() => {
     fetchFleet();
@@ -98,18 +157,201 @@ export default function ManageFleet() {
     }
   };
 
+  // ----------------------------------------------------
+  // LOGICA CARGA MASIVA POR COLUMNAS (Requisito 1)
+  // ----------------------------------------------------
+  const onDropExcel = (acceptedFiles) => {
+    const file = acceptedFiles[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target.result;
+        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+        const sheets = workbook.SheetNames || [];
+        if (sheets.length === 0) {
+          toast.error('El archivo no contiene hojas válidas');
+          return;
+        }
+
+        setExcelWorkbook(workbook);
+        setSheetNames(sheets);
+        const initialSheet = sheets[0];
+        setSelectedSheet(initialSheet);
+        processSheetData(workbook, initialSheet);
+        toast.success(`Archivo cargado: ${sheets.length} hoja(s) detectada(s)`);
+      } catch (err) {
+        console.error(err);
+        toast.error('Error al procesar el archivo Excel');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const processSheetData = (workbook, sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+
+    const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    if (json.length === 0) {
+      setExcelColumns([]);
+      setExcelRawRows([]);
+      toast.warning('La hoja seleccionada está vacía');
+      return;
+    }
+
+    const cols = Object.keys(json[0] || {});
+    setExcelColumns(cols);
+    setExcelRawRows(json);
+
+    // Auto-detectar columna clave "N° Interno"
+    let detectedKey = cols.find(c => {
+      const n = normalizeText(c);
+      return n.includes('interno') || n === 'codigocamion' || n === 'codigo' || n === 'unidad';
+    }) || cols[0] || '';
+    setKeyInternalColumn(detectedKey);
+
+    // Auto-mapear columnas de flota que coincidan por nombre
+    const autoSelected = {};
+    FLEET_COLUMNS.forEach(fc => {
+      const targetNorm = normalizeText(fc.label);
+      const targetKeyNorm = normalizeText(fc.key);
+
+      const matchedExcelCol = cols.find(ec => {
+        const ecNorm = normalizeText(ec);
+        return ecNorm === targetNorm || ecNorm === targetKeyNorm || 
+               ecNorm.includes(targetNorm) || targetNorm.includes(ecNorm);
+      });
+
+      if (matchedExcelCol && matchedExcelCol !== detectedKey) {
+        autoSelected[fc.key] = matchedExcelCol;
+      }
+    });
+
+    setSelectedFleetColumns(autoSelected);
+  };
+
+  const handleSheetChange = (newSheet) => {
+    setSelectedSheet(newSheet);
+    if (excelWorkbook) {
+      processSheetData(excelWorkbook, newSheet);
+    }
+  };
+
+  const toggleColumnSelection = (colKey) => {
+    setSelectedFleetColumns(prev => {
+      const next = { ...prev };
+      if (next[colKey]) {
+        delete next[colKey];
+      } else {
+        // Encontrar columna candidata en excel
+        const fc = FLEET_COLUMNS.find(c => c.key === colKey);
+        const targetNorm = normalizeText(fc?.label || colKey);
+        const cand = excelColumns.find(c => normalizeText(c).includes(targetNorm)) || excelColumns[0] || '';
+        next[colKey] = cand;
+      }
+      return next;
+    });
+  };
+
+  const handleSetColumnMapping = (colKey, excelCol) => {
+    setSelectedFleetColumns(prev => ({
+      ...prev,
+      [colKey]: excelCol
+    }));
+  };
+
+  // Previsualización de los datos que se van a actualizar
+  const previewUpdates = useMemo(() => {
+    if (!keyInternalColumn || excelRawRows.length === 0) return [];
+    const activeCols = Object.entries(selectedFleetColumns);
+    if (activeCols.length === 0) return [];
+
+    return excelRawRows.map((row, idx) => {
+      const rawInternal = String(row[keyInternalColumn] || '').trim();
+      const existingVehicle = fleetList.find(f => 
+        String(f.internal_number || '').trim().toLowerCase() === rawInternal.toLowerCase()
+      );
+
+      const fields = {};
+      activeCols.forEach(([fleetKey, excelCol]) => {
+        const fc = FLEET_COLUMNS.find(c => c.key === fleetKey);
+        const formattedVal = formatExcelCellValue(row[excelCol], fc?.type);
+        fields[fleetKey] = formattedVal;
+      });
+
+      return {
+        rowIdx: idx + 1,
+        internal_number: rawInternal,
+        existingVehicle,
+        fields,
+        isMatched: !!existingVehicle && !!rawInternal
+      };
+    });
+  }, [keyInternalColumn, excelRawRows, selectedFleetColumns, fleetList]);
+
+  const matchedCount = useMemo(() => {
+    return previewUpdates.filter(u => u.isMatched).length;
+  }, [previewUpdates]);
+
+  // Confirmar y aplicar carga masiva por columnas
+  const handleApplyBulkColumns = async () => {
+    const validUpdates = previewUpdates
+      .filter(u => u.isMatched && u.internal_number)
+      .map(u => ({
+        internal_number: u.internal_number,
+        ...u.fields
+      }));
+
+    if (validUpdates.length === 0) {
+      toast.warning('No hay filas coincidentes con N° Interno de la flota para actualizar');
+      return;
+    }
+
+    const success = await updateFleetBulkColumns(validUpdates);
+    if (success) {
+      setIsBulkModalOpen(false);
+      setExcelWorkbook(null);
+      setExcelRawRows([]);
+      setSelectedFleetColumns({});
+    }
+  };
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop: onDropExcel,
+    accept: {
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls']
+    },
+    maxFiles: 1
+  });
+
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col">
+      {/* Header Principal */}
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
         <div>
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <Truck className="text-blue-600" />
             Gestión de Flota
           </h2>
-          <p className="text-sm text-slate-500 mt-1">Total de vehículos registrados: {fleetList.length}</p>
+          <p className="text-sm text-slate-500 mt-1">
+            Total de vehículos registrados: <strong>{fleetList.length}</strong>
+          </p>
         </div>
         
-        <div className="flex flex-col md:flex-row gap-3 w-full xl:w-auto">
+        <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full xl:w-auto">
+          {/* Botón Carga Masiva por Columnas (Requisito 1) */}
+          <Button
+            onClick={() => setIsBulkModalOpen(true)}
+            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-10 px-4 rounded-xl shadow-xs shrink-0 w-full sm:w-auto justify-center"
+            title="Cargar y actualizar columnas masivamente relacionando por N° Interno"
+          >
+            <UploadCloud size={16} />
+            Carga Masiva por Columnas
+          </Button>
+
           <Select 
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
@@ -120,7 +362,7 @@ export default function ManageFleet() {
               { value: 'Semiremolques', label: 'Semiremolques' }
             ]}
           />
-          <div className="relative w-full md:w-64">
+          <div className="relative w-full sm:w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="text"
@@ -133,6 +375,7 @@ export default function ManageFleet() {
         </div>
       </div>
 
+      {/* Tabla de Flota */}
       <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-slate-50">
         <table className="w-full text-xs text-left whitespace-nowrap">
           <thead className="bg-slate-100 text-slate-600 border-b border-slate-200 sticky top-0 z-10 shadow-sm">
@@ -142,13 +385,13 @@ export default function ManageFleet() {
               <th className="px-3 py-2 font-semibold">N° Interno</th>
               <th className="px-3 py-2 font-semibold">Tipo</th>
               <th className="px-3 py-2 font-semibold text-center sticky right-0 bg-slate-100 shadow-[-4px_0_10px_rgba(0,0,0,0.05)]">Acciones</th>
-              {COLUMNS.map(col => <th key={col.key} className="px-3 py-2 font-semibold">{col.label}</th>)}
+              {TABLE_COLUMNS.map(col => <th key={col.key} className="px-3 py-2 font-semibold">{col.label}</th>)}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {filteredFleet.length === 0 ? (
               <tr>
-                <td colSpan={5 + COLUMNS.length} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={5 + TABLE_COLUMNS.length} className="px-4 py-8 text-center text-slate-500">
                   No se encontraron vehículos.
                 </td>
               </tr>
@@ -196,7 +439,7 @@ export default function ManageFleet() {
                           <button onClick={cancelEdit} disabled={isLoading} className="p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 rounded transition-colors" title="Cancelar"><X size={16} /></button>
                         </div>
                       </td>
-                      {COLUMNS.map(col => (
+                      {TABLE_COLUMNS.map(col => (
                         <td key={col.key} className="px-2 py-1">
                           <input 
                             type={col.type || 'text'}
@@ -221,7 +464,7 @@ export default function ManageFleet() {
                         </span>
                       </td>
                       <td className="px-3 py-2 font-bold text-slate-700">{truck.plate}</td>
-                      <td className="px-3 py-2 text-slate-600">{truck.internal_number || '-'}</td>
+                      <td className="px-3 py-2 text-slate-600 font-mono font-bold">{truck.internal_number || '-'}</td>
                       <td className="px-3 py-2 text-slate-600">{truck.type}</td>
                       <td className="px-3 py-2 sticky right-0 bg-white group-hover:bg-slate-50 shadow-[-4px_0_10px_rgba(0,0,0,0.05)] border-l border-slate-100 transition-colors">
                         <div className="flex items-center justify-center gap-1">
@@ -229,7 +472,7 @@ export default function ManageFleet() {
                           <button onClick={() => handleDelete(truck.id)} className="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors" title="Eliminar"><Trash2 size={16} /></button>
                         </div>
                       </td>
-                      {COLUMNS.map(col => (
+                      {TABLE_COLUMNS.map(col => (
                         <td key={col.key} className="px-3 py-2 text-slate-600">
                           {truck[col.key] || '-'}
                         </td>
@@ -242,6 +485,286 @@ export default function ManageFleet() {
           </tbody>
         </table>
       </div>
+
+      {/* ---------------------------------------------------- */}
+      {/* MODAL: CARGA MASIVA POR COLUMNAS (Requisito 1)       */}
+      {/* ---------------------------------------------------- */}
+      {isBulkModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-6 max-h-[92vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Cabecera */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-xl">
+                  <UploadCloud size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-800">Carga Masiva por Columnas</h3>
+                  <p className="text-xs text-slate-500">
+                    Actualiza columnas seleccionadas de la flota relacionando siempre con <strong>N° Interno</strong>.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsBulkModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4 overflow-y-auto flex-1">
+              {/* Paso 1: Dropzone Excel */}
+              {!excelWorkbook ? (
+                <div 
+                  {...getRootProps()}
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                    isDragActive ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 hover:border-indigo-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <input {...getInputProps()} />
+                  <div className="flex justify-center mb-3 text-slate-400">
+                    <FileSpreadsheet size={48} className="text-indigo-500" />
+                  </div>
+                  <p className="text-slate-700 font-bold text-sm">Arrastra y suelta tu archivo Excel aquí</p>
+                  <p className="text-xs text-slate-400 mt-1">O haz clic para seleccionar un archivo (.xlsx o .xls)</p>
+                  <div className="mt-4 p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-left text-xs text-indigo-900 flex items-start gap-2 max-w-lg mx-auto">
+                    <CheckCircle2 size={16} className="text-indigo-600 shrink-0 mt-0.5" />
+                    <span>
+                      El archivo solo debe incluir una columna con el <strong>N° Interno</strong> y las columnas que deseas actualizar. Podrás seleccionar exactamente qué columnas cargar.
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Selector de Hoja y Columna Clave */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                    {/* Selector de Hoja */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Hoja del archivo Excel:
+                      </label>
+                      <select
+                        value={selectedSheet}
+                        onChange={(e) => handleSheetChange(e.target.value)}
+                        className="w-full text-xs font-semibold border border-slate-200 rounded-lg p-2 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        {sheetNames.map(sh => (
+                          <option key={sh} value={sh}>{sh}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Selector de Columna Clave N° Interno */}
+                    <div>
+                      <label className="block text-xs font-bold text-indigo-800 mb-1">
+                        Columna Clave de N° Interno (en Excel):
+                      </label>
+                      <select
+                        value={keyInternalColumn}
+                        onChange={(e) => setKeyInternalColumn(e.target.value)}
+                        className="w-full text-xs font-bold border border-indigo-300 rounded-lg p-2 bg-indigo-50/50 text-indigo-950 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        {excelColumns.map(col => (
+                          <option key={col} value={col}>{col}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Paso 2: Selección de Columnas a Cargar */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                        Selecciona las columnas que deseas cargar masivamente:
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Seleccionar todas las que tengan coincidencia
+                            const all = {};
+                            FLEET_COLUMNS.forEach(fc => {
+                              const match = excelColumns.find(ec => 
+                                normalizeText(ec) === normalizeText(fc.label) || 
+                                normalizeText(ec) === normalizeText(fc.key)
+                              );
+                              if (match && match !== keyInternalColumn) {
+                                all[fc.key] = match;
+                              }
+                            });
+                            setSelectedFleetColumns(all);
+                          }}
+                          className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                        >
+                          Auto-seleccionar detectadas
+                        </button>
+                        <span className="text-slate-300">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedFleetColumns({})}
+                          className="text-xs font-semibold text-slate-500 hover:text-red-600"
+                        >
+                          Limpiar selección
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Grid de checkboxes de columnas de flota */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-xl bg-slate-50/50">
+                      {FLEET_COLUMNS.map(col => {
+                        const isSelected = !!selectedFleetColumns[col.key];
+                        return (
+                          <div 
+                            key={col.key}
+                            className={`p-2 rounded-lg border text-xs transition-all ${
+                              isSelected 
+                                ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold shadow-2xs' 
+                                : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                            }`}
+                          >
+                            <label className="flex items-center gap-1.5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleColumnSelection(col.key)}
+                                className="rounded text-indigo-600 cursor-pointer"
+                              />
+                              <span className="truncate">{col.label}</span>
+                            </label>
+
+                            {/* Dropdown de mapeo si está seleccionada */}
+                            {isSelected && (
+                              <div className="mt-1.5 pt-1 border-t border-indigo-200/60">
+                                <span className="block text-[10px] text-indigo-700 font-normal">Columna en Excel:</span>
+                                <select
+                                  value={selectedFleetColumns[col.key] || ''}
+                                  onChange={(e) => handleSetColumnMapping(col.key, e.target.value)}
+                                  className="w-full text-[11px] font-medium border border-indigo-200 rounded p-1 bg-white text-slate-800 focus:outline-none"
+                                >
+                                  {excelColumns.map(ec => (
+                                    <option key={ec} value={ec}>{ec}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Paso 3: Vista Previa de los Cambios */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-slate-800">
+                        Vista previa ({excelRawRows.length} filas en archivo)
+                      </span>
+                      <span className="text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200">
+                        {matchedCount} vehículo(s) coinciden en flota
+                      </span>
+                    </div>
+
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto max-h-48">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-100 text-slate-700 sticky top-0 border-b border-slate-200 font-bold text-[11px]">
+                          <tr>
+                            <th className="px-3 py-2">Fila</th>
+                            <th className="px-3 py-2">N° Interno (Excel)</th>
+                            <th className="px-3 py-2">Vehículo en Flota</th>
+                            {Object.keys(selectedFleetColumns).map(fKey => {
+                              const fc = FLEET_COLUMNS.find(c => c.key === fKey);
+                              return (
+                                <th key={fKey} className="px-3 py-2 text-indigo-900 bg-indigo-50/50">
+                                  {fc?.label || fKey} (Nuevo)
+                                </th>
+                              );
+                            })}
+                            <th className="px-3 py-2 text-center">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {previewUpdates.slice(0, 30).map((up, uIdx) => (
+                            <tr key={uIdx} className={up.isMatched ? 'hover:bg-slate-50' : 'bg-red-50/20'}>
+                              <td className="px-3 py-1.5 text-slate-400 font-mono text-[10px]">{up.rowIdx}</td>
+                              <td className="px-3 py-1.5 font-bold font-mono text-slate-900">{up.internal_number || '-'}</td>
+                              <td className="px-3 py-1.5">
+                                {up.existingVehicle ? (
+                                  <span className="text-slate-800 font-semibold">
+                                    {up.existingVehicle.plate} ({up.existingVehicle.type || 'S/T'})
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 italic">No existe en flota</span>
+                                )}
+                              </td>
+                              {Object.keys(selectedFleetColumns).map(fKey => (
+                                <td key={fKey} className="px-3 py-1.5 font-medium text-indigo-950 bg-indigo-50/20">
+                                  {up.fields[fKey] || <span className="text-slate-300 italic">—</span>}
+                                </td>
+                              ))}
+                              <td className="px-3 py-1.5 text-center">
+                                {up.isMatched ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                                    <CheckCircle2 size={12} /> Coincide
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                                    <AlertCircle size={12} /> Sin relación
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {previewUpdates.length > 30 && (
+                      <p className="text-[11px] text-slate-400 text-center mt-1">
+                        ... mostrando primeras 30 de {previewUpdates.length} filas del archivo.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Acciones del Modal */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
+              {excelWorkbook && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExcelWorkbook(null);
+                    setExcelRawRows([]);
+                    setSelectedFleetColumns({});
+                  }}
+                  className="text-xs text-slate-500 hover:text-slate-700 underline"
+                >
+                  Cargar otro archivo
+                </button>
+              )}
+              <div className="flex gap-2 ml-auto">
+                <Button
+                  variant="ghost"
+                  onClick={() => setIsBulkModalOpen(false)}
+                  className="text-xs"
+                >
+                  Cancelar
+                </Button>
+                {excelWorkbook && (
+                  <Button
+                    onClick={handleApplyBulkColumns}
+                    disabled={matchedCount === 0 || isLoading}
+                    className="text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+                  >
+                    Confirmar y Actualizar {matchedCount} Vehículo(s)
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
