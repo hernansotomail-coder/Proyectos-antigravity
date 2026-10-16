@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { 
   Droplets, UploadCloud, Search, Calendar, FileSpreadsheet, 
   CheckCircle2, AlertCircle, Edit2, Trash2, X, Download, 
-  Check, Filter, ArrowRight, ShieldCheck, Sparkles, RefreshCw
+  Check, Filter, ArrowRight, ShieldCheck, Sparkles, RefreshCw,
+  Truck, ChevronDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -91,6 +92,139 @@ export const parseDateStrToTime = (s) => {
   return isNaN(d.getTime()) ? null : d.getTime();
 };
 
+// Componente de multi-selección de camiones con búsqueda y checkboxes (Requisito 2)
+function TruckMultiSelect({ truckOptions, selectedTrucks, onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!searchTerm) return truckOptions;
+    const lower = searchTerm.toLowerCase();
+    return truckOptions.filter(o => 
+      o.label.toLowerCase().includes(lower) || 
+      o.internal.toLowerCase().includes(lower) || 
+      o.plate.toLowerCase().includes(lower)
+    );
+  }, [truckOptions, searchTerm]);
+
+  const toggleOption = (val) => {
+    if (selectedTrucks.includes(val)) {
+      onChange(selectedTrucks.filter(v => v !== val));
+    } else {
+      onChange([...selectedTrucks, val]);
+    }
+  };
+
+  const buttonText = useMemo(() => {
+    if (selectedTrucks.length === 0) return 'Camiones: Todos';
+    if (selectedTrucks.length === 1) {
+      const found = truckOptions.find(o => o.value === selectedTrucks[0]);
+      return `Camión: ${found ? found.label : selectedTrucks[0]}`;
+    }
+    return `Camiones: ${selectedTrucks.length} sel.`;
+  }, [selectedTrucks, truckOptions]);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center justify-between gap-1.5 px-3 py-1.5 text-xs rounded-xl border transition-all text-left h-9 ${
+          selectedTrucks.length > 0 
+            ? 'bg-emerald-50 border-emerald-400 text-emerald-900 font-bold shadow-2xs' 
+            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white'
+        }`}
+      >
+        <div className="flex items-center gap-1.5 truncate">
+          <Truck size={14} className={selectedTrucks.length > 0 ? "text-emerald-700 shrink-0" : "text-slate-400 shrink-0"} />
+          <span className="truncate max-w-[130px]">{buttonText}</span>
+        </div>
+        <ChevronDown size={13} className={`text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 sm:left-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2.5 animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 text-xs">
+            <span className="font-bold text-slate-800">Filtrar por Camión</span>
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => onChange(truckOptions.map(o => o.value))}
+                className="text-emerald-600 hover:text-emerald-800 font-semibold"
+              >
+                Todos
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="text-slate-500 hover:text-red-600 font-semibold"
+              >
+                Limpiar
+              </button>
+            </div>
+          </div>
+
+          <div className="relative mb-2">
+            <Search className="absolute left-2.5 top-2 text-slate-400" size={12} />
+            <input
+              type="text"
+              placeholder="Buscar camión o patente..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-7 pr-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-slate-50"
+            />
+          </div>
+
+          <div className="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
+            {filtered.map(opt => {
+              const isChecked = selectedTrucks.includes(opt.value);
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer select-none transition-colors ${
+                    isChecked ? 'bg-emerald-50 text-emerald-950 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleOption(opt.value)}
+                      className="rounded text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5 shrink-0 cursor-pointer"
+                    />
+                    <span className="truncate">{opt.label}</span>
+                  </div>
+                  <span className="text-[9px] text-slate-400 font-normal shrink-0">{opt.type}</span>
+                </label>
+              );
+            })}
+            {filtered.length === 0 && (
+              <p className="text-xs text-slate-400 text-center py-3">No hay coincidencias</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MONTH_NAMES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
 export default function FleetWashes() {
   const { fleetList, fetchFleet, updateFleetWashes, updateSingleFleetWash, isLoading } = useFleetStore();
 
@@ -98,11 +232,31 @@ export default function FleetWashes() {
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [regionFilter, setRegionFilter] = useState('Todas');
   const [certFilter, setCertFilter] = useState('Todos');
+  const [selectedTrucks, setSelectedTrucks] = useState([]); // Multi-selección de camiones (Requisito 2)
 
   // Regiones únicas de flota (Requisito 3)
   const regions = useMemo(() => {
     const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
     return ['Todas', ...Array.from(rSet).sort()];
+  }, [fleetList]);
+
+  // Opciones únicas de camiones para el multi-select (Requisito 2)
+  const truckOptions = useMemo(() => {
+    return fleetList
+      .map(f => {
+        const internal = (f.internal_number || '').trim();
+        const plate = (f.plate || '').trim();
+        const label = internal && plate ? `${internal} (${plate})` : internal || plate;
+        return {
+          value: internal || plate,
+          internal,
+          plate,
+          label,
+          type: f.type || 'Camión'
+        };
+      })
+      .filter(opt => opt.value)
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
   }, [fleetList]);
 
   // ------------------------------------------------------------------
@@ -141,7 +295,7 @@ export default function FleetWashes() {
   const [unmatchedRows, setUnmatchedRows] = useState([]); // Array de items no coincidentes editables
   const [matchedWashUpdates, setMatchedWashUpdates] = useState([]); // Array de items que sí coincidieron
 
-  // Fechas únicas disponibles en la columna "Creado" (orden descendente)
+  // Fechas únicas disponibles en la columna "Creado" (orden descendente: más recientes primero)
   const availableCreadoDates = useMemo(() => {
     if (!washCreadoCol || washRawRows.length === 0) return [];
     const dateCounts = {};
@@ -158,6 +312,44 @@ export default function FleetWashes() {
       timestamp: parseDateStrToTime(date) || 0
     })).sort((a, b) => b.timestamp - a.timestamp);
   }, [washCreadoCol, washRawRows]);
+
+  // Fechas ordenadas agrupadas por Mes y Año (desde el mes más reciente hacia atrás, y dentro de cada mes en orden cronológico) (Requisito 1)
+  const groupedCreadoDates = useMemo(() => {
+    if (availableCreadoDates.length === 0) return [];
+    const groups = {};
+    availableCreadoDates.forEach(item => {
+      const parts = item.date.split(/[-/]/);
+      let year = 2026;
+      let month = 0;
+      if (parts.length === 3) {
+        if (parts[0].length === 4) {
+          year = parseInt(parts[0], 10);
+          month = parseInt(parts[1], 10) - 1;
+        } else {
+          year = parseInt(parts[2], 10);
+          month = parseInt(parts[1], 10) - 1;
+        }
+      }
+      const groupKey = `${year}-${String(month).padStart(2, '0')}`;
+      const groupLabel = `${MONTH_NAMES[month] || 'Mes ' + (month + 1)} ${year}`;
+      if (!groups[groupKey]) {
+        groups[groupKey] = {
+          key: groupKey,
+          label: groupLabel,
+          year,
+          month,
+          items: []
+        };
+      }
+      groups[groupKey].items.push(item);
+    });
+
+    const sortedGroups = Object.values(groups).sort((a, b) => b.key.localeCompare(a.key));
+    sortedGroups.forEach(g => {
+      g.items.sort((a, b) => a.timestamp - b.timestamp);
+    });
+    return sortedGroups;
+  }, [availableCreadoDates]);
 
   // Fechas ordenadas cronológicamente (más antigua primero) para selectores de rango
   const chronologicalCreadoDates = useMemo(() => {
@@ -220,6 +412,18 @@ export default function FleetWashes() {
   // Filtrado de la tabla principal de Lavados
   const filteredFleet = useMemo(() => {
     return fleetList.filter(f => {
+      // Filtro multi-selección de camiones (Requisito 2)
+      if (selectedTrucks.length > 0) {
+        const matchesTruck = selectedTrucks.some(val => 
+          val === f.internal_number || 
+          val === f.plate || 
+          val === `${f.internal_number} (${f.plate})` ||
+          (f.internal_number && val.includes(f.internal_number)) ||
+          (f.plate && val.includes(f.plate))
+        );
+        if (!matchesTruck) return false;
+      }
+
       if (typeFilter !== 'Todos') {
         const t = (f.type || '').toLowerCase();
         if (typeFilter === 'Camiones' && (t.includes('tracto') || t.includes('rampla') || t.includes('semi'))) return false;
@@ -246,7 +450,7 @@ export default function FleetWashes() {
 
       return true;
     });
-  }, [fleetList, typeFilter, regionFilter, certFilter, searchTerm]);
+  }, [fleetList, typeFilter, regionFilter, certFilter, searchTerm, selectedTrucks]);
 
   // ------------------------------------------------------------------
   // MANEJADORES: CARGA 1 - CERTIFICACIONES
@@ -714,8 +918,8 @@ export default function FleetWashes() {
       </div>
 
       {/* 2. Barra de Filtros */}
-      <div className="flex flex-col sm:flex-row items-center gap-2.5">
-        <div className="relative flex-1 w-full">
+      <div className="flex flex-col sm:flex-row items-center gap-2.5 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <input
             type="text"
@@ -725,6 +929,13 @@ export default function FleetWashes() {
             className="w-full pl-9 pr-4 py-1.5 h-9 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
           />
         </div>
+
+        {/* Multi-Filtro Camiones (Requisito 2) */}
+        <TruckMultiSelect
+          truckOptions={truckOptions}
+          selectedTrucks={selectedTrucks}
+          onChange={setSelectedTrucks}
+        />
 
         {/* Filtro por Región (Requisito 3) */}
         <select
@@ -763,6 +974,23 @@ export default function FleetWashes() {
           <option value="con_lavado">Con Lavado Registrado</option>
           <option value="sin_lavado">Sin Lavado</option>
         </select>
+
+        {(searchTerm || regionFilter !== 'Todas' || typeFilter !== 'Todos' || certFilter !== 'Todos' || selectedTrucks.length > 0) && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchTerm('');
+              setRegionFilter('Todas');
+              setTypeFilter('Todos');
+              setCertFilter('Todos');
+              setSelectedTrucks([]);
+            }}
+            className="text-xs font-bold text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+            title="Limpiar todos los filtros"
+          >
+            × Limpiar
+          </button>
+        )}
       </div>
 
       {/* 3. Tabla Principal de Lavados */}
@@ -1135,11 +1363,15 @@ export default function FleetWashes() {
                           type="button"
                           onClick={() => {
                             setWashDateFilterMode('rango');
-                            if (!washDateRangeStart && chronologicalCreadoDates.length > 0) {
-                              setWashDateRangeStart(chronologicalCreadoDates[0].date);
-                            }
-                            if (!washDateRangeEnd && chronologicalCreadoDates.length > 0) {
-                              setWashDateRangeEnd(chronologicalCreadoDates[chronologicalCreadoDates.length - 1].date);
+                            if (groupedCreadoDates.length > 0) {
+                              const latestGroup = groupedCreadoDates[0];
+                              if (latestGroup.items.length > 0) {
+                                if (!washDateRangeStart) setWashDateRangeStart(latestGroup.items[0].date);
+                                if (!washDateRangeEnd) setWashDateRangeEnd(latestGroup.items[latestGroup.items.length - 1].date);
+                              }
+                            } else if (chronologicalCreadoDates.length > 0) {
+                              if (!washDateRangeStart) setWashDateRangeStart(chronologicalCreadoDates[0].date);
+                              if (!washDateRangeEnd) setWashDateRangeEnd(chronologicalCreadoDates[chronologicalCreadoDates.length - 1].date);
                             }
                           }}
                           className={`text-xs py-1.5 px-2 rounded-md font-bold transition-all ${
@@ -1170,7 +1402,7 @@ export default function FleetWashes() {
                       </div>
                     </div>
 
-                    {/* Si seleccionó Rango de Fechas (Requisito 4) */}
+                    {/* Si seleccionó Rango de Fechas (Requisito 1 y 4) */}
                     {washDateFilterMode === 'rango' && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-emerald-200/70">
                         <div>
@@ -1182,10 +1414,14 @@ export default function FleetWashes() {
                             onChange={(e) => setWashDateRangeStart(e.target.value)}
                             className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-xs"
                           >
-                            {chronologicalCreadoDates.map(item => (
-                              <option key={`start-${item.date}`} value={item.date}>
-                                📅 {item.date} ({item.count} reg.)
-                              </option>
+                            {groupedCreadoDates.map(grp => (
+                              <optgroup key={`start-grp-${grp.key}`} label={`📅 ${grp.label}`}>
+                                {grp.items.map(item => (
+                                  <option key={`start-${item.date}`} value={item.date}>
+                                    {item.date} ({item.count} reg.)
+                                  </option>
+                                ))}
+                              </optgroup>
                             ))}
                           </select>
                         </div>
@@ -1199,10 +1435,14 @@ export default function FleetWashes() {
                             onChange={(e) => setWashDateRangeEnd(e.target.value)}
                             className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-xs"
                           >
-                            {chronologicalCreadoDates.map(item => (
-                              <option key={`end-${item.date}`} value={item.date}>
-                                📅 {item.date} ({item.count} reg.)
-                              </option>
+                            {groupedCreadoDates.map(grp => (
+                              <optgroup key={`end-grp-${grp.key}`} label={`📅 ${grp.label}`}>
+                                {grp.items.map(item => (
+                                  <option key={`end-${item.date}`} value={item.date}>
+                                    {item.date} ({item.count} reg.)
+                                  </option>
+                                ))}
+                              </optgroup>
                             ))}
                           </select>
                         </div>
@@ -1220,10 +1460,14 @@ export default function FleetWashes() {
                           onChange={(e) => setSelectedCreadoDate(e.target.value)}
                           className="w-full text-xs font-bold border border-emerald-300 rounded-lg p-2 bg-white text-emerald-950 focus:ring-2 focus:ring-emerald-500 shadow-xs"
                         >
-                          {availableCreadoDates.map(item => (
-                            <option key={`single-${item.date}`} value={item.date}>
-                              📅 {item.date} — ({item.count} {item.count === 1 ? 'registro' : 'registros'})
-                            </option>
+                          {groupedCreadoDates.map(grp => (
+                            <optgroup key={`single-grp-${grp.key}`} label={`📅 ${grp.label}`}>
+                              {grp.items.map(item => (
+                                <option key={`single-${item.date}`} value={item.date}>
+                                  {item.date} — ({item.count} {item.count === 1 ? 'registro' : 'registros'})
+                                </option>
+                              ))}
+                            </optgroup>
                           ))}
                         </select>
                       </div>

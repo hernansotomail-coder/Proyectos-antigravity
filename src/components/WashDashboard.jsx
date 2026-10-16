@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useFleetStore } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { 
@@ -100,6 +100,134 @@ export const getInternalColorStatus = (diffDays) => {
   return 'green';
 };
 
+// Componente de multi-selección de camiones con búsqueda y checkboxes (Requisito 2)
+function TruckMultiSelect({ truckOptions, selectedTrucks, onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!searchTerm) return truckOptions;
+    const lower = searchTerm.toLowerCase();
+    return truckOptions.filter(o => 
+      o.label.toLowerCase().includes(lower) || 
+      o.internal.toLowerCase().includes(lower) || 
+      o.plate.toLowerCase().includes(lower)
+    );
+  }, [truckOptions, searchTerm]);
+
+  const toggleOption = (val) => {
+    if (selectedTrucks.includes(val)) {
+      onChange(selectedTrucks.filter(v => v !== val));
+    } else {
+      onChange([...selectedTrucks, val]);
+    }
+  };
+
+  const buttonText = useMemo(() => {
+    if (selectedTrucks.length === 0) return 'Camiones: Todos';
+    if (selectedTrucks.length === 1) {
+      const found = truckOptions.find(o => o.value === selectedTrucks[0]);
+      return `Camión: ${found ? found.label : selectedTrucks[0]}`;
+    }
+    return `Camiones: ${selectedTrucks.length} sel.`;
+  }, [selectedTrucks, truckOptions]);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen(!isOpen)}
+        className={`flex items-center justify-between gap-1.5 px-3 py-1.5 text-xs rounded-xl border transition-all text-left h-9 ${
+          selectedTrucks.length > 0 
+            ? 'bg-blue-50 border-blue-400 text-blue-900 font-bold shadow-2xs' 
+            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white'
+        }`}
+      >
+        <div className="flex items-center gap-1.5 truncate">
+          <Truck size={14} className={selectedTrucks.length > 0 ? "text-blue-700 shrink-0" : "text-slate-400 shrink-0"} />
+          <span className="truncate max-w-[130px]">{buttonText}</span>
+        </div>
+        <ChevronDown size={13} className={`text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 sm:left-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2.5 animate-in fade-in zoom-in-95">
+          <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 text-xs">
+            <span className="font-bold text-slate-800">Filtrar por Camión</span>
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => onChange(truckOptions.map(o => o.value))}
+                className="text-blue-600 hover:text-blue-800 font-semibold"
+              >
+                Todos
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                type="button"
+                onClick={() => onChange([])}
+                className="text-slate-500 hover:text-red-600 font-semibold"
+              >
+                Limpiar
+              </button>
+            </div>
+          </div>
+
+          <div className="relative mb-2">
+            <Search className="absolute left-2.5 top-2 text-slate-400" size={12} />
+            <input
+              type="text"
+              placeholder="Buscar camión o patente..."
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-7 pr-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50"
+            />
+          </div>
+
+          <div className="max-h-52 overflow-y-auto space-y-0.5 pr-0.5">
+            {filtered.map(opt => {
+              const isChecked = selectedTrucks.includes(opt.value);
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg text-xs cursor-pointer select-none transition-colors ${
+                    isChecked ? 'bg-blue-50 text-blue-950 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 truncate">
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleOption(opt.value)}
+                      className="rounded text-blue-600 focus:ring-blue-500 h-3.5 w-3.5 shrink-0 cursor-pointer"
+                    />
+                    <span className="truncate">{opt.label}</span>
+                  </div>
+                  <span className="text-[9px] text-slate-400 font-normal shrink-0">{opt.type}</span>
+                </label>
+              );
+            })}
+            {filtered.length === 0 && (
+              <p className="text-xs text-slate-400 text-center py-3">No hay coincidencias</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function WashDashboard() {
   const { fleetList, fetchFleet } = useFleetStore();
 
@@ -107,6 +235,7 @@ export default function WashDashboard() {
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [regionFilter, setRegionFilter] = useState('Todas');
   const [statusFilter, setStatusFilter] = useState('Todos');
+  const [selectedTrucks, setSelectedTrucks] = useState([]); // Multi-selección de camiones (Requisito 2)
   const [activeCard, setActiveCard] = useState('todos');
 
   useEffect(() => {
@@ -117,6 +246,25 @@ export default function WashDashboard() {
   const regions = useMemo(() => {
     const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
     return ['Todas', ...Array.from(rSet).sort()];
+  }, [fleetList]);
+
+  // Opciones únicas de camiones para el multi-select (Requisito 2)
+  const truckOptions = useMemo(() => {
+    return fleetList
+      .map(f => {
+        const internal = (f.internal_number || '').trim();
+        const plate = (f.plate || '').trim();
+        const label = internal && plate ? `${internal} (${plate})` : internal || plate;
+        return {
+          value: internal || plate,
+          internal,
+          plate,
+          label,
+          type: f.type || 'Camión'
+        };
+      })
+      .filter(opt => opt.value)
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
   }, [fleetList]);
 
   // Enriquecer flota con categorías y estado de semáforo de certificación (1 mes de vigencia)
@@ -142,9 +290,21 @@ export default function WashDashboard() {
     });
   }, [fleetList]);
 
-  // Flota con filtros base aplicados (Tipo, Región, Búsqueda) para que los KPIs respondan a la región
+  // Flota con filtros base aplicados (Tipo, Región, Camiones, Búsqueda) para que los KPIs respondan
   const baseFilteredFleet = useMemo(() => {
     return enrichedFleet.filter(f => {
+      // Filtro multi-selección de camiones (Requisito 2)
+      if (selectedTrucks.length > 0) {
+        const matchesTruck = selectedTrucks.some(val => 
+          val === f.internal_number || 
+          val === f.plate || 
+          val === `${f.internal_number} (${f.plate})` ||
+          (f.internal_number && val.includes(f.internal_number)) ||
+          (f.plate && val.includes(f.plate))
+        );
+        if (!matchesTruck) return false;
+      }
+
       // Filtro por Tipo
       if (typeFilter !== 'Todos' && f.dashboardCategory !== typeFilter) return false;
 
@@ -163,7 +323,7 @@ export default function WashDashboard() {
 
       return true;
     });
-  }, [enrichedFleet, typeFilter, regionFilter, searchFilter]);
+  }, [enrichedFleet, typeFilter, regionFilter, searchFilter, selectedTrucks]);
 
   // Estadísticas para las 5 tarjetas superiores (Requisito 2: Se quitó tarjeta <7d)
   const stats = useMemo(() => {
@@ -329,8 +489,8 @@ export default function WashDashboard() {
       </div>
 
       {/* 3. Filtros y Búsqueda (Con Región agregada - Requisito 3) */}
-      <div className="flex flex-col sm:flex-row items-center gap-2.5">
-        <div className="relative flex-1 w-full">
+      <div className="flex flex-col sm:flex-row items-center gap-2.5 flex-wrap">
+        <div className="relative flex-1 min-w-[200px] w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
           <input
             type="text"
@@ -340,6 +500,13 @@ export default function WashDashboard() {
             className="w-full pl-9 pr-4 py-2 h-9 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
           />
         </div>
+
+        {/* Multi-Filtro Camiones (Requisito 2) */}
+        <TruckMultiSelect
+          truckOptions={truckOptions}
+          selectedTrucks={selectedTrucks}
+          onChange={setSelectedTrucks}
+        />
 
         {/* Filtro por Región (Requisito 3) */}
         <select
@@ -378,6 +545,24 @@ export default function WashDashboard() {
           <option value="green">Al Día (Verde)</option>
           <option value="none">Sin Certificación</option>
         </select>
+
+        {(searchFilter || regionFilter !== 'Todas' || typeFilter !== 'Todos' || statusFilter !== 'Todos' || selectedTrucks.length > 0 || activeCard !== 'todos') && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchFilter('');
+              setRegionFilter('Todas');
+              setTypeFilter('Todos');
+              setStatusFilter('Todos');
+              setSelectedTrucks([]);
+              setActiveCard('todos');
+            }}
+            className="text-xs font-bold text-red-600 hover:text-red-800 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+            title="Limpiar todos los filtros"
+          >
+            × Limpiar
+          </button>
+        )}
       </div>
 
       {/* 4. Tabla de Dashboard de Lavados (Requisito 3 & 5) */}

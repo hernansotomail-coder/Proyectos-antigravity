@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Edit2, Trash2, Search, X, Check, Truck, UploadCloud, 
-  FileSpreadsheet, ArrowRight, CheckCircle2, AlertCircle, RefreshCw, Layers
+  FileSpreadsheet, ArrowRight, CheckCircle2, AlertCircle, RefreshCw, Layers,
+  Eye, EyeOff, Table
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -88,13 +89,16 @@ export default function ManageFleet() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
 
-  // Estado del Modal de Carga Masiva por Columnas (Requisito 1)
+  // Estado del Modal de Carga Masiva por Columnas (Requisito 1 y 3)
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [excelWorkbook, setExcelWorkbook] = useState(null);
   const [sheetNames, setSheetNames] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState('');
   const [excelColumns, setExcelColumns] = useState([]);
   const [excelRawRows, setExcelRawRows] = useState([]);
+  const [excel2DRows, setExcel2DRows] = useState([]); // Matriz 2D de filas crudas (Requisito 3)
+  const [headerRowIndex, setHeaderRowIndex] = useState(0); // Fila activa de títulos (Requisito 3)
+  const [showPreviewTable, setShowPreviewTable] = useState(true);
   
   // Mapeos y columnas seleccionadas por el usuario
   const [keyInternalColumn, setKeyInternalColumn] = useState('');
@@ -158,8 +162,109 @@ export default function ManageFleet() {
   };
 
   // ----------------------------------------------------
-  // LOGICA CARGA MASIVA POR COLUMNAS (Requisito 1)
+  // LOGICA CARGA MASIVA POR COLUMNAS (Requisito 1 y 3)
   // ----------------------------------------------------
+
+  // Auto-detectar la mejor fila de títulos analizando las primeras 15 filas (Requisito 3)
+  const autoDetectHeaderRow = (rows2D) => {
+    if (!rows2D || rows2D.length === 0) return 0;
+    let bestIdx = 0;
+    let bestScore = -1;
+
+    for (let i = 0; i < Math.min(rows2D.length, 15); i++) {
+      const row = rows2D[i] || [];
+      const validCells = row.filter(cell => {
+        if (cell === null || cell === undefined || cell === '') return false;
+        const str = String(cell).trim();
+        return str.length > 0 && !str.startsWith('__EMPTY');
+      });
+
+      if (validCells.length < 2) continue;
+
+      let score = validCells.length * 2;
+      const rowText = row.map(c => normalizeText(String(c))).join(' ');
+      if (rowText.includes('interno') || rowText.includes('codigo') || rowText.includes('unidad')) score += 15;
+      if (rowText.includes('patente') || rowText.includes('placa')) score += 10;
+      if (rowText.includes('marca')) score += 5;
+      if (rowText.includes('tipo')) score += 5;
+      if (rowText.includes('ano') || rowText.includes('modelo')) score += 4;
+      if (rowText.includes('region')) score += 4;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  };
+
+  // Aplicar una fila específica como encabezados de columnas (Requisito 3)
+  const applyHeaderRow = (rows2D, rowIdx) => {
+    if (!rows2D || rows2D.length === 0 || rowIdx < 0 || rowIdx >= rows2D.length) return;
+
+    const headerRow = rows2D[rowIdx] || [];
+    const cols = [];
+    const colCounts = {};
+
+    headerRow.forEach((cell, cIdx) => {
+      let name = String(cell || '').trim();
+      if (!name || name.startsWith('__EMPTY')) {
+        name = `Columna ${cIdx + 1}`;
+      }
+      if (colCounts[name]) {
+        colCounts[name]++;
+        name = `${name} (${colCounts[name]})`;
+      } else {
+        colCounts[name] = 1;
+      }
+      cols.push(name);
+    });
+
+    const dataRows = [];
+    for (let i = rowIdx + 1; i < rows2D.length; i++) {
+      const rowArr = rows2D[i];
+      if (!rowArr || rowArr.length === 0) continue;
+      const hasData = rowArr.some(c => c !== null && c !== undefined && String(c).trim() !== '');
+      if (!hasData) continue;
+
+      const rowObj = {};
+      cols.forEach((colName, cIdx) => {
+        rowObj[colName] = rowArr[cIdx] !== undefined ? rowArr[cIdx] : '';
+      });
+      dataRows.push(rowObj);
+    }
+
+    setExcelColumns(cols);
+    setExcelRawRows(dataRows);
+    setHeaderRowIndex(rowIdx);
+
+    // Auto-detectar columna clave "N° Interno"
+    let detectedKey = cols.find(c => {
+      const n = normalizeText(c);
+      return n.includes('interno') || n === 'codigocamion' || n === 'codigo' || n === 'unidad';
+    }) || cols[0] || '';
+    setKeyInternalColumn(detectedKey);
+
+    // Auto-mapear columnas de flota que coincidan por nombre
+    const autoSelected = {};
+    FLEET_COLUMNS.forEach(fc => {
+      const targetNorm = normalizeText(fc.label);
+      const targetKeyNorm = normalizeText(fc.key);
+
+      const matchedExcelCol = cols.find(ec => {
+        const ecNorm = normalizeText(ec);
+        return ecNorm === targetNorm || ecNorm === targetKeyNorm || 
+               ecNorm.includes(targetNorm) || targetNorm.includes(ecNorm);
+      });
+
+      if (matchedExcelCol && matchedExcelCol !== detectedKey) {
+        autoSelected[fc.key] = matchedExcelCol;
+      }
+    });
+
+    setSelectedFleetColumns(autoSelected);
+  };
+
   const onDropExcel = (acceptedFiles) => {
     const file = acceptedFiles[0];
     if (!file) return;
@@ -193,43 +298,19 @@ export default function ManageFleet() {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) return;
 
-    const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    if (json.length === 0) {
+    // Leer como matriz 2D cruda para permitir seleccionar fila de títulos (Requisito 3)
+    const raw2D = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (raw2D.length === 0) {
       setExcelColumns([]);
       setExcelRawRows([]);
+      setExcel2DRows([]);
       toast.warning('La hoja seleccionada está vacía');
       return;
     }
 
-    const cols = Object.keys(json[0] || {});
-    setExcelColumns(cols);
-    setExcelRawRows(json);
-
-    // Auto-detectar columna clave "N° Interno"
-    let detectedKey = cols.find(c => {
-      const n = normalizeText(c);
-      return n.includes('interno') || n === 'codigocamion' || n === 'codigo' || n === 'unidad';
-    }) || cols[0] || '';
-    setKeyInternalColumn(detectedKey);
-
-    // Auto-mapear columnas de flota que coincidan por nombre
-    const autoSelected = {};
-    FLEET_COLUMNS.forEach(fc => {
-      const targetNorm = normalizeText(fc.label);
-      const targetKeyNorm = normalizeText(fc.key);
-
-      const matchedExcelCol = cols.find(ec => {
-        const ecNorm = normalizeText(ec);
-        return ecNorm === targetNorm || ecNorm === targetKeyNorm || 
-               ecNorm.includes(targetNorm) || targetNorm.includes(ecNorm);
-      });
-
-      if (matchedExcelCol && matchedExcelCol !== detectedKey) {
-        autoSelected[fc.key] = matchedExcelCol;
-      }
-    });
-
-    setSelectedFleetColumns(autoSelected);
+    setExcel2DRows(raw2D);
+    const detectedIdx = autoDetectHeaderRow(raw2D);
+    applyHeaderRow(raw2D, detectedIdx);
   };
 
   const handleSheetChange = (newSheet) => {
@@ -537,12 +618,12 @@ export default function ManageFleet() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {/* Selector de Hoja y Columna Clave */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                  {/* Selector de Hoja, Fila de Títulos y Columna Clave (Requisito 3) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
                     {/* Selector de Hoja */}
                     <div>
                       <label className="block text-xs font-bold text-slate-700 mb-1">
-                        Hoja del archivo Excel:
+                        1. Hoja del archivo Excel:
                       </label>
                       <select
                         value={selectedSheet}
@@ -555,10 +636,31 @@ export default function ManageFleet() {
                       </select>
                     </div>
 
+                    {/* Selector de Fila de Títulos (Requisito 3) */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                        <span>2. Fila de títulos:</span>
+                        <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                          Auto-detectada
+                        </span>
+                      </label>
+                      <select
+                        value={headerRowIndex}
+                        onChange={(e) => applyHeaderRow(excel2DRows, parseInt(e.target.value, 10))}
+                        className="w-full text-xs font-bold border border-slate-300 rounded-lg p-2 bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      >
+                        {excel2DRows.slice(0, 10).map((row, idx) => (
+                          <option key={`row-${idx}`} value={idx}>
+                            Fila {idx + 1} {idx === headerRowIndex ? '✓ (Títulos activos)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
                     {/* Selector de Columna Clave N° Interno */}
                     <div>
                       <label className="block text-xs font-bold text-indigo-800 mb-1">
-                        Columna Clave de N° Interno (en Excel):
+                        3. Columna N° Interno (Clave):
                       </label>
                       <select
                         value={keyInternalColumn}
@@ -571,6 +673,93 @@ export default function ManageFleet() {
                       </select>
                     </div>
                   </div>
+
+                  {/* Vista Previa de Primeras 5 Filas con Selección Interactiva (Requisito 3) */}
+                  {excel2DRows.length > 0 && (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+                      <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Table size={14} className="text-indigo-600" />
+                          <span className="text-xs font-bold text-slate-800">
+                            Previsualización del archivo (Primeras 5 filas)
+                          </span>
+                          <span className="text-[10px] text-slate-500 hidden sm:inline">
+                            — Haz clic en "Usar como títulos" en la fila donde comienzan los encabezados
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowPreviewTable(!showPreviewTable)}
+                          className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
+                        >
+                          {showPreviewTable ? <EyeOff size={13} /> : <Eye size={13} />}
+                          {showPreviewTable ? 'Ocultar' : 'Mostrar'}
+                        </button>
+                      </div>
+
+                      {showPreviewTable && (
+                        <div className="overflow-x-auto max-h-48 text-xs">
+                          <table className="w-full text-left border-collapse">
+                            <tbody>
+                              {excel2DRows.slice(0, 5).map((row, rIdx) => {
+                                const isHeader = rIdx === headerRowIndex;
+                                return (
+                                  <tr 
+                                    key={`prev-${rIdx}`}
+                                    className={`transition-colors border-b border-slate-100 ${
+                                      isHeader 
+                                        ? 'bg-indigo-50/90 font-bold border-l-4 border-l-indigo-600 text-indigo-950' 
+                                        : 'hover:bg-slate-50/70 text-slate-700'
+                                    }`}
+                                  >
+                                    <td className="px-2.5 py-1.5 text-center font-mono text-[11px] whitespace-nowrap bg-slate-100/70 border-r border-slate-200 w-36">
+                                      <div className="flex items-center gap-2 justify-between">
+                                        <span className="text-slate-500 font-bold">Fila {rIdx + 1}</span>
+                                        {isHeader ? (
+                                          <span className="bg-indigo-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-2xs">
+                                            ✓ Títulos
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => applyHeaderRow(excel2DRows, rIdx)}
+                                            className="text-[10px] bg-white border border-slate-300 hover:border-indigo-500 hover:text-indigo-600 px-1.5 py-0.5 rounded font-semibold text-slate-600 transition-colors shadow-2xs"
+                                            title="Establecer esta fila como encabezados de columna"
+                                          >
+                                            Usar como títulos
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                    {row.slice(0, 8).map((cell, cIdx) => (
+                                      <td 
+                                        key={`cell-${rIdx}-${cIdx}`}
+                                        className={`px-2.5 py-1.5 max-w-[140px] truncate border-r border-slate-100 text-[11px] ${
+                                          isHeader ? 'font-black text-indigo-900 bg-indigo-100/40' : ''
+                                        }`}
+                                        title={String(cell || '')}
+                                      >
+                                        {cell !== null && cell !== undefined && String(cell).trim() !== '' ? (
+                                          String(cell)
+                                        ) : (
+                                          <span className="text-slate-300 italic text-[10px]">—</span>
+                                        )}
+                                      </td>
+                                    ))}
+                                    {row.length > 8 && (
+                                      <td className="px-2 py-1 text-slate-400 text-[10px] italic">
+                                        +{row.length - 8} más...
+                                      </td>
+                                    )}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Paso 2: Selección de Columnas a Cargar */}
                   <div>

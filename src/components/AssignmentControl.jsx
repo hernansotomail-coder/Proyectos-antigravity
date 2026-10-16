@@ -889,13 +889,17 @@ export default function AssignmentControl() {
     }
     const att = attendanceMap[staff.id] || staff.attStatus;
     if (att) {
-      const attLower = String(att).toLowerCase();
+      const attLower = String(att).trim().toLowerCase();
+      // Si el estado es Trabajado o Disponible, no es una novedad ni alerta
+      if (attLower.includes('trabaj') || attLower.includes('disponib')) {
+        return null;
+      }
       if (attLower.includes('vacaci')) return 'Vacaciones';
       if (attLower.includes('licenc')) return 'Licencia Médica';
       if (attLower.includes('ausent')) return 'Ausente';
       if (attLower.includes('con goce')) return 'Permiso con goce';
       if (attLower.includes('sin goce')) return 'Permiso sin goce';
-      if (attLower.includes('baja')) return 'Baja';
+      if (attLower === 'baja' || attLower === 'de baja' || attLower.startsWith('baja ')) return 'Baja';
       if (ATTENDANCE_STYLES[att]?.isAlert) return ATTENDANCE_STYLES[att].badge || att;
     }
     return null;
@@ -1145,7 +1149,7 @@ export default function AssignmentControl() {
     e.dataTransfer.setData('application/json', JSON.stringify({ type: isRampla ? 'rampla' : 'truck', data: truck }));
   };
 
-  const handleDropOnRow = (e, rowId, slotPreference = 'conductor') => {
+  const handleDropOnRow = (e, rowId, slotPreference = 'auto') => {
     e.preventDefault();
     try {
       const raw = e.dataTransfer.getData('application/json');
@@ -1158,12 +1162,33 @@ export default function AssignmentControl() {
 
       if (parsed.type === 'staff') {
         const staff = parsed.data;
-        // Requisito 2: Permitir arrastrar Auxiliares como Conductor en la columna Conductor
-        const targetSlot = slotPreference;
+        let targetSlot = slotPreference;
+        if (targetSlot === 'auto' || !targetSlot) {
+          // Si se soltó sobre la fila en general, inferir por el rol o pestaña activa
+          const staffRole = (staff.role || '').toLowerCase();
+          if (staffRole.includes('auxiliar') || staffRole.includes('movilizador') || activeTabStaff === 'auxiliares') {
+            const currentRow = assignmentsForDate.find(r => r.id === rowId);
+            if (currentRow && currentRow.aux1_name && !currentRow.aux2_name) {
+              targetSlot = 'auxiliar2';
+            } else {
+              targetSlot = 'auxiliar';
+            }
+          } else {
+            targetSlot = 'conductor';
+          }
+        }
         handleRequestAssignStaff(staff, targetSlot, targetIds);
       } else if (parsed.type === 'truck' || parsed.type === 'rampla') {
-        // En la columna Rampla o Camión se pueden arrastrar camiones indistintamente (Requisito 5)
-        if (slotPreference === 'rampla') {
+        let slot = slotPreference;
+        if (slot === 'auto' || !slot) {
+          const truckType = (parsed.data?.type || '').toLowerCase();
+          if (parsed.type === 'rampla' || truckType.includes('semirremolque') || truckType.includes('rampla')) {
+            slot = 'rampla';
+          } else {
+            slot = 'camion';
+          }
+        }
+        if (slot === 'rampla') {
           assignRamplaToRows(activeDate, targetIds, parsed.data);
         } else {
           assignTruckToRows(activeDate, targetIds, parsed.data);
@@ -1667,7 +1692,7 @@ export default function AssignmentControl() {
                       <tr 
                         key={row.id}
                         onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => handleDropOnRow(e, row.id)}
+                        onDrop={(e) => handleDropOnRow(e, row.id, 'auto')}
                         className={`transition-colors ${
                           isSelected ? 'bg-blue-50/70 border-l-4 border-l-blue-600' : 'hover:bg-slate-50'
                         }`}
@@ -1821,9 +1846,13 @@ export default function AssignmentControl() {
 
                         {/* 4. Conductor */}
                         <td 
-                          className="px-2.5 py-2 font-bold text-slate-800 max-w-[130px] truncate bg-blue-50/20"
+                          className="px-2.5 py-2 font-bold text-slate-800 max-w-[130px] truncate bg-blue-50/20 transition-colors hover:bg-blue-100/40"
                           title={row.conductor_name}
-                          onDrop={(e) => handleDropOnRow(e, row.id, 'conductor')}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            handleDropOnRow(e, row.id, 'conductor');
+                          }}
                         >
                           {row.conductor_name ? (
                             <span className="flex items-center justify-between gap-1">
@@ -1850,9 +1879,13 @@ export default function AssignmentControl() {
 
                         {/* 5. Auxiliar */}
                         <td 
-                          className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20"
+                          className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20 transition-colors hover:bg-indigo-100/40"
                           title={row.aux1_name}
-                          onDrop={(e) => handleDropOnRow(e, row.id, 'auxiliar')}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            handleDropOnRow(e, row.id, 'auxiliar');
+                          }}
                         >
                           {row.aux1_name ? (
                             <span className="flex items-center justify-between gap-1">
@@ -1879,9 +1912,13 @@ export default function AssignmentControl() {
 
                         {/* 6. Auxiliar 2 */}
                         <td 
-                          className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20"
+                          className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20 transition-colors hover:bg-indigo-100/40"
                           title={row.aux2_name}
-                          onDrop={(e) => handleDropOnRow(e, row.id, 'auxiliar2')}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            handleDropOnRow(e, row.id, 'auxiliar2');
+                          }}
                         >
                           {row.aux2_name ? (
                             <span className="flex items-center justify-between gap-1">
@@ -1901,8 +1938,12 @@ export default function AssignmentControl() {
 
                         {/* 7. Camión (Con Tipo de equipo en hover - Requisito 5) */}
                         <td 
-                          className="px-2.5 py-2 font-bold text-slate-800 bg-emerald-50/20 relative group/truck"
-                          onDrop={(e) => handleDropOnRow(e, row.id, 'camion')}
+                          className="px-2.5 py-2 font-bold text-slate-800 bg-emerald-50/20 relative group/truck transition-colors hover:bg-emerald-100/40"
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.stopPropagation();
+                            handleDropOnRow(e, row.id, 'camion');
+                          }}
                         >
                           {row.camion ? (
                             <div className="flex items-center justify-between gap-1">
@@ -1935,7 +1976,7 @@ export default function AssignmentControl() {
 
                         {/* 9. Rampla (Asignable por arrastrar camión, semirremolque o texto - Requisito 5) */}
                         <td 
-                          className="px-2.5 py-2 bg-teal-50/20"
+                          className="px-2.5 py-2 bg-teal-50/20 transition-colors hover:bg-teal-100/40"
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
                             e.stopPropagation();
