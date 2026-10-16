@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx';
 import { useDropzone } from 'react-dropzone';
 import { useFleetStore } from '../store/fleetStore';
 import { Button } from './ui/Button';
+import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
 
 // Helpers para normalizar texto
 const normalizeText = (txt) => {
@@ -531,9 +532,7 @@ export default function FleetWashes() {
       const rawDateVal = row[certDateCol];
       const parsedDate = parseExcelDateValue(rawDateVal);
 
-      const matchedFleet = fleetList.find(f => 
-        String(f.internal_number || '').trim().toLowerCase() === internalVal.toLowerCase()
-      );
+      const matchedFleet = matchVehicleByCode(internalVal, '', fleetList);
 
       return {
         rowIdx: idx + 1,
@@ -553,8 +552,8 @@ export default function FleetWashes() {
     const validUpdates = certPreviewUpdates
       .filter(u => u.isMatched)
       .map(u => ({
-        internal_number: u.internal_number,
-        plate: u.matchedFleet.plate,
+        internal_number: u.matchedFleet?.internal_number || u.internal_number,
+        plate: u.matchedFleet?.plate,
         ultima_certificacion: u.newCertDate
       }));
 
@@ -704,15 +703,8 @@ export default function FleetWashes() {
       if (!rawCode && !rawPlate) return;
 
       // Buscar relación con N° Interno de flota (o por Patente como alternativa)
-      const foundVehicle = fleetList.find(f => {
-        const fInt = String(f.internal_number || '').trim().toLowerCase();
-        const fPlate = String(f.plate || '').trim().toLowerCase();
-        const codeLower = rawCode.toLowerCase();
-        const plateLower = rawPlate.toLowerCase();
-
-        return (rawCode && (fInt === codeLower || fInt.includes(codeLower) || codeLower.includes(fInt))) ||
-               (rawPlate && fPlate === plateLower);
-      });
+      // Soporta formatos flexibles: C200, C-200, C 200, c200, C.200, etc.
+      const foundVehicle = matchVehicleByCode(rawCode, rawPlate, fleetList);
 
       const itemData = {
         id: `wash-${idx}`,
@@ -749,9 +741,7 @@ export default function FleetWashes() {
   const handleUpdateUnmatchedCode = (itemId, newCode) => {
     setUnmatchedRows(prev => prev.map(item => {
       if (item.id === itemId) {
-        const found = fleetList.find(f => 
-          String(f.internal_number || '').trim().toLowerCase() === newCode.trim().toLowerCase()
-        );
+        const found = matchVehicleByCode(newCode, item.plate, fleetList);
         return {
           ...item,
           truckCode: newCode,

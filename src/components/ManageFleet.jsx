@@ -11,6 +11,7 @@ import { useFleetStore } from '../store/fleetStore';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { Button } from './ui/Button';
+import { matchVehicleByCode } from '../lib/vehicleMatcher';
 
 // Columnas editables y cargables de flota
 export const FLEET_COLUMNS = [
@@ -351,9 +352,7 @@ export default function ManageFleet() {
 
     return excelRawRows.map((row, idx) => {
       const rawInternal = String(row[keyInternalColumn] || '').trim();
-      const existingVehicle = fleetList.find(f => 
-        String(f.internal_number || '').trim().toLowerCase() === rawInternal.toLowerCase()
-      );
+      const existingVehicle = matchVehicleByCode(rawInternal, '', fleetList);
 
       const fields = {};
       activeCols.forEach(([fleetKey, excelCol]) => {
@@ -381,7 +380,7 @@ export default function ManageFleet() {
     const validUpdates = previewUpdates
       .filter(u => u.isMatched && u.internal_number)
       .map(u => ({
-        internal_number: u.internal_number,
+        internal_number: u.existingVehicle?.internal_number || u.internal_number,
         ...u.fields
       }));
 

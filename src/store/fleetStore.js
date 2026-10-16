@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
+import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
 
 // Persistencia local para Lavados y Certificaciones de Flota
 const loadPersistedFleetWashes = () => {
@@ -57,15 +58,21 @@ export const useFleetStore = create((set, get) => ({
 
       const enriched = (data || []).map(f => {
         const intKey = f.internal_number ? String(f.internal_number).trim() : null;
+        const normIntKey = f.internal_number ? normalizeVehicleCode(f.internal_number) : null;
         const plateKey = f.plate ? String(f.plate).trim().toUpperCase() : null;
+        const normPlateKey = f.plate ? normalizeVehicleCode(f.plate) : null;
         const idKey = f.id ? String(f.id) : null;
 
         const washInfo = (intKey && washesMap[intKey]) || 
+                         (normIntKey && washesMap[normIntKey]) ||
                          (plateKey && washesMap[plateKey]) || 
+                         (normPlateKey && washesMap[normPlateKey]) ||
                          (idKey && washesMap[idKey]) || {};
 
         const overrideInfo = (intKey && overridesMap[intKey]) || 
+                             (normIntKey && overridesMap[normIntKey]) ||
                              (plateKey && overridesMap[plateKey]) || 
+                             (normPlateKey && overridesMap[normPlateKey]) ||
                              (idKey && overridesMap[idKey]) || {};
 
         return {
@@ -189,17 +196,29 @@ export const useFleetStore = create((set, get) => ({
         if (!internal_number) continue;
 
         const cleanInternal = String(internal_number).trim();
-        const existingVehicle = currentList.find(f => 
-          String(f.internal_number || '').trim().toLowerCase() === cleanInternal.toLowerCase()
-        );
+        const existingVehicle = matchVehicleByCode(cleanInternal, '', currentList);
 
         if (existingVehicle) {
           updatedCount++;
-          // Guardar en override map
+          // Guardar en override map (claves directa, normalizada y por id)
           overridesMap[cleanInternal] = {
             ...(overridesMap[cleanInternal] || {}),
             ...fieldsToUpdate
           };
+          overridesMap[normalizeVehicleCode(cleanInternal)] = {
+            ...(overridesMap[normalizeVehicleCode(cleanInternal)] || {}),
+            ...fieldsToUpdate
+          };
+          if (existingVehicle.internal_number) {
+            overridesMap[existingVehicle.internal_number] = {
+              ...(overridesMap[existingVehicle.internal_number] || {}),
+              ...fieldsToUpdate
+            };
+            overridesMap[normalizeVehicleCode(existingVehicle.internal_number)] = {
+              ...(overridesMap[normalizeVehicleCode(existingVehicle.internal_number)] || {}),
+              ...fieldsToUpdate
+            };
+          }
           if (existingVehicle.id) {
             overridesMap[existingVehicle.id] = {
               ...(overridesMap[existingVehicle.id] || {}),
@@ -245,8 +264,11 @@ export const useFleetStore = create((set, get) => ({
         const plate = w.plate ? String(w.plate).trim().toUpperCase() : null;
 
         if (key || plate) {
+          const found = matchVehicleByCode(key, plate, currentList);
           const existingKey = key || plate;
-          const currentEntry = washesMap[existingKey] || {};
+          const currentEntry = washesMap[existingKey] || 
+                               (key && washesMap[normalizeVehicleCode(key)]) || 
+                               (plate && washesMap[normalizeVehicleCode(plate)]) || {};
           
           const newEntry = {
             ...currentEntry,
@@ -254,16 +276,26 @@ export const useFleetStore = create((set, get) => ({
             ...(w.fecha_ultimo_lavado !== undefined ? { fecha_ultimo_lavado: w.fecha_ultimo_lavado } : {})
           };
 
-          if (key) washesMap[key] = newEntry;
-          if (plate) washesMap[plate] = newEntry;
+          if (key) {
+            washesMap[key] = newEntry;
+            washesMap[normalizeVehicleCode(key)] = newEntry;
+          }
+          if (plate) {
+            washesMap[plate] = newEntry;
+            washesMap[normalizeVehicleCode(plate)] = newEntry;
+          }
 
-          // Buscar ID del vehículo para sincronizar también por ID
-          const found = currentList.find(f => 
-            (key && String(f.internal_number || '').trim().toLowerCase() === key.toLowerCase()) ||
-            (plate && String(f.plate || '').trim().toUpperCase() === plate)
-          );
+          // Vincular también con el vehículo encontrado
           if (found && found.id) {
             washesMap[found.id] = newEntry;
+            if (found.internal_number) {
+              washesMap[found.internal_number] = newEntry;
+              washesMap[normalizeVehicleCode(found.internal_number)] = newEntry;
+            }
+            if (found.plate) {
+              washesMap[found.plate] = newEntry;
+              washesMap[normalizeVehicleCode(found.plate)] = newEntry;
+            }
             matchedCount++;
 
             // Intentar sincronizar con Supabase si las columnas existen en la base
