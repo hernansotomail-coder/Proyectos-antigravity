@@ -29,9 +29,13 @@ CREATE TABLE IF NOT EXISTS public.attendance (
 ALTER TABLE public.attendance ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Permitir todo a attendance anonimo" ON public.attendance FOR ALL USING (true);
 
--- Columnas opcionales para soporte nativo de Flota Externa y Dotación Externa en Supabase:
+-- Columnas opcionales para soporte nativo de Lavados, Flota Externa y Dotación Externa en Supabase:
+ALTER TABLE public.fleet ADD COLUMN IF NOT EXISTS ultima_certificacion TEXT;
+ALTER TABLE public.fleet ADD COLUMN IF NOT EXISTS fecha_ultimo_lavado TEXT;
 ALTER TABLE public.fleet ADD COLUMN IF NOT EXISTS tipo_flota TEXT DEFAULT 'Propia';
 ALTER TABLE public.fleet ADD COLUMN IF NOT EXISTS empresa_externa TEXT;
 
 ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS tipo_dotacion TEXT DEFAULT 'Propia';
 ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS empresa_externa TEXT;
+ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS phone TEXT;
+

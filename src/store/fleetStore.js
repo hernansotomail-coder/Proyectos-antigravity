@@ -126,6 +126,59 @@ export const useFleetStore = create((set, get) => ({
         };
       });
 
+      // Auto-sincronizar hacia Supabase si en este equipo hay datos locales de lavados/certificaciones
+      const missingWashesInDb = (data || []).filter(f => {
+        const intKey = f.internal_number ? String(f.internal_number).trim() : null;
+        const normIntKey = f.internal_number ? normalizeVehicleCode(f.internal_number) : null;
+        const plateKey = f.plate ? String(f.plate).trim().toUpperCase() : null;
+        const normPlateKey = f.plate ? normalizeVehicleCode(f.plate) : null;
+        const idKey = f.id ? String(f.id) : null;
+
+        const washInfo = (intKey && washesMap[intKey]) || 
+                         (normIntKey && washesMap[normIntKey]) ||
+                         (plateKey && washesMap[plateKey]) || 
+                         (normPlateKey && washesMap[normPlateKey]) ||
+                         (idKey && washesMap[idKey]) || {};
+
+        const hasLocalCert = washInfo.ultima_certificacion && !f.ultima_certificacion;
+        const hasLocalWash = washInfo.fecha_ultimo_lavado && !f.fecha_ultimo_lavado;
+        return hasLocalCert || hasLocalWash;
+      });
+
+      if (missingWashesInDb.length > 0) {
+        setTimeout(async () => {
+          for (const item of missingWashesInDb) {
+            const intKey = item.internal_number ? String(item.internal_number).trim() : null;
+            const normIntKey = item.internal_number ? normalizeVehicleCode(item.internal_number) : null;
+            const plateKey = item.plate ? String(item.plate).trim().toUpperCase() : null;
+            const normPlateKey = item.plate ? normalizeVehicleCode(item.plate) : null;
+            const idKey = item.id ? String(item.id) : null;
+
+            const washInfo = (intKey && washesMap[intKey]) || 
+                             (normIntKey && washesMap[normIntKey]) ||
+                             (plateKey && washesMap[plateKey]) || 
+                             (normPlateKey && washesMap[normPlateKey]) ||
+                             (idKey && washesMap[idKey]) || {};
+
+            const payload = {};
+            if (washInfo.ultima_certificacion && !item.ultima_certificacion) {
+              payload.ultima_certificacion = washInfo.ultima_certificacion;
+            }
+            if (washInfo.fecha_ultimo_lavado && !item.fecha_ultimo_lavado) {
+              payload.fecha_ultimo_lavado = washInfo.fecha_ultimo_lavado;
+            }
+
+            if (Object.keys(payload).length > 0) {
+              try {
+                await supabase.from('fleet').update(payload).eq('id', item.id);
+              } catch (e) {
+                break;
+              }
+            }
+          }
+        }, 1000);
+      }
+
       set({ fleetList: enriched });
     } catch (err) {
       console.error(err);
@@ -527,6 +580,7 @@ export const useFleetStore = create((set, get) => ({
       const washesMap = loadPersistedFleetWashes();
       const currentList = get().fleetList;
       let matchedCount = 0;
+      const dbUpdates = [];
 
       washesArray.forEach(w => {
         const key = w.internal_number ? String(w.internal_number).trim() : null;
@@ -567,21 +621,29 @@ export const useFleetStore = create((set, get) => ({
             }
             matchedCount++;
 
-            // Intentar sincronizar con Supabase si las columnas existen en la base
-            supabase
-              .from('fleet')
-              .update({
-                ...(w.ultima_certificacion !== undefined ? { ultima_certificacion: w.ultima_certificacion } : {}),
-                ...(w.fecha_ultimo_lavado !== undefined ? { fecha_ultimo_lavado: w.fecha_ultimo_lavado } : {})
-              })
-              .eq('id', found.id)
-              .then(() => {})
-              .catch(() => {});
+            const payload = {};
+            if (w.ultima_certificacion !== undefined) payload.ultima_certificacion = w.ultima_certificacion;
+            if (w.fecha_ultimo_lavado !== undefined) payload.fecha_ultimo_lavado = w.fecha_ultimo_lavado;
+            if (Object.keys(payload).length > 0) {
+              dbUpdates.push({ id: found.id, payload });
+            }
           }
         }
       });
 
       persistFleetWashes(washesMap);
+
+      // Sincronizar en Supabase para que cualquier computador pueda leerlo
+      if (dbUpdates.length > 0) {
+        const batchSize = 10;
+        for (let i = 0; i < dbUpdates.length; i += batchSize) {
+          const batch = dbUpdates.slice(i, i + batchSize);
+          await Promise.allSettled(batch.map(u => 
+            supabase.from('fleet').update(u.payload).eq('id', u.id)
+          ));
+        }
+      }
+
       await get().fetchFleet();
       return true;
     } catch (err) {
@@ -604,9 +666,22 @@ export const useFleetStore = create((set, get) => ({
       };
       persistFleetWashes(washesMap);
 
+      const currentList = get().fleetList;
+      const found = matchVehicleByCode(key, '', currentList) || currentList.find(f => f.id === key);
+      if (found && found.id) {
+        try {
+          await supabase
+            .from('fleet')
+            .update(washData)
+            .eq('id', found.id);
+        } catch (subErr) {
+          console.warn('Fallback al actualizar wash en Supabase:', subErr);
+        }
+      }
+
       set(state => ({
         fleetList: state.fleetList.map(f => {
-          if (String(f.internal_number).trim() === key || String(f.id) === key) {
+          if (String(f.internal_number).trim() === key || String(f.id) === key || (found && f.id === found.id)) {
             return { ...f, ...washData };
           }
           return f;

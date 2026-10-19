@@ -94,6 +94,35 @@ export const useStaffStore = create((set, get) => ({
         };
       });
 
+      // Auto-sincronizar hacia Supabase si en este equipo hay datos locales que no están en Supabase
+      const missingStaffInDb = (data || []).filter(s => {
+        const hasPhone = phoneMap[s.id] || (s.rut && phoneMap[s.rut]);
+        const hasTipo = tipoMap[s.id] || (s.rut && tipoMap[s.rut]);
+        const hasEmpresa = empresaMap[s.id] || (s.rut && empresaMap[s.rut]);
+        return (!s.phone && hasPhone) || (!s.tipo_dotacion && hasTipo) || (!s.empresa_externa && hasEmpresa);
+      });
+
+      if (missingStaffInDb.length > 0) {
+        setTimeout(async () => {
+          for (const item of missingStaffInDb) {
+            const p = phoneMap[item.id] || (item.rut ? phoneMap[item.rut] : null);
+            const t = tipoMap[item.id] || (item.rut ? tipoMap[item.rut] : null);
+            const e = empresaMap[item.id] || (item.rut ? empresaMap[item.rut] : null);
+            const payload = {};
+            if (!item.phone && p) payload.phone = p;
+            if (!item.tipo_dotacion && t) payload.tipo_dotacion = t;
+            if (!item.empresa_externa && e) payload.empresa_externa = e;
+            if (Object.keys(payload).length > 0) {
+              try {
+                await supabase.from('staff').update(payload).eq('id', item.id);
+              } catch (err) {
+                break;
+              }
+            }
+          }
+        }, 1200);
+      }
+
       set({ staffList: enriched, error: null });
     } catch (err) {
       console.error(err);
