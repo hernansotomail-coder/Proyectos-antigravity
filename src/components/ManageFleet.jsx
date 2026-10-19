@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Edit2, Trash2, Search, X, Check, Truck, UploadCloud, 
   FileSpreadsheet, ArrowRight, CheckCircle2, AlertCircle, RefreshCw, Layers,
-  Eye, EyeOff, Table
+  Eye, EyeOff, Table, Download
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -12,6 +12,7 @@ import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { Button } from './ui/Button';
 import { matchVehicleByCode } from '../lib/vehicleMatcher';
+import { downloadFleetBulkTemplate } from '../lib/excelTemplates';
 
 // Columnas editables y cargables de flota
 export const FLEET_COLUMNS = [
@@ -443,6 +444,17 @@ export default function ManageFleet() {
             Carga Masiva por Columnas
           </Button>
 
+          {/* Botón Descargar Plantilla Excel */}
+          <Button
+            variant="outline"
+            onClick={downloadFleetBulkTemplate}
+            className="flex items-center gap-1.5 border-slate-200 text-slate-700 hover:text-indigo-600 hover:bg-indigo-50 font-bold text-xs h-10 px-3 rounded-xl shadow-xs shrink-0 w-full sm:w-auto justify-center"
+            title="Descargar plantilla Excel con todos los títulos de columnas oficiales para carga rápida"
+          >
+            <Download size={15} />
+            Plantilla Excel
+          </Button>
+
           <Select 
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
@@ -596,12 +608,23 @@ export default function ManageFleet() {
                   </p>
                 </div>
               </div>
-              <button 
-                onClick={() => setIsBulkModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={downloadFleetBulkTemplate}
+                  className="text-xs h-8 px-2.5 flex items-center gap-1.5 text-indigo-700 border-indigo-200 hover:bg-indigo-50 font-bold rounded-lg"
+                  title="Descargar plantilla Excel con encabezados oficiales"
+                >
+                  <Download size={14} />
+                  Descargar Plantilla
+                </Button>
+                <button 
+                  onClick={() => setIsBulkModalOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             <div className="py-4 space-y-4 overflow-y-auto flex-1">
@@ -619,6 +642,22 @@ export default function ManageFleet() {
                   </div>
                   <p className="text-slate-700 font-bold text-sm">Arrastra y suelta tu archivo Excel aquí</p>
                   <p className="text-xs text-slate-400 mt-1">O haz clic para seleccionar un archivo (.xlsx o .xls)</p>
+                  
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadFleetBulkTemplate();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-bold transition-all shadow-xs"
+                      title="Descargar archivo Excel con todos los títulos para rellenar"
+                    >
+                      <Download size={14} />
+                      Descargar Plantilla Excel con Títulos
+                    </button>
+                  </div>
+
                   <div className="mt-4 p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-left text-xs text-indigo-900 flex items-start gap-2 max-w-lg mx-auto">
                     <CheckCircle2 size={16} className="text-indigo-600 shrink-0 mt-0.5" />
                     <span>

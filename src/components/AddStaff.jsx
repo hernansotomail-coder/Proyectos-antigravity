@@ -5,8 +5,9 @@ import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
-import { UploadCloud, CheckCircle2, AlertCircle } from 'lucide-react';
+import { UploadCloud, CheckCircle2, AlertCircle, Download } from 'lucide-react';
 import { toast } from 'sonner';
+import { downloadStaffBulkTemplate } from '../lib/excelTemplates';
 
 // Utilidad simple para formatear RUT
 const formatRut = (rut) => {
@@ -23,7 +24,7 @@ export default function AddStaff() {
   const [activeTab, setActiveTab] = useState('manual');
   
   // Tab 1: Carga Manual
-  const [formData, setFormData] = useState({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia' });
+  const [formData, setFormData] = useState({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia', phone: '' });
   const { addStaff, addStaffBulk, isLoading } = useStaffStore();
 
   const handleManualSubmit = async (e) => {
@@ -34,7 +35,7 @@ export default function AddStaff() {
     }
     const success = await addStaff(formData);
     if (success) {
-      setFormData({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia' });
+      setFormData({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia', phone: '' });
     }
   };
 
@@ -58,7 +59,7 @@ export default function AddStaff() {
         const getValue = (rowObj, possibleKeys) => {
           const keys = Object.keys(rowObj);
           for (let k of keys) {
-            const normalizedKey = k.toLowerCase().trim().replace(/\\./g, '');
+            const normalizedKey = k.toLowerCase().trim().replace(/\./g, '');
             if (possibleKeys.some(pk => normalizedKey.includes(pk))) {
               return rowObj[k];
             }
@@ -73,6 +74,7 @@ export default function AddStaff() {
           const rawRole = getValue(row, ['cargo', 'puesto']);
           let rawStatus = getValue(row, ['estado', 'status', 'vigencia']);
           const rawTipo = getValue(row, ['tipo de dotación', 'tipo de dotacion', 'tipo dotacion', 'tipo dotación', 'tipo', 'dotacion', 'dotación']);
+          const rawPhone = getValue(row, ['teléfono celular', 'telefono celular', 'celular', 'telefono', 'teléfono', 'fono', 'whatsapp', 'movil', 'móvil']);
 
           let tipoDotacion = 'Propia';
           if (rawTipo) {
@@ -101,6 +103,7 @@ export default function AddStaff() {
             role: role,
             status: rawStatus,
             tipo_dotacion: tipoDotacion,
+            phone: rawPhone ? String(rawPhone).trim() : '',
             isValid: !!formattedRut && !!rawName && !!role
           };
         });
@@ -129,12 +132,13 @@ export default function AddStaff() {
   });
 
   const handleBulkSubmit = async () => {
-    const validData = previewData.filter(d => d.isValid).map(({ rut, name, role, status, tipo_dotacion }) => ({
+    const validData = previewData.filter(d => d.isValid).map(({ rut, name, role, status, tipo_dotacion, phone }) => ({
       rut: String(rut).trim(),
       name: String(name).trim(),
       role: String(role).trim(),
       status: String(status).trim(),
-      tipo_dotacion: tipo_dotacion || 'Propia'
+      tipo_dotacion: tipo_dotacion || 'Propia',
+      phone: phone ? String(phone).trim() : ''
     }));
     
     if (validData.length === 0) {
@@ -185,6 +189,12 @@ export default function AddStaff() {
             value={formData.name}
             onChange={(e) => setFormData({...formData, name: e.target.value})}
             required
+          />
+          <Input 
+            label="Teléfono Celular (WhatsApp)" 
+            placeholder="+56 9 1234 5678" 
+            value={formData.phone}
+            onChange={(e) => setFormData({...formData, phone: e.target.value})}
           />
           <Select 
             label="Cargo"
@@ -243,9 +253,25 @@ export default function AddStaff() {
               </div>
               <p className="text-slate-600 font-medium">Arrastra y suelta tu archivo Excel aquí</p>
               <p className="text-xs text-slate-400 mt-2">O haz clic para seleccionar un archivo (.xlsx)</p>
+              
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    downloadStaffBulkTemplate();
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-all shadow-xs"
+                  title="Descargar plantilla Excel con columnas oficiales de dotación"
+                >
+                  <Download size={14} />
+                  Descargar Plantilla Excel con Títulos
+                </button>
+              </div>
+
               <div className="mt-4 p-4 bg-yellow-50 rounded-lg text-left text-sm text-yellow-800">
                 <span className="font-semibold block mb-1">Columnas en el Excel:</span>
-                "Rut", "Conductor/Auxiliar", "Cargo", "Estado", "Tipo Dotación" (Propia / Externo - Opcional)
+                "RUT", "Conductor/Auxiliar", "Cargo", "Tipo Dotación", "Teléfono Celular", "Estado"
               </div>
             </div>
           )}
@@ -271,6 +297,7 @@ export default function AddStaff() {
                       <th className="px-4 py-3 font-medium">Nombre</th>
                       <th className="px-4 py-3 font-medium">Cargo</th>
                       <th className="px-4 py-3 font-medium">Tipo Dotación</th>
+                      <th className="px-4 py-3 font-medium">Teléfono</th>
                       <th className="px-4 py-3 font-medium">Status</th>
                     </tr>
                   </thead>
@@ -291,6 +318,7 @@ export default function AddStaff() {
                             {row.tipo_dotacion || 'Propia'}
                           </span>
                         </td>
+                        <td className="px-4 py-3 text-slate-600 font-mono text-xs">{row.phone || '-'}</td>
                         <td className="px-4 py-3 text-slate-600">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${row.status === 'Activo' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-700'}`}>
                             {row.status}

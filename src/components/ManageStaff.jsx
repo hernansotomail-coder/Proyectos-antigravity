@@ -3,12 +3,12 @@ import { useStaffStore } from '../store/staffStore';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
-import { Search, Edit2, UserX, UserCheck, X, Trash2 } from 'lucide-react';
+import { Search, Edit2, UserX, UserCheck, X, Trash2, Phone } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 
 export default function ManageStaff() {
-  const { staffList, fetchStaff, isLoading, updateStaffTipoDotacion } = useStaffStore();
+  const { staffList, fetchStaff, isLoading, updateStaffTipoDotacion, updateStaffPhone } = useStaffStore();
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modal State
@@ -26,13 +26,18 @@ export default function ManageStaff() {
     return staffList.filter(
       (staff) => 
         staff.name.toLowerCase().includes(lowerTerm) || 
-        staff.rut.toLowerCase().includes(lowerTerm)
+        staff.rut.toLowerCase().includes(lowerTerm) ||
+        (staff.phone && staff.phone.toLowerCase().includes(lowerTerm))
     );
   }, [staffList, searchTerm]);
 
   // Actions
   const handleEditClick = (staff) => {
-    setEditingStaff({ ...staff, tipo_dotacion: staff.tipo_dotacion || 'Propia' });
+    setEditingStaff({ 
+      ...staff, 
+      tipo_dotacion: staff.tipo_dotacion || 'Propia',
+      phone: staff.phone || ''
+    });
     setIsModalOpen(true);
   };
 
@@ -78,8 +83,13 @@ export default function ManageStaff() {
     e.preventDefault();
     try {
       const tipo = editingStaff.tipo_dotacion || 'Propia';
+      const phone = editingStaff.phone || '';
+
       if (updateStaffTipoDotacion) {
         await updateStaffTipoDotacion(editingStaff.id, tipo);
+      }
+      if (updateStaffPhone) {
+        await updateStaffPhone(editingStaff.id, phone, editingStaff.rut, editingStaff.name);
       }
 
       try {
@@ -144,6 +154,7 @@ export default function ManageStaff() {
               <th className="px-4 py-3 font-medium">Nombre</th>
               <th className="px-4 py-3 font-medium">Cargo</th>
               <th className="px-4 py-3 font-medium">Tipo</th>
+              <th className="px-4 py-3 font-medium">Teléfono Celular</th>
               <th className="px-4 py-3 font-medium">Estado</th>
               <th className="px-4 py-3 font-medium text-right">Acciones</th>
             </tr>
@@ -151,13 +162,13 @@ export default function ManageStaff() {
           <tbody className="divide-y divide-slate-100">
             {isLoading && staffList.length === 0 ? (
               <tr>
-                <td colSpan="6" className="px-4 py-8 text-center text-slate-500">
+                <td colSpan="7" className="px-4 py-8 text-center text-slate-500">
                   Cargando dotación...
                 </td>
               </tr>
             ) : filteredStaff.length === 0 ? (
               <tr>
-                <td colSpan="6" className="px-4 py-8 text-center text-slate-500">
+                <td colSpan="7" className="px-4 py-8 text-center text-slate-500">
                   No se encontraron registros
                 </td>
               </tr>
@@ -165,7 +176,7 @@ export default function ManageStaff() {
               filteredStaff.map((staff) => (
                 <tr key={staff.id} className="bg-white hover:bg-slate-50 transition-colors">
                   <td className="px-4 py-3 text-slate-600 font-medium">{staff.rut}</td>
-                  <td className="px-4 py-3 text-slate-900">{staff.name}</td>
+                  <td className="px-4 py-3 text-slate-900 font-medium">{staff.name}</td>
                   <td className="px-4 py-3 text-slate-600">{staff.role}</td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
@@ -175,6 +186,22 @@ export default function ManageStaff() {
                     }`}>
                       {staff.tipo_dotacion || 'Propia'}
                     </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {staff.phone ? (
+                      <a
+                        href={`https://api.whatsapp.com/send?phone=${staff.phone.replace(/\D/g, '')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-medium text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors"
+                        title="Contactar vía WhatsApp"
+                      >
+                        <Phone size={12} className="text-emerald-600" />
+                        <span>{staff.phone}</span>
+                      </a>
+                    ) : (
+                      <span className="text-slate-300 italic text-xs font-mono">Sin teléfono</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
@@ -245,6 +272,12 @@ export default function ManageStaff() {
                 value={editingStaff.name}
                 onChange={(e) => setEditingStaff({...editingStaff, name: e.target.value})}
                 required
+              />
+              <Input 
+                label="Teléfono Celular (WhatsApp)" 
+                placeholder="+56 9 1234 5678" 
+                value={editingStaff.phone || ''}
+                onChange={(e) => setEditingStaff({...editingStaff, phone: e.target.value})}
               />
               <Select 
                 label="Cargo"

@@ -11,6 +11,7 @@ import { useDropzone } from 'react-dropzone';
 import { useFleetStore } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
+import { downloadFleetWashesCertTemplate, downloadFleetWashesRecordsTemplate } from '../lib/excelTemplates';
 
 // Helpers para normalizar texto
 const normalizeText = (txt) => {
@@ -1116,9 +1117,20 @@ export default function FleetWashes() {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setIsCertModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={downloadFleetWashesCertTemplate}
+                  className="text-xs h-8 px-2.5 flex items-center gap-1.5 text-blue-700 border-blue-200 hover:bg-blue-50 font-bold rounded-lg"
+                  title="Descargar archivo Excel con columnas de N° Interno y Ultima certificación"
+                >
+                  <Download size={14} />
+                  Descargar Plantilla
+                </Button>
+                <button onClick={() => setIsCertModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             <div className="py-4 space-y-4 overflow-y-auto flex-1">
@@ -1133,6 +1145,21 @@ export default function FleetWashes() {
                   <FileSpreadsheet size={44} className="mx-auto text-blue-500 mb-2" />
                   <p className="text-sm font-bold text-slate-700">Arrastra tu archivo Excel de certificaciones aquí</p>
                   <p className="text-xs text-slate-400 mt-1">O haz clic para seleccionar archivo (.xlsx / .xls)</p>
+                  
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadFleetWashesCertTemplate();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-all shadow-xs"
+                      title="Descargar archivo Excel con títulos: N° Interno y Ultima certificación"
+                    >
+                      <Download size={14} />
+                      Descargar Plantilla Excel con Títulos
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -1266,9 +1293,20 @@ export default function FleetWashes() {
                   </p>
                 </div>
               </div>
-              <button onClick={() => setIsWashModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={downloadFleetWashesRecordsTemplate}
+                  className="text-xs h-8 px-2.5 flex items-center gap-1.5 text-emerald-700 border-emerald-200 hover:bg-emerald-50 font-bold rounded-lg"
+                  title="Descargar plantilla Excel con columnas oficiales de lavados"
+                >
+                  <Download size={14} />
+                  Descargar Plantilla
+                </Button>
+                <button onClick={() => setIsWashModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             <div className="py-4 space-y-4 overflow-y-auto flex-1">
@@ -1284,6 +1322,21 @@ export default function FleetWashes() {
                   <p className="text-sm font-bold text-slate-700">Arrastra tu archivo Excel o CSV de lavados aquí</p>
                   <p className="text-xs text-slate-400 mt-1">Formatos compatibles: .xlsx, .xls, .csv</p>
                   <p className="text-[11px] text-slate-400 mt-0.5">Detecta columnas como "Creado", "Código de camión", "Patente de camión", etc.</p>
+
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadFleetWashesRecordsTemplate();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold transition-all shadow-xs"
+                      title="Descargar archivo Excel con títulos: Código de camión, Creado, Patente de camión, Servicio"
+                    >
+                      <Download size={14} />
+                      Descargar Plantilla Excel con Títulos
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-4">

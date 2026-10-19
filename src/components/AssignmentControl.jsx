@@ -1236,9 +1236,6 @@ export default function AssignmentControl() {
           </div>
 
           <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500">
-            <span className="bg-slate-100 text-slate-700 font-bold px-2 py-0.5 rounded-lg text-[11px]">
-              {filteredAssignments.length} servicios
-            </span>
             <span className="bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-lg text-[11px]">
               {totalLocales} locales
             </span>
@@ -1334,15 +1331,6 @@ export default function AssignmentControl() {
           >
             <Save size={13} />
             Guardar Disponibilización
-          </Button>
-
-          <Button 
-            variant="outline" 
-            onClick={() => navigate('/ruteo')}
-            className="text-xs h-7.5 px-2 text-slate-600 hover:text-blue-700 flex items-center gap-1 rounded-xl"
-          >
-            <Layers size={13} />
-            Ruteo
           </Button>
         </div>
       </header>

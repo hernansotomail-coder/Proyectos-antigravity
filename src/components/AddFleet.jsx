@@ -1,7 +1,8 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { FileSpreadsheet, CheckCircle2, AlertCircle, Truck } from 'lucide-react';
+import { FileSpreadsheet, CheckCircle2, AlertCircle, Truck, Download } from 'lucide-react';
 import { useFleetStore } from '../store/fleetStore';
+import { downloadFleetNewTemplate } from '../lib/excelTemplates';
 import { Select } from './ui/Select';
 import { Input } from './ui/Input';
 import { Button } from './ui/Button';
@@ -231,6 +232,20 @@ export default function AddFleet() {
               <div className="flex flex-col items-center justify-center text-slate-500">
                 <FileSpreadsheet size={48} className="mb-4 text-slate-400" />
                 <p className="text-lg font-medium text-slate-700">Sube el Excel para {fleetCategory}</p>
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      downloadFleetNewTemplate(fleetCategory);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-all shadow-xs"
+                    title={`Descargar plantilla Excel para ${fleetCategory}`}
+                  >
+                    <Download size={14} />
+                    Descargar Plantilla Excel con Títulos
+                  </button>
+                </div>
                 <div className="mt-4 p-4 bg-yellow-50 rounded-lg text-left text-xs text-yellow-800">
                   <span className="font-semibold block mb-1">Columnas que leerá el sistema:</span>
                   {suggestCols()}
