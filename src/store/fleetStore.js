@@ -39,6 +39,44 @@ const persistFleetOverrides = (map) => {
   }
 };
 
+export const inferTipoFlota = (f, overrideInfo = {}) => {
+  if (overrideInfo?.tipo_flota) return overrideInfo.tipo_flota;
+  if (f?.tipo_flota) return f.tipo_flota;
+  if (overrideInfo?.empresa_externa && String(overrideInfo.empresa_externa).trim() !== '') return 'Externa';
+  if (f?.empresa_externa && String(f.empresa_externa).trim() !== '') return 'Externa';
+  
+  const st = (f?.status || '').trim();
+  const stLower = st.toLowerCase();
+  if (stLower.startsWith('externo_') || stLower.includes('externo') || stLower.startsWith('transportes')) {
+    return 'Externa';
+  }
+  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
+  if (st && !standardStatuses.includes(stLower)) {
+    return 'Externa';
+  }
+  return 'Propia';
+};
+
+export const inferEmpresaExterna = (f, overrideInfo = {}) => {
+  if (overrideInfo?.empresa_externa && String(overrideInfo.empresa_externa).trim() !== '') {
+    return String(overrideInfo.empresa_externa).trim();
+  }
+  if (f?.empresa_externa && String(f.empresa_externa).trim() !== '') {
+    return String(f.empresa_externa).trim();
+  }
+  
+  const st = (f?.status || '').trim();
+  const stLower = st.toLowerCase();
+  if (stLower.startsWith('externo_')) {
+    return st.replace(/^externo_/i, '').trim();
+  }
+  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
+  if (st && !standardStatuses.includes(stLower)) {
+    return st;
+  }
+  return '';
+};
+
 export const useFleetStore = create((set, get) => ({
   fleetList: [],
   isLoading: false,
@@ -75,11 +113,14 @@ export const useFleetStore = create((set, get) => ({
                              (normPlateKey && overridesMap[normPlateKey]) ||
                              (idKey && overridesMap[idKey]) || {};
 
+        const tipo = inferTipoFlota(f, overrideInfo);
+        const empresa = inferEmpresaExterna(f, overrideInfo);
+
         return {
           ...f,
           ...overrideInfo,
-          tipo_flota: f.tipo_flota || overrideInfo.tipo_flota || 'Propia',
-          empresa_externa: f.empresa_externa || overrideInfo.empresa_externa || '',
+          tipo_flota: tipo,
+          empresa_externa: empresa,
           ultima_certificacion: f.ultima_certificacion || washInfo.ultima_certificacion || null,
           fecha_ultimo_lavado: f.fecha_ultimo_lavado || washInfo.fecha_ultimo_lavado || null
         };
@@ -98,12 +139,22 @@ export const useFleetStore = create((set, get) => ({
     set({ isLoading: true });
     const tipoFlota = fleetData.tipo_flota || (fleetData.empresa_externa ? 'Externa' : 'Propia');
     const empresaExterna = fleetData.empresa_externa || '';
+    let statusVal = fleetData.status || 'Activo';
+    if (tipoFlota === 'Externa' && (!statusVal || statusVal === 'Activo')) {
+      statusVal = empresaExterna ? `Externo_${empresaExterna.trim()}` : 'Externo';
+    }
+    const finalPayload = {
+      ...fleetData,
+      status: statusVal,
+      tipo_flota: tipoFlota,
+      empresa_externa: empresaExterna
+    };
     try {
       let insertedRow = null;
       try {
         const { data, error } = await supabase
           .from('fleet')
-          .insert([fleetData])
+          .insert([finalPayload])
           .select();
 
         if (error) {
@@ -116,7 +167,7 @@ export const useFleetStore = create((set, get) => ({
         insertedRow = data ? data[0] : null;
       } catch (insertErr) {
         // Fallback si tipo_flota o empresa_externa no existen como columnas en Supabase
-        const { tipo_flota, empresa_externa, ...rest } = fleetData;
+        const { tipo_flota, empresa_externa, ...rest } = finalPayload;
         const { data, error } = await supabase
           .from('fleet')
           .insert([rest])
@@ -209,6 +260,11 @@ export const useFleetStore = create((set, get) => ({
           if (!empresa) {
             empresa = String(f.status).replace(/^externo_/i, '').trim();
           }
+        } else if (f.status && String(f.status).toLowerCase().startsWith('transportes')) {
+          tipoFlota = 'Externa';
+          if (!empresa) empresa = String(f.status).trim();
+        } else if (tipoFlota === 'Externa' && empresa && (!f.status || f.status === 'Activo')) {
+          f.status = `Externo_${empresa.trim()}`;
         }
 
         const keys = [
@@ -240,8 +296,10 @@ export const useFleetStore = create((set, get) => ({
       // Sanitizar columnas reconocidas en Supabase y validar fechas
       const sanitized = uniqueList.map(f => {
         let statusVal = f.status || 'Activo';
-        if (statusVal && String(statusVal).toLowerCase().startsWith('externo_')) {
-          // Mantener statusVal para que se guarde tal cual (ej. Externo_Valencia)
+        const tipoFlota = f.tipo_flota || (f.empresa_externa ? 'Externa' : 'Propia');
+        const empresa = f.empresa_externa || '';
+        if (tipoFlota === 'Externa' && (!statusVal || statusVal === 'Activo' || statusVal === 'Disponible')) {
+          statusVal = empresa ? `Externo_${empresa}` : 'Externo';
         }
 
         return {
@@ -337,18 +395,24 @@ export const useFleetStore = create((set, get) => ({
           ...fleetData
         };
       });
-      persistFleetOverrides(overridesMap);
+      // Si es flota externa y tiene empresa externa, asegurar que status lo refleje si no viene especificado
+      let dataToUpdate = { ...fleetData };
+      if (dataToUpdate.tipo_flota === 'Externa' && dataToUpdate.empresa_externa) {
+        if (!dataToUpdate.status || dataToUpdate.status === 'Activo') {
+          dataToUpdate.status = `Externo_${dataToUpdate.empresa_externa.trim()}`;
+        }
+      }
 
       try {
         const { error } = await supabase
           .from('fleet')
-          .update(fleetData)
+          .update(dataToUpdate)
           .eq('id', id);
 
         if (error) throw error;
       } catch (subErr) {
         // Fallback sanitizado sin columnas custom si no existen en Supabase
-        const { tipo_flota, empresa_externa, ...rest } = fleetData;
+        const { tipo_flota, empresa_externa, ...rest } = dataToUpdate;
         const { error } = await supabase
           .from('fleet')
           .update(rest)

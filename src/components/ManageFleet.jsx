@@ -123,6 +123,22 @@ const formatExcelCellValue = (val, colType) => {
   return String(val).trim();
 };
 
+export const isVehicleExternal = (f) => {
+  if (!f) return false;
+  if (f.tipo_flota === 'Externa') return true;
+  if (f.empresa_externa && String(f.empresa_externa).trim() !== '') return true;
+  const st = (f.status || '').trim();
+  const stLower = st.toLowerCase();
+  if (stLower.startsWith('externo_') || stLower.includes('externo') || stLower.startsWith('transportes')) {
+    return true;
+  }
+  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
+  if (st && !standardStatuses.includes(stLower)) {
+    return true;
+  }
+  return false;
+};
+
 export default function ManageFleet() {
   const { fleetList, fetchFleet, updateFleet, deleteFleet, updateFleetBulkColumns, isLoading } = useFleetStore();
   const [searchTerm, setSearchTerm] = useState('');
@@ -133,11 +149,11 @@ export default function ManageFleet() {
 
   // Conteo de flota propia y externa
   const propiaCount = useMemo(() => {
-    return fleetList.filter(f => (f.tipo_flota || 'Propia') !== 'Externa' && (!f.empresa_externa || f.empresa_externa.trim() === '')).length;
+    return fleetList.filter(f => !isVehicleExternal(f)).length;
   }, [fleetList]);
 
   const externaCount = useMemo(() => {
-    return fleetList.filter(f => f.tipo_flota === 'Externa' || (f.empresa_externa && f.empresa_externa.trim() !== '')).length;
+    return fleetList.filter(f => isVehicleExternal(f)).length;
   }, [fleetList]);
 
   // Estado del Modal de Carga Masiva por Columnas (Requisito 1 y 3)
@@ -172,7 +188,7 @@ export default function ManageFleet() {
 
   const filteredFleet = categorized.filter(f => {
     // 1. Filtrado por Pestaña de Flota (Propia vs Externa vs Todas)
-    const isExternal = f.tipo_flota === 'Externa' || (f.empresa_externa && f.empresa_externa.trim() !== '');
+    const isExternal = isVehicleExternal(f);
     if (fleetTab === 'propia' && isExternal) return false;
     if (fleetTab === 'externa' && !isExternal) return false;
 
@@ -193,9 +209,10 @@ export default function ManageFleet() {
 
   const startEdit = (truck) => {
     setEditingId(truck.id);
+    const isExt = isVehicleExternal(truck);
     setEditForm({
       ...truck,
-      tipo_flota: truck.tipo_flota || (truck.empresa_externa ? 'Externa' : 'Propia'),
+      tipo_flota: isExt ? 'Externa' : (truck.tipo_flota || 'Propia'),
       empresa_externa: truck.empresa_externa || ''
     });
   };
@@ -846,7 +863,7 @@ export default function ManageFleet() {
                         </td>
                         {TABLE_COLUMNS.map(col => {
                           if (col.key === 'tipo_flota') {
-                            const isExt = truck.tipo_flota === 'Externa' || (truck.empresa_externa && truck.empresa_externa.trim() !== '');
+                            const isExt = isVehicleExternal(truck);
                             return (
                               <td key={col.key} className="px-3 py-2">
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
