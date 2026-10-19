@@ -172,11 +172,47 @@ export const useFleetStore = create((set, get) => ({
     set({ isLoading: true });
     try {
       const overridesMap = loadPersistedFleetOverrides();
+
+      // Función para validar y corregir fechas (ej. 31 de junio -> 30 de junio)
+      const sanitizeDate = (val) => {
+        if (!val) return null;
+        if (typeof val === 'string') {
+          const trimmed = val.trim();
+          const m = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+          if (m) {
+            const y = parseInt(m[1], 10);
+            const mon = parseInt(m[2], 10);
+            const d = parseInt(m[3], 10);
+            if (mon >= 1 && mon <= 12) {
+              const maxD = new Date(y, mon, 0).getDate();
+              const validD = Math.min(d, maxD);
+              return `${y}-${String(mon).padStart(2, '0')}-${String(validD).padStart(2, '0')}`;
+            }
+          }
+        }
+        return val;
+      };
+
+      // Deduplicar por Patente (manteniendo la última fila del archivo si se repite)
+      const uniqueMap = new Map();
       fleetArray.forEach(f => {
-        const tipoFlota = f.tipo_flota || (f.empresa_externa ? 'Externa' : 'Propia');
-        const empresa = f.empresa_externa || '';
+        if (!f || !f.plate) return;
+        const plateKey = String(f.plate).trim().toUpperCase();
+        uniqueMap.set(plateKey, { ...f, plate: plateKey });
+
+        let tipoFlota = f.tipo_flota || (f.empresa_externa ? 'Externa' : 'Propia');
+        let empresa = f.empresa_externa || '';
+
+        // Si el estado viene como "Externo_Valencia", inferir tipo Externa y empresa Valencia
+        if (f.status && String(f.status).toLowerCase().startsWith('externo_')) {
+          tipoFlota = 'Externa';
+          if (!empresa) {
+            empresa = String(f.status).replace(/^externo_/i, '').trim();
+          }
+        }
+
         const keys = [
-          f.plate ? String(f.plate).trim().toUpperCase() : null,
+          plateKey,
           f.internal_number ? String(f.internal_number).trim() : null
         ].filter(Boolean);
 
@@ -195,30 +231,85 @@ export const useFleetStore = create((set, get) => ({
       });
       persistFleetOverrides(overridesMap);
 
-      try {
-        const { data, error } = await supabase
-          .from('fleet')
-          .upsert(fleetArray, { onConflict: 'plate' })
-          .select();
+      const uniqueList = Array.from(uniqueMap.values());
+      if (uniqueList.length === 0) {
+        toast.error('No se encontraron vehículos válidos para procesar');
+        return false;
+      }
 
-        if (error) throw error;
-      } catch (upsertErr) {
-        // Fallback si tipo_flota o empresa_externa no existen en la BD
-        const sanitized = fleetArray.map(({ tipo_flota, empresa_externa, ...rest }) => rest);
+      // Sanitizar columnas reconocidas en Supabase y validar fechas
+      const sanitized = uniqueList.map(f => {
+        let statusVal = f.status || 'Activo';
+        if (statusVal && String(statusVal).toLowerCase().startsWith('externo_')) {
+          // Mantener statusVal para que se guarde tal cual (ej. Externo_Valencia)
+        }
+
+        return {
+          type: String(f.type || 'Camión').trim(),
+          plate: String(f.plate).trim().toUpperCase(),
+          internal_number: f.internal_number != null ? String(f.internal_number).trim() : 'S/N',
+          brand: f.brand ? String(f.brand).trim() : null,
+          model: f.model ? String(f.model).trim() : null,
+          year: f.year ? String(f.year).trim() : null,
+          status: String(statusVal).trim(),
+          frio: f.frio ? String(f.frio).trim() : null,
+          engine_number: f.engine_number ? String(f.engine_number).trim() : null,
+          chassis_number: f.chassis_number ? String(f.chassis_number).trim() : null,
+          cc: f.cc ? String(f.cc).trim() : null,
+          tank_capacity: f.tank_capacity ? String(f.tank_capacity).trim() : null,
+          payload: f.payload ? String(f.payload).trim() : null,
+          state2: f.state2 ? String(f.state2).trim() : null,
+          rt_date: sanitizeDate(f.rt_date),
+          gases_date: sanitizeDate(f.gases_date),
+          pc_date: sanitizeDate(f.pc_date),
+          soap_date: sanitizeDate(f.soap_date),
+          carnes_date: sanitizeDate(f.carnes_date),
+          resolution: f.resolution ? String(f.resolution).trim() : null,
+          type2: f.type2 ? String(f.type2).trim() : null,
+          side_doors: f.side_doors ? String(f.side_doors).trim() : null,
+          gps: f.gps ? String(f.gps).trim() : null,
+          operation: f.operation ? String(f.operation).trim() : null,
+          insurer: f.insurer ? String(f.insurer).trim() : null,
+          region: f.region ? String(f.region).trim() : null,
+          tct: f.tct ? String(f.tct).trim() : null,
+          tct_copy: f.tct_copy ? String(f.tct_copy).trim() : null,
+          neo_tac: f.neo_tac ? String(f.neo_tac).trim() : null,
+          pallet_capacity: f.pallet_capacity ? String(f.pallet_capacity).trim() : null
+        };
+      });
+
+      // Inserción por lotes (chunks) de 50 para máxima estabilidad
+      const chunkSize = 50;
+      let totalInserted = 0;
+      for (let i = 0; i < sanitized.length; i += chunkSize) {
+        const chunk = sanitized.slice(i, i + chunkSize);
         const { error } = await supabase
           .from('fleet')
-          .upsert(sanitized, { onConflict: 'plate' })
-          .select();
+          .upsert(chunk, { onConflict: 'plate' });
 
-        if (error) throw error;
+        if (error) {
+          console.warn('Fallo lote en Supabase, intentando inserción fila por fila...', error);
+          for (const item of chunk) {
+            try {
+              const { error: singleErr } = await supabase
+                .from('fleet')
+                .upsert([item], { onConflict: 'plate' });
+              if (!singleErr) totalInserted++;
+            } catch (e) {
+              console.error('Error insertando vehículo:', item.plate, e);
+            }
+          }
+        } else {
+          totalInserted += chunk.length;
+        }
       }
       
       await get().fetchFleet();
-      toast.success(`${fleetArray.length} vehículos procesados correctamente`);
+      toast.success(`${totalInserted} vehículo(s) procesados correctamente`);
       return true;
     } catch (err) {
       console.error(err);
-      toast.error('Error en la carga masiva');
+      toast.error(err?.message || 'Error en la carga masiva');
       return false;
     } finally {
       set({ isLoading: false });

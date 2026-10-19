@@ -182,43 +182,96 @@ export const downloadStaffBulkTemplate = () => {
 /**
  * Plantilla 5: Creación Masiva de Nuevos Vehículos (AddFleet)
  */
-export const downloadFleetNewTemplate = (category = 'Camiones') => {
-  const columns = ['Patente', 'N° Interno', 'Tipo', 'Tipo de Flota', 'Empresa Externa', 'Marca', 'Modelo', 'Año', 'Estado', 'Región', 'RT', 'Gases', 'PC', 'SOAP', 'Carnes'];
+export const downloadFleetNewTemplate = (category = 'Camiones/Camionetas') => {
+  if (category === 'Flota Externa') {
+    const columns = [
+      'Tipo', 'Patente', 'N*Interno', 'Estado', 'Frio', 'Marca', 'Modelo', 'Año', 
+      'N° Motor', 'N° Chasis', 'CC', 'Carga -Peso', 'Estado2', 
+      'RT', 'Gases', 'PC', 'SOAP', 'Resolucion', 'Tipo2', 'GPS', 'Operación', 'Region'
+    ];
+    const sampleRows = [
+      {
+        'Tipo': 'Camión',
+        'Patente': 'RBLT48',
+        'N*Interno': 'C194',
+        'Estado': 'Externo_Valencia',
+        'Frio': 'Sí',
+        'Marca': 'CHEVROLET',
+        'Modelo': 'NPR816AMT AC',
+        'Año': 2023,
+        'N° Motor': '4HK10GH252',
+        'N° Chasis': 'JAANPR75KM7100944',
+        'CC': '5.2',
+        'Carga -Peso': '7.500 KG',
+        'Estado2': 'Vigente',
+        'RT': '2026-09-14',
+        'Gases': '2026-09-14',
+        'PC': '2026-09-30',
+        'SOAP': '2026-09-30',
+        'Resolucion': '46629',
+        'Tipo2': 'Furgón',
+        'GPS': 'Wisetrack',
+        'Operación': 'Distribución',
+        'Region': 'RM'
+      },
+      {
+        'Tipo': 'Tracto',
+        'Patente': 'SLHP98',
+        'N*Interno': 'C244',
+        'Estado': 'Externo_Valencia',
+        'Frio': 'No',
+        'Marca': 'CHEVROLET',
+        'Modelo': 'NPR816AMT AC',
+        'Año': 2023,
+        'N° Motor': '4HK10SS505',
+        'N° Chasis': 'JAANPR75KP7102121',
+        'CC': '5.2',
+        'Carga -Peso': '8.000 KG',
+        'Estado2': 'Vigente',
+        'RT': '2026-09-14',
+        'Gases': '2026-09-14',
+        'PC': '2026-09-30',
+        'SOAP': '2026-09-30',
+        'Resolucion': '47505',
+        'Tipo2': 'Tractocamión',
+        'GPS': 'Wisetrack',
+        'Operación': 'Troncal',
+        'Region': 'RM'
+      }
+    ];
+    exportTemplate(columns, sampleRows, 'Plantilla_Creacion_Flota_Externa.xlsx', 'Flota Externa');
+    return;
+  }
+
+  const columns = ['Tipo', 'Patente', 'N*Interno', 'Frio', 'Marca', 'Modelo', 'Año', 'Estado', 'N° Motor', 'N° Chasis', 'CC', 'Carga Estanque', 'Carga -Peso', 'Estado2', 'RT', 'Gases', 'PC', 'SOAP', 'Carnes', 'Resolucion', 'Tipo2', 'GPS', 'Operación', 'Aseguradora', 'Region'];
   const sampleRows = [
     {
+      'Tipo': category.includes('Tracto') ? 'Tracto' : category.includes('Semiremolque') ? 'Semiremolque' : 'Camión',
       'Patente': 'GH-JK-12',
-      'N° Interno': 'C300',
-      'Tipo': category,
-      'Tipo de Flota': 'Propia',
-      'Empresa Externa': '',
+      'N*Interno': 'C300',
+      'Frio': 'Sí',
       'Marca': 'Mercedes Benz',
       'Modelo': 'Atego 1726',
       'Año': 2025,
       'Estado': 'Activo',
-      'Región': 'Metropolitana',
-      'RT': '2027-01-31',
-      'Gases': '2027-01-31',
+      'N° Motor': 'MB-906-12345',
+      'N° Chasis': '9BM970-54321',
+      'CC': '6400',
+      'Carga Estanque': '300 L',
+      'Carga -Peso': '10.500 kg',
+      'Estado2': 'Operativo',
+      'RT': '2027-01-30',
+      'Gases': '2027-01-30',
       'PC': '2027-03-31',
       'SOAP': '2027-03-31',
-      'Carnes': '2026-12-31'
-    },
-    {
-      'Patente': 'KL-MN-34',
-      'N° Interno': 'EXT-202',
-      'Tipo': category,
-      'Tipo de Flota': 'Externa',
-      'Empresa Externa': 'Transportes Rent a Truck SPA',
-      'Marca': 'Scania',
-      'Modelo': 'R450',
-      'Año': 2024,
-      'Estado': 'Activo',
-      'Región': 'Metropolitana',
-      'RT': '2027-03-15',
-      'Gases': '2027-03-15',
-      'PC': '2027-03-31',
-      'SOAP': '2027-03-31',
-      'Carnes': '2026-11-30'
+      'Carnes': '2026-12-30',
+      'Resolucion': 'Res-1234',
+      'Tipo2': 'Furgón',
+      'GPS': 'Instalado',
+      'Operación': 'Distribución Central',
+      'Aseguradora': 'BCI',
+      'Region': 'RM'
     }
   ];
-  exportTemplate(columns, sampleRows, `Plantilla_Creacion_${category.replace(/\s+/g, '_')}.xlsx`, category);
+  exportTemplate(columns, sampleRows, `Plantilla_Creacion_${category.replace(/[/\\?%*:|"<>]/g, '_')}.xlsx`, category);
 };

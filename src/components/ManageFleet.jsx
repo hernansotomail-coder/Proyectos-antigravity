@@ -53,6 +53,32 @@ export const FLEET_COLUMNS = [
 
 export const TABLE_COLUMNS = FLEET_COLUMNS.filter(c => !['plate', 'type', 'status'].includes(c.key));
 
+// Columnas específicas solicitadas para Flota Externa
+export const EXTERNAL_FLEET_COLUMNS = [
+  { key: 'type', label: 'Tipo' },
+  { key: 'plate', label: 'Patente' },
+  { key: 'internal_number', label: 'N*Interno' },
+  { key: 'status', label: 'Estado' },
+  { key: 'frio', label: 'Frio' },
+  { key: 'brand', label: 'Marca' },
+  { key: 'model', label: 'Modelo' },
+  { key: 'year', label: 'Año' },
+  { key: 'engine_number', label: 'N° Motor' },
+  { key: 'chassis_number', label: 'N° Chasis' },
+  { key: 'cc', label: 'CC' },
+  { key: 'payload', label: 'Carga -Peso' },
+  { key: 'state2', label: 'Estado2' },
+  { key: 'rt_date', label: 'RT', type: 'date' },
+  { key: 'gases_date', label: 'Gases', type: 'date' },
+  { key: 'pc_date', label: 'PC', type: 'date' },
+  { key: 'soap_date', label: 'SOAP', type: 'date' },
+  { key: 'resolution', label: 'Resolucion' },
+  { key: 'type2', label: 'Tipo2' },
+  { key: 'gps', label: 'GPS' },
+  { key: 'operation', label: 'Operación' },
+  { key: 'region', label: 'Region' }
+];
+
 // Función para normalizar y buscar coincidencia en encabezados de Excel
 const normalizeText = (txt) => {
   return String(txt || '').toLowerCase().trim()
@@ -582,25 +608,34 @@ export default function ManageFleet() {
       <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-slate-50">
         <table className="w-full text-xs text-left whitespace-nowrap">
           <thead className="bg-slate-100 text-slate-600 border-b border-slate-200 sticky top-0 z-10 shadow-sm">
-            <tr>
-              <th className="px-3 py-2 font-semibold">Estado</th>
-              <th className="px-3 py-2 font-semibold">Patente</th>
-              <th className="px-3 py-2 font-semibold">N° Interno</th>
-              <th className="px-3 py-2 font-semibold">Tipo</th>
-              <th className="px-3 py-2 font-semibold text-center sticky right-0 bg-slate-100 shadow-[-4px_0_10px_rgba(0,0,0,0.05)]">Acciones</th>
-              {TABLE_COLUMNS.map(col => <th key={col.key} className="px-3 py-2 font-semibold">{col.label}</th>)}
-            </tr>
+            {fleetTab === 'externa' ? (
+              <tr>
+                {EXTERNAL_FLEET_COLUMNS.map(col => (
+                  <th key={col.key} className="px-3 py-2 font-semibold">{col.label}</th>
+                ))}
+                <th className="px-3 py-2 font-semibold text-center sticky right-0 bg-slate-100 shadow-[-4px_0_10px_rgba(0,0,0,0.05)]">Acciones</th>
+              </tr>
+            ) : (
+              <tr>
+                <th className="px-3 py-2 font-semibold">Estado</th>
+                <th className="px-3 py-2 font-semibold">Patente</th>
+                <th className="px-3 py-2 font-semibold">N° Interno</th>
+                <th className="px-3 py-2 font-semibold">Tipo</th>
+                <th className="px-3 py-2 font-semibold text-center sticky right-0 bg-slate-100 shadow-[-4px_0_10px_rgba(0,0,0,0.05)]">Acciones</th>
+                {TABLE_COLUMNS.map(col => <th key={col.key} className="px-3 py-2 font-semibold">{col.label}</th>)}
+              </tr>
+            )}
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {filteredFleet.length === 0 ? (
               <tr>
-                <td colSpan={5 + TABLE_COLUMNS.length} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={fleetTab === 'externa' ? EXTERNAL_FLEET_COLUMNS.length + 1 : 5 + TABLE_COLUMNS.length} className="px-4 py-8 text-center text-slate-500">
                   {fleetTab === 'externa' ? (
                     <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto py-4">
                       <Building2 size={36} className="text-purple-400" />
                       <p className="font-semibold text-slate-700">No hay vehículos registrados en Flota Externa</p>
                       <p className="text-xs text-slate-500">
-                        Puedes agregar vehículos externos desde <strong>Agregar Flota</strong> seleccionando <em>Tipo de Flota: Externa</em>, o editando cualquier vehículo existente en esta tabla.
+                        Puedes agregar vehículos externos desde <strong>Agregar Flota</strong> seleccionando <em>Flota Externa</em>, o editando cualquier vehículo existente en esta tabla.
                       </p>
                     </div>
                   ) : fleetTab === 'propia' ? (
@@ -613,156 +648,238 @@ export default function ManageFleet() {
             ) : (
               filteredFleet.map((truck) => (
                 <tr key={truck.id} className="hover:bg-slate-50 transition-colors">
-                  {editingId === truck.id ? (
-                    <>
-                      <td className="px-2 py-1">
-                        <select 
-                          value={editForm.status || 'Activo'} 
-                          onChange={(e) => setEditForm({...editForm, status: e.target.value})}
-                          className="h-7 text-xs border border-slate-200 rounded px-1 min-w-[120px]"
-                        >
-                          <option value="Activo">Activo</option>
-                          <option value="Baja">Baja</option>
-                          <option value="En Taller">En Taller</option>
-                          <option value="Por documentación">Por documentación</option>
-                        </select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <input 
-                          value={editForm.plate || ''} 
-                          onChange={(e) => setEditForm({...editForm, plate: e.target.value.toUpperCase()})}
-                          className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[80px]"
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input 
-                          value={editForm.internal_number || ''} 
-                          onChange={(e) => setEditForm({...editForm, internal_number: e.target.value})}
-                          className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[80px]"
-                        />
-                      </td>
-                      <td className="px-2 py-1">
-                        <input 
-                          value={editForm.type || ''} 
-                          onChange={(e) => setEditForm({...editForm, type: e.target.value})}
-                          className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[100px]"
-                        />
-                      </td>
-                      <td className="px-3 py-1 sticky right-0 bg-slate-50 shadow-[-4px_0_10px_rgba(0,0,0,0.05)] border-l border-slate-100">
-                        <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => handleSave(truck.id)} disabled={isLoading} className="p-1.5 text-green-600 hover:bg-green-100 rounded transition-colors" title="Guardar"><Check size={16} /></button>
-                          <button onClick={cancelEdit} disabled={isLoading} className="p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 rounded transition-colors" title="Cancelar"><X size={16} /></button>
-                        </div>
-                      </td>
-                      {TABLE_COLUMNS.map(col => {
-                        if (col.key === 'tipo_flota') {
-                          return (
-                            <td key={col.key} className="px-2 py-1">
-                              <select 
-                                value={editForm.tipo_flota || 'Propia'} 
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setEditForm({
-                                    ...editForm, 
-                                    tipo_flota: val,
-                                    empresa_externa: val === 'Propia' ? '' : editForm.empresa_externa
-                                  });
-                                }}
-                                className="h-7 text-xs border border-slate-200 rounded px-1 min-w-[90px] bg-white font-medium"
-                              >
-                                <option value="Propia">Propia</option>
-                                <option value="Externa">Externa</option>
-                              </select>
-                            </td>
-                          );
-                        }
-                        if (col.key === 'empresa_externa') {
+                  {fleetTab === 'externa' ? (
+                    editingId === truck.id ? (
+                      <>
+                        {EXTERNAL_FLEET_COLUMNS.map(col => {
+                          if (col.key === 'plate') {
+                            return (
+                              <td key={col.key} className="px-2 py-1">
+                                <input 
+                                  value={editForm.plate || ''} 
+                                  onChange={(e) => setEditForm({...editForm, plate: e.target.value.toUpperCase()})}
+                                  className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[80px] font-bold"
+                                />
+                              </td>
+                            );
+                          }
+                          if (col.key === 'status') {
+                            return (
+                              <td key={col.key} className="px-2 py-1">
+                                <input 
+                                  value={editForm.status || ''} 
+                                  onChange={(e) => setEditForm({...editForm, status: e.target.value})}
+                                  className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[120px]"
+                                  placeholder="Ej. Externo_Valencia"
+                                />
+                              </td>
+                            );
+                          }
                           return (
                             <td key={col.key} className="px-2 py-1">
                               <input 
-                                type="text"
-                                placeholder={editForm.tipo_flota === 'Externa' ? 'Empresa externa *' : 'Opcional'}
-                                disabled={editForm.tipo_flota !== 'Externa'}
-                                value={editForm.empresa_externa || ''} 
-                                onChange={(e) => setEditForm({...editForm, empresa_externa: e.target.value})}
-                                className={`h-7 text-xs border rounded px-2 min-w-[130px] ${
-                                  editForm.tipo_flota === 'Externa' 
-                                    ? 'border-purple-300 bg-purple-50/50 font-semibold text-purple-900' 
-                                    : 'border-slate-200 bg-slate-100 text-slate-400'
-                                }`}
+                                type={col.type || 'text'}
+                                value={editForm[col.key] || ''} 
+                                onChange={(e) => setEditForm({...editForm, [col.key]: e.target.value})}
+                                className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[100px]"
                               />
                             </td>
                           );
-                        }
-                        return (
-                          <td key={col.key} className="px-2 py-1">
-                            <input 
-                              type={col.type || 'text'}
-                              value={editForm[col.key] || ''} 
-                              onChange={(e) => setEditForm({...editForm, [col.key]: e.target.value})}
-                              className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[100px]"
-                            />
-                          </td>
-                        );
-                      })}
-                    </>
-                  ) : (
-                    <>
-                      <td className="px-3 py-2">
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${
-                          truck.status === 'Activo' ? 'bg-green-100 text-green-700' : 
-                          truck.status === 'Baja' ? 'bg-red-100 text-red-700' : 
-                          truck.status === 'En Taller' ? 'bg-amber-100 text-amber-700' : 
-                          truck.status === 'Por documentación' ? 'bg-orange-100 text-orange-700' : 
-                          'bg-slate-100 text-slate-600'
-                        }`}>
-                          {truck.status}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 font-bold text-slate-700">{truck.plate}</td>
-                      <td className="px-3 py-2 text-slate-600 font-mono font-bold">{truck.internal_number || '-'}</td>
-                      <td className="px-3 py-2 text-slate-600">{truck.type}</td>
-                      <td className="px-3 py-2 sticky right-0 bg-white group-hover:bg-slate-50 shadow-[-4px_0_10px_rgba(0,0,0,0.05)] border-l border-slate-100 transition-colors">
-                        <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => startEdit(truck)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors" title="Editar"><Edit2 size={16} /></button>
-                          <button onClick={() => handleDelete(truck.id)} className="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors" title="Eliminar"><Trash2 size={16} /></button>
-                        </div>
-                      </td>
-                      {TABLE_COLUMNS.map(col => {
-                        if (col.key === 'tipo_flota') {
-                          const isExt = truck.tipo_flota === 'Externa' || (truck.empresa_externa && truck.empresa_externa.trim() !== '');
-                          return (
-                            <td key={col.key} className="px-3 py-2">
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                isExt
-                                  ? 'bg-purple-100 text-purple-700 border border-purple-200'
-                                  : 'bg-blue-100 text-blue-700 border border-blue-200'
-                              }`}>
-                                {isExt ? 'Externa' : 'Propia'}
-                              </span>
-                            </td>
-                          );
-                        }
-                        if (col.key === 'empresa_externa') {
-                          return (
-                            <td key={col.key} className="px-3 py-2 text-slate-700">
-                              {truck.empresa_externa ? (
-                                <span className="font-semibold text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
-                                  {truck.empresa_externa}
+                        })}
+                        <td className="px-3 py-1 sticky right-0 bg-slate-50 shadow-[-4px_0_10px_rgba(0,0,0,0.05)] border-l border-slate-100">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => handleSave(truck.id)} disabled={isLoading} className="p-1.5 text-green-600 hover:bg-green-100 rounded transition-colors" title="Guardar"><Check size={16} /></button>
+                            <button onClick={cancelEdit} disabled={isLoading} className="p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 rounded transition-colors" title="Cancelar"><X size={16} /></button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        {EXTERNAL_FLEET_COLUMNS.map(col => {
+                          if (col.key === 'plate') {
+                            return <td key={col.key} className="px-3 py-2 font-bold text-slate-800">{truck.plate}</td>;
+                          }
+                          if (col.key === 'internal_number') {
+                            return <td key={col.key} className="px-3 py-2 text-slate-600 font-mono font-bold">{truck.internal_number || '-'}</td>;
+                          }
+                          if (col.key === 'status') {
+                            const isExternalStatus = truck.status && (truck.status.toLowerCase().startsWith('externo') || truck.tipo_flota === 'Externa');
+                            return (
+                              <td key={col.key} className="px-3 py-2">
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                  isExternalStatus ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {truck.status || 'Activo'}
                                 </span>
-                              ) : (
-                                <span className="text-slate-300">-</span>
-                              )}
+                              </td>
+                            );
+                          }
+                          return (
+                            <td key={col.key} className="px-3 py-2 text-slate-600">
+                              {truck[col.key] || '-'}
                             </td>
                           );
-                        }
-                        return (
-                          <td key={col.key} className="px-3 py-2 text-slate-600">
-                            {truck[col.key] || '-'}
-                          </td>
-                        );
-                      })}
-                    </>
+                        })}
+                        <td className="px-3 py-2 sticky right-0 bg-white group-hover:bg-slate-50 shadow-[-4px_0_10px_rgba(0,0,0,0.05)] border-l border-slate-100 transition-colors">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => startEdit(truck)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors" title="Editar"><Edit2 size={16} /></button>
+                            <button onClick={() => handleDelete(truck.id)} className="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors" title="Eliminar"><Trash2 size={16} /></button>
+                          </div>
+                        </td>
+                      </>
+                    )
+                  ) : (
+                    editingId === truck.id ? (
+                      <>
+                        <td className="px-2 py-1">
+                          <select 
+                            value={editForm.status || 'Activo'} 
+                            onChange={(e) => setEditForm({...editForm, status: e.target.value})}
+                            className="h-7 text-xs border border-slate-200 rounded px-1 min-w-[120px]"
+                          >
+                            <option value="Activo">Activo</option>
+                            <option value="Baja">Baja</option>
+                            <option value="En Taller">En Taller</option>
+                            <option value="Por documentación">Por documentación</option>
+                          </select>
+                        </td>
+                        <td className="px-2 py-1">
+                          <input 
+                            value={editForm.plate || ''} 
+                            onChange={(e) => setEditForm({...editForm, plate: e.target.value.toUpperCase()})}
+                            className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[80px]"
+                          />
+                        </td>
+                        <td className="px-2 py-1">
+                          <input 
+                            value={editForm.internal_number || ''} 
+                            onChange={(e) => setEditForm({...editForm, internal_number: e.target.value})}
+                            className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[80px]"
+                          />
+                        </td>
+                        <td className="px-2 py-1">
+                          <input 
+                            value={editForm.type || ''} 
+                            onChange={(e) => setEditForm({...editForm, type: e.target.value})}
+                            className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[100px]"
+                          />
+                        </td>
+                        <td className="px-3 py-1 sticky right-0 bg-slate-50 shadow-[-4px_0_10px_rgba(0,0,0,0.05)] border-l border-slate-100">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => handleSave(truck.id)} disabled={isLoading} className="p-1.5 text-green-600 hover:bg-green-100 rounded transition-colors" title="Guardar"><Check size={16} /></button>
+                            <button onClick={cancelEdit} disabled={isLoading} className="p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 rounded transition-colors" title="Cancelar"><X size={16} /></button>
+                          </div>
+                        </td>
+                        {TABLE_COLUMNS.map(col => {
+                          if (col.key === 'tipo_flota') {
+                            return (
+                              <td key={col.key} className="px-2 py-1">
+                                <select 
+                                  value={editForm.tipo_flota || 'Propia'} 
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setEditForm({
+                                      ...editForm, 
+                                      tipo_flota: val,
+                                      empresa_externa: val === 'Propia' ? '' : editForm.empresa_externa
+                                    });
+                                  }}
+                                  className="h-7 text-xs border border-slate-200 rounded px-1 min-w-[90px] bg-white font-medium"
+                                >
+                                  <option value="Propia">Propia</option>
+                                  <option value="Externa">Externa</option>
+                                </select>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'empresa_externa') {
+                            return (
+                              <td key={col.key} className="px-2 py-1">
+                                <input 
+                                  type="text"
+                                  placeholder={editForm.tipo_flota === 'Externa' ? 'Empresa externa *' : 'Opcional'}
+                                  disabled={editForm.tipo_flota !== 'Externa'}
+                                  value={editForm.empresa_externa || ''} 
+                                  onChange={(e) => setEditForm({...editForm, empresa_externa: e.target.value})}
+                                  className={`h-7 text-xs border rounded px-2 min-w-[130px] ${
+                                    editForm.tipo_flota === 'Externa' 
+                                      ? 'border-purple-300 bg-purple-50/50 font-semibold text-purple-900' 
+                                      : 'border-slate-200 bg-slate-100 text-slate-400'
+                                  }`}
+                                />
+                              </td>
+                            );
+                          }
+                          return (
+                            <td key={col.key} className="px-2 py-1">
+                              <input 
+                                type={col.type || 'text'}
+                                value={editForm[col.key] || ''} 
+                                onChange={(e) => setEditForm({...editForm, [col.key]: e.target.value})}
+                                className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[100px]"
+                              />
+                            </td>
+                          );
+                        })}
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${
+                            truck.status === 'Activo' ? 'bg-green-100 text-green-700' : 
+                            truck.status === 'Baja' ? 'bg-red-100 text-red-700' : 
+                            truck.status === 'En Taller' ? 'bg-amber-100 text-amber-700' : 
+                            truck.status === 'Por documentación' ? 'bg-orange-100 text-orange-700' : 
+                            'bg-slate-100 text-slate-600'
+                          }`}>
+                            {truck.status}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-bold text-slate-700">{truck.plate}</td>
+                        <td className="px-3 py-2 text-slate-600 font-mono font-bold">{truck.internal_number || '-'}</td>
+                        <td className="px-3 py-2 text-slate-600">{truck.type}</td>
+                        <td className="px-3 py-2 sticky right-0 bg-white group-hover:bg-slate-50 shadow-[-4px_0_10px_rgba(0,0,0,0.05)] border-l border-slate-100 transition-colors">
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => startEdit(truck)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors" title="Editar"><Edit2 size={16} /></button>
+                            <button onClick={() => handleDelete(truck.id)} className="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors" title="Eliminar"><Trash2 size={16} /></button>
+                          </div>
+                        </td>
+                        {TABLE_COLUMNS.map(col => {
+                          if (col.key === 'tipo_flota') {
+                            const isExt = truck.tipo_flota === 'Externa' || (truck.empresa_externa && truck.empresa_externa.trim() !== '');
+                            return (
+                              <td key={col.key} className="px-3 py-2">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isExt
+                                    ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                                    : 'bg-blue-100 text-blue-700 border border-blue-200'
+                                }`}>
+                                  {isExt ? 'Externa' : 'Propia'}
+                                </span>
+                              </td>
+                            );
+                          }
+                          if (col.key === 'empresa_externa') {
+                            return (
+                              <td key={col.key} className="px-3 py-2 text-slate-700">
+                                {truck.empresa_externa ? (
+                                  <span className="font-semibold text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                                    {truck.empresa_externa}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300">-</span>
+                                )}
+                              </td>
+                            );
+                          }
+                          return (
+                            <td key={col.key} className="px-3 py-2 text-slate-600">
+                              {truck[col.key] || '-'}
+                            </td>
+                          );
+                        })}
+                      </>
+                    )
                   )}
                 </tr>
               ))

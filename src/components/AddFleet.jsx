@@ -12,14 +12,49 @@ import * as XLSX from 'xlsx';
 const parseExcelDate = (val) => {
   if (!val) return null;
   if (typeof val === 'number') {
-    const d = new Date((val - (25567 + 2)) * 86400 * 1000);
-    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000));
+    if (!isNaN(d.getTime())) {
+      const y = d.getUTCFullYear();
+      const m = d.getUTCMonth() + 1;
+      const day = d.getUTCDate();
+      const maxDays = new Date(y, m, 0).getDate();
+      const validD = Math.min(day, maxDays);
+      return `${y}-${String(m).padStart(2, '0')}-${String(validD).padStart(2, '0')}`;
+    }
   }
   if (typeof val === 'string') {
-    const parts = val.split(/[-/]/);
+    const trimmed = val.trim();
+    if (!trimmed) return null;
+
+    const parts = trimmed.split(/[-/.]/);
     if (parts.length === 3) {
-      if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-      if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+      let y, m, d;
+      if (parts[2].length === 4) {
+        y = parseInt(parts[2], 10);
+        m = parseInt(parts[1], 10);
+        d = parseInt(parts[0], 10);
+      } else if (parts[0].length === 4) {
+        y = parseInt(parts[0], 10);
+        m = parseInt(parts[1], 10);
+        d = parseInt(parts[2], 10);
+      }
+      if (y && m >= 1 && m <= 12 && d >= 1) {
+        const maxDays = new Date(y, m, 0).getDate();
+        const validD = Math.min(d, maxDays);
+        return `${y}-${String(m).padStart(2, '0')}-${String(validD).padStart(2, '0')}`;
+      }
+    }
+
+    const isoMatch = trimmed.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (isoMatch) {
+      const y = parseInt(isoMatch[1], 10);
+      const m = parseInt(isoMatch[2], 10);
+      const d = parseInt(isoMatch[3], 10);
+      if (m >= 1 && m <= 12) {
+        const maxDays = new Date(y, m, 0).getDate();
+        const validD = Math.min(d, maxDays);
+        return `${y}-${String(m).padStart(2, '0')}-${String(validD).padStart(2, '0')}`;
+      }
     }
   }
   return null;
@@ -45,7 +80,7 @@ const initialFormData = {
 export default function AddFleet() {
   const { addFleetBulk, isLoading } = useFleetStore();
   const [activeTab, setActiveTab] = useState('manual');
-  const [fleetCategory, setFleetCategory] = useState('Camiones/Camionetas'); // 'Camiones/Camionetas', 'Tractos', 'Semiremolques'
+  const [fleetCategory, setFleetCategory] = useState('Camiones/Camionetas'); // 'Camiones/Camionetas', 'Tractos', 'Semiremolques', 'Flota Externa'
   const [previewData, setPreviewData] = useState(null);
   const [formData, setFormData] = useState(initialFormData);
 
@@ -55,7 +90,16 @@ export default function AddFleet() {
       toast.error('La patente es obligatoria');
       return;
     }
-    if (formData.tipo_flota === 'Externa' && !formData.empresa_externa?.trim()) {
+    
+    let tipoFlota = formData.tipo_flota || (fleetCategory === 'Flota Externa' ? 'Externa' : 'Propia');
+    let empresaExterna = formData.empresa_externa || '';
+
+    if (formData.status && String(formData.status).toLowerCase().startsWith('externo_')) {
+      tipoFlota = 'Externa';
+      if (!empresaExterna) empresaExterna = String(formData.status).replace(/^externo_/i, '').trim();
+    }
+
+    if (tipoFlota === 'Externa' && !empresaExterna?.trim() && !formData.status?.toLowerCase().startsWith('externo_')) {
       toast.error('Por favor ingresa el nombre de la empresa externa');
       return;
     }
@@ -67,8 +111,8 @@ export default function AddFleet() {
     const success = await addFleetBulk([{ 
       ...formData, 
       type: submitType,
-      tipo_flota: formData.tipo_flota || 'Propia',
-      empresa_externa: formData.tipo_flota === 'Externa' ? (formData.empresa_externa || '').trim() : ''
+      tipo_flota: tipoFlota,
+      empresa_externa: empresaExterna.trim()
     }]);
     if (success) {
       setFormData(initialFormData);
@@ -86,15 +130,19 @@ export default function AddFleet() {
       const json = XLSX.utils.sheet_to_json(worksheet);
 
       const mappedData = json.map(row => {
-        const cleanPlate = getValue(row, ['patente']);
-        const rawInternal = getValue(row, ['interno', 'n*interno', 'n°interno', 'numero']);
+        const cleanPlate = getValue(row, ['patente', 'placa']);
+        const rawInternal = getValue(row, ['interno', 'n*interno', 'n°interno', 'n° interno', 'numero']);
         let rawStatus = getValue(row, ['estado', 'status', 'vigencia']) || 'Activo';
         const rawTipoFlota = getValue(row, ['tipo flota', 'tipo de flota', 'flota', 'propiedad', 'origen']);
-        const rawEmpresa = getValue(row, ['empresa externa', 'empresa', 'proveedor', 'transportista', 'contratista']);
+        let rawEmpresa = getValue(row, ['empresa externa', 'empresa', 'proveedor', 'transportista', 'contratista']);
         
-        let tipoFlota = 'Propia';
+        let tipoFlota = fleetCategory === 'Flota Externa' ? 'Externa' : 'Propia';
         if (rawTipoFlota && String(rawTipoFlota).toLowerCase().includes('ext')) tipoFlota = 'Externa';
         if (rawEmpresa && String(rawEmpresa).trim()) tipoFlota = 'Externa';
+        if (rawStatus && String(rawStatus).toLowerCase().startsWith('externo_')) {
+          tipoFlota = 'Externa';
+          if (!rawEmpresa) rawEmpresa = String(rawStatus).replace(/^externo_/i, '').trim();
+        }
 
         let typeVal = getValue(row, ['tipo']);
         if (!typeVal) {
@@ -114,20 +162,20 @@ export default function AddFleet() {
           tipo_flota: tipoFlota,
           empresa_externa: rawEmpresa ? String(rawEmpresa).trim() : '',
           frio: getValue(row, ['frio', 'frío'])?.toString() || null,
-          engine_number: getValue(row, ['n° motor', 'n motor', 'motor'])?.toString() || null,
-          chassis_number: getValue(row, ['n° chasis', 'n chasis', 'chasis'])?.toString() || null,
+          engine_number: getValue(row, ['n° motor', 'n° motor ', 'n motor', 'motor'])?.toString() || null,
+          chassis_number: getValue(row, ['n° chasis', 'n° chasis ', 'n chasis', 'chasis'])?.toString() || null,
           cc: getValue(row, ['cc'])?.toString() || null,
-          tank_capacity: getValue(row, ['carga estanque', 'capacidad de estanque'])?.toString() || null,
-          payload: getValue(row, ['carga -peso', 'carga peso', 'peso'])?.toString() || null,
-          state2: getValue(row, ['estado2'])?.toString() || null,
+          tank_capacity: getValue(row, ['carga estanque', 'capacidad de estanque', 'estanque'])?.toString() || null,
+          payload: getValue(row, ['carga -peso', 'carga-peso', 'carga peso', 'peso'])?.toString() || null,
+          state2: getValue(row, ['estado2', 'estado 2'])?.toString() || null,
           rt_date: parseExcelDate(getValue(row, ['rt', 'revision', 'revisión'])),
           gases_date: parseExcelDate(getValue(row, ['gases'])),
           pc_date: parseExcelDate(getValue(row, ['pc'])),
           soap_date: parseExcelDate(getValue(row, ['soap'])),
           carnes_date: parseExcelDate(getValue(row, ['carnes'])),
           resolution: getValue(row, ['resolucion', 'resolución'])?.toString() || null,
-          type2: getValue(row, ['tipo2'])?.toString() || null,
-          side_doors: getValue(row, ['puertas laterales'])?.toString() || null,
+          type2: getValue(row, ['tipo2', 'tipo 2'])?.toString() || null,
+          side_doors: getValue(row, ['puertas laterales', 'p. laterales', 'laterales'])?.toString() || null,
           gps: getValue(row, ['gps'])?.toString() || null,
           operation: getValue(row, ['operación', 'operacion'])?.toString() || null,
           insurer: getValue(row, ['aseguradora'])?.toString() || null,
@@ -135,7 +183,7 @@ export default function AddFleet() {
           tct: getValue(row, ['tct'])?.toString() || null,
           tct_copy: getValue(row, ['copia tct'])?.toString() || null,
           neo_tac: getValue(row, ['neo tac', 'neotac'])?.toString() || null,
-          pallet_capacity: getValue(row, ['capacidad pallet', 'pallets'])?.toString() || null,
+          pallet_capacity: getValue(row, ['capacidad pallet', 'cap. pallet', 'pallets'])?.toString() || null,
           isValid: !!cleanPlate
         };
       });
@@ -178,6 +226,7 @@ export default function AddFleet() {
   };
 
   const suggestCols = () => {
+    if (fleetCategory === 'Flota Externa') return 'Tipo, Patente, N*Interno, Estado, Frio, Marca, Modelo, Año, N° Motor, N° Chasis, CC, Carga -Peso, Estado2, RT, Gases, PC, SOAP, Resolucion, Tipo2, GPS, Operación, Region';
     if (fleetCategory === 'Camiones/Camionetas') return 'Tipo, Patente, N*Interno, Frio, Marca, Modelo, Año, Disponibilidad, N° Motor, N° Chasis, CC, Carga Estanque, Carga -Peso, Estado2, RT, Gases, PC, SOAP, Carnes, Resolucion, Tipo2, Puertas Laterales, GPS, Operación, Aseguradora, Region, TCT, Copia TCT, NEO TAC';
     if (fleetCategory === 'Tractos') return 'Tipo, Patente, N*Interno, Frio, Marca, Modelo, Año, N° Motor, N° chasis, Carga -Peso, Estado2, RT, PC, SOAP, Carnes, Resolucion, Tipo2, Capacidad Pallet, GPS, Operación, Aseguradora, Region, TCT, Capacidad de Estanque';
     return 'Tipo, Patente, N*Interno, Frio, Marca, Modelo, Año, N° Motor, N° chasis, Carga -Peso, Estado2, RT, PC, SOAP, Carnes, Resolucion, Tipo2, Capacidad Pallet, GPS, Operación, Aseguradora, Region, TCT, Capacidad de Estanque';
@@ -185,11 +234,16 @@ export default function AddFleet() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex gap-2">
-        {['Camiones/Camionetas', 'Tractos', 'Semiremolques'].map(cat => (
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-wrap gap-2">
+        {['Camiones/Camionetas', 'Tractos', 'Semiremolques', 'Flota Externa'].map(cat => (
           <button
             key={cat}
-            onClick={() => setFleetCategory(cat)}
+            onClick={() => {
+              setFleetCategory(cat);
+              if (cat === 'Flota Externa') {
+                setFormData(prev => ({ ...prev, tipo_flota: 'Externa' }));
+              }
+            }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               fleetCategory === cat ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
