@@ -62,9 +62,10 @@ const formatExcelCellValue = (val, colType) => {
   if (val === null || val === undefined || val === '') return '';
   if (colType === 'date') {
     if (val instanceof Date) {
-      const y = val.getFullYear();
-      const m = String(val.getMonth() + 1).padStart(2, '0');
-      const d = String(val.getDate()).padStart(2, '0');
+      const isUtcMidnight = val.getUTCHours() === 0 && val.getUTCMinutes() === 0 && val.getUTCSeconds() === 0;
+      const y = isUtcMidnight ? val.getUTCFullYear() : val.getFullYear();
+      const m = String((isUtcMidnight ? val.getUTCMonth() : val.getMonth()) + 1).padStart(2, '0');
+      const d = String(isUtcMidnight ? val.getUTCDate() : val.getDate()).padStart(2, '0');
       return `${y}-${m}-${d}`;
     }
     if (typeof val === 'number') {
@@ -77,7 +78,17 @@ const formatExcelCellValue = (val, colType) => {
     const str = String(val).trim();
     const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
     if (dmy) {
-      return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+      let p1 = parseInt(dmy[1], 10);
+      let p2 = parseInt(dmy[2], 10);
+      let y = dmy[3];
+      if (p2 > 12 && p1 <= 12) {
+        return `${y}-${String(p1).padStart(2, '0')}-${String(p2).padStart(2, '0')}`;
+      }
+      return `${y}-${String(p2).padStart(2, '0')}-${String(p1).padStart(2, '0')}`;
+    }
+    const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (ymd) {
+      return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
     }
   }
   return String(val).trim();
@@ -274,7 +285,7 @@ export default function ManageFleet() {
     reader.onload = (e) => {
       try {
         const data = e.target.result;
-        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+        const workbook = XLSX.read(data, { type: 'binary', cellDates: false });
         const sheets = workbook.SheetNames || [];
         if (sheets.length === 0) {
           toast.error('El archivo no contiene hojas válidas');

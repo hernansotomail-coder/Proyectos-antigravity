@@ -24,11 +24,12 @@ export const parseExcelDateValue = (val) => {
   if (val === null || val === undefined || val === '') return null;
   if (val instanceof Date) {
     if (isNaN(val.getTime())) return null;
-    const y = val.getFullYear();
-    const m = String(val.getMonth() + 1).padStart(2, '0');
-    const d = String(val.getDate()).padStart(2, '0');
-    const hh = String(val.getHours()).padStart(2, '0');
-    const mm = String(val.getMinutes()).padStart(2, '0');
+    const isUtcMidnight = val.getUTCHours() === 0 && val.getUTCMinutes() === 0 && val.getUTCSeconds() === 0;
+    const y = isUtcMidnight ? val.getUTCFullYear() : val.getFullYear();
+    const m = String((isUtcMidnight ? val.getUTCMonth() : val.getMonth()) + 1).padStart(2, '0');
+    const d = String(isUtcMidnight ? val.getUTCDate() : val.getDate()).padStart(2, '0');
+    const hh = String(isUtcMidnight ? val.getUTCHours() : val.getHours()).padStart(2, '0');
+    const mm = String(isUtcMidnight ? val.getUTCMinutes() : val.getMinutes()).padStart(2, '0');
     return `${d}/${m}/${y}${hh !== '00' || mm !== '00' ? ` ${hh}:${mm}` : ''}`;
   }
   if (typeof val === 'number') {
@@ -44,18 +45,29 @@ export const parseExcelDateValue = (val) => {
   const str = String(val).trim();
   if (!str) return null;
 
-  // DD/MM/YYYY o DD-MM-YYYY
-  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/);
+  // DD/MM/YYYY o DD-MM-YYYY (con detección inteligente para evitar invertir día/mes)
+  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})(?:[T\s]+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp]\.?[Mm]\.?)?))?/);
   if (dmyMatch) {
-    const d = dmyMatch[1].padStart(2, '0');
-    const m = dmyMatch[2].padStart(2, '0');
-    const y = dmyMatch[3];
+    let part1 = parseInt(dmyMatch[1], 10);
+    let part2 = parseInt(dmyMatch[2], 10);
+    let y = dmyMatch[3];
+    let d, m;
+    
+    // Si la segunda parte es > 12 y la primera <= 12, viene como MM/DD/YYYY
+    if (part2 > 12 && part1 <= 12) {
+      m = String(part1).padStart(2, '0');
+      d = String(part2).padStart(2, '0');
+    } else {
+      // Estándar chileno / internacional: DD/MM/YYYY
+      d = String(part1).padStart(2, '0');
+      m = String(part2).padStart(2, '0');
+    }
     const time = dmyMatch[4] ? ` ${dmyMatch[4]}` : '';
     return `${d}/${m}/${y}${time}`;
   }
 
   // YYYY-MM-DD
-  const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?/);
+  const ymdMatch = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s]+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AaPp]\.?[Mm]\.?)?))?/);
   if (ymdMatch) {
     const y = ymdMatch[1];
     const m = ymdMatch[2].padStart(2, '0');
@@ -464,7 +476,7 @@ export default function FleetWashes() {
     reader.onload = (e) => {
       try {
         const data = e.target.result;
-        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+        const workbook = XLSX.read(data, { type: 'binary', cellDates: false });
         const sheets = workbook.SheetNames || [];
         if (sheets.length === 0) {
           toast.error('El archivo no contiene hojas');
@@ -489,7 +501,7 @@ export default function FleetWashes() {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) return;
 
-    const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const json = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
     if (json.length === 0) {
       setCertColumns([]);
       setCertRawRows([]);
@@ -601,10 +613,10 @@ export default function FleetWashes() {
         if (semicolonCount > commaCount && semicolonCount > tabCount) delimiter = ';';
         else if (tabCount > commaCount && tabCount > semicolonCount) delimiter = '\t';
 
-        workbook = XLSX.read(text, { type: 'string', FS: delimiter, cellDates: true });
+        workbook = XLSX.read(text, { type: 'string', FS: delimiter, cellDates: false, raw: true });
       } else {
         const buffer = await file.arrayBuffer();
-        workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+        workbook = XLSX.read(buffer, { type: 'array', cellDates: false, raw: true });
       }
 
       const sheets = workbook.SheetNames || [];
@@ -629,7 +641,7 @@ export default function FleetWashes() {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) return;
 
-    const json = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const json = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
     if (json.length === 0) {
       setWashColumns([]);
       setWashRawRows([]);
