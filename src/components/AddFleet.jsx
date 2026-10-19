@@ -36,6 +36,7 @@ const getValue = (row, possibleKeys) => {
 
 const initialFormData = {
   type: 'Camión', plate: '', internal_number: '', brand: '', model: '', year: '', status: 'Activo',
+  tipo_flota: 'Propia', empresa_externa: '',
   frio: '', engine_number: '', chassis_number: '', cc: '', tank_capacity: '', payload: '', state2: '',
   rt_date: '', gases_date: '', pc_date: '', soap_date: '', carnes_date: '', resolution: '', type2: '',
   side_doors: '', gps: '', operation: '', insurer: '', region: '', tct: '', tct_copy: '', neo_tac: '', pallet_capacity: ''
@@ -54,12 +55,21 @@ export default function AddFleet() {
       toast.error('La patente es obligatoria');
       return;
     }
+    if (formData.tipo_flota === 'Externa' && !formData.empresa_externa?.trim()) {
+      toast.error('Por favor ingresa el nombre de la empresa externa');
+      return;
+    }
     
     let submitType = formData.type;
     if (fleetCategory === 'Tractos') submitType = 'Tracto';
     else if (fleetCategory === 'Semiremolques' && !submitType.includes('Rampla') && !submitType.includes('Semiremolque')) submitType = 'Semiremolque';
 
-    const success = await addFleetBulk([{ ...formData, type: submitType }]);
+    const success = await addFleetBulk([{ 
+      ...formData, 
+      type: submitType,
+      tipo_flota: formData.tipo_flota || 'Propia',
+      empresa_externa: formData.tipo_flota === 'Externa' ? (formData.empresa_externa || '').trim() : ''
+    }]);
     if (success) {
       setFormData(initialFormData);
     }
@@ -79,7 +89,13 @@ export default function AddFleet() {
         const cleanPlate = getValue(row, ['patente']);
         const rawInternal = getValue(row, ['interno', 'n*interno', 'n°interno', 'numero']);
         let rawStatus = getValue(row, ['estado', 'status', 'vigencia']) || 'Activo';
+        const rawTipoFlota = getValue(row, ['tipo flota', 'tipo de flota', 'flota', 'propiedad', 'origen']);
+        const rawEmpresa = getValue(row, ['empresa externa', 'empresa', 'proveedor', 'transportista', 'contratista']);
         
+        let tipoFlota = 'Propia';
+        if (rawTipoFlota && String(rawTipoFlota).toLowerCase().includes('ext')) tipoFlota = 'Externa';
+        if (rawEmpresa && String(rawEmpresa).trim()) tipoFlota = 'Externa';
+
         let typeVal = getValue(row, ['tipo']);
         if (!typeVal) {
           if (fleetCategory === 'Tractos') typeVal = 'Tracto';
@@ -95,6 +111,8 @@ export default function AddFleet() {
           model: getValue(row, ['modelo'])?.toString() || null,
           year: getValue(row, ['año', 'ano'])?.toString() || null,
           status: String(rawStatus).trim(),
+          tipo_flota: tipoFlota,
+          empresa_externa: rawEmpresa ? String(rawEmpresa).trim() : '',
           frio: getValue(row, ['frio', 'frío'])?.toString() || null,
           engine_number: getValue(row, ['n° motor', 'n motor', 'motor'])?.toString() || null,
           chassis_number: getValue(row, ['n° chasis', 'n chasis', 'chasis'])?.toString() || null,
@@ -206,6 +224,25 @@ export default function AddFleet() {
           </h2>
           
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Select 
+              label="Tipo de Flota *" 
+              value={formData.tipo_flota || 'Propia'} 
+              onChange={(e) => setFormData({...formData, tipo_flota: e.target.value})} 
+              options={[
+                { value: 'Propia', label: 'Flota Propia' }, 
+                { value: 'Externa', label: 'Flota Externa' }
+              ]} 
+              required 
+            />
+            {formData.tipo_flota === 'Externa' && (
+              <Input 
+                label="Nombre de la Empresa Externa *" 
+                placeholder="Ej. Transportes González / Rent a Truck" 
+                value={formData.empresa_externa || ''} 
+                onChange={(e) => setFormData({...formData, empresa_externa: e.target.value})} 
+                required 
+              />
+            )}
             <Input label="Patente *" placeholder="Ej. AB-CD-12" value={formData.plate} onChange={(e) => setFormData({...formData, plate: e.target.value})} required />
             <Input label="N° Interno" placeholder="Ej. 1045" value={formData.internal_number} onChange={(e) => setFormData({...formData, internal_number: e.target.value})} />
             <Input label="Marca" placeholder="Ej. Volvo" value={formData.brand} onChange={(e) => setFormData({...formData, brand: e.target.value})} />
@@ -269,6 +306,8 @@ export default function AddFleet() {
                       <th className="px-3 py-2">Tipo</th>
                       <th className="px-3 py-2">Patente</th>
                       <th className="px-3 py-2">N° Interno</th>
+                      <th className="px-3 py-2">Tipo Flota</th>
+                      <th className="px-3 py-2">Empresa Externa</th>
                       <th className="px-3 py-2">Frio</th>
                       <th className="px-3 py-2">Marca</th>
                       <th className="px-3 py-2">Modelo</th>
@@ -307,6 +346,12 @@ export default function AddFleet() {
                         <td className="px-3 py-2">{row.type}</td>
                         <td className="px-3 py-2 font-bold">{row.plate}</td>
                         <td className="px-3 py-2">{row.internal_number}</td>
+                        <td className="px-3 py-2">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${row.tipo_flota === 'Externa' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {row.tipo_flota || 'Propia'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-medium text-slate-700">{row.empresa_externa || '-'}</td>
                         <td className="px-3 py-2">{row.frio}</td>
                         <td className="px-3 py-2">{row.brand}</td>
                         <td className="px-3 py-2">{row.model}</td>

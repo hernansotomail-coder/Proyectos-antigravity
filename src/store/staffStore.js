@@ -19,6 +19,23 @@ const persistTipoDotacion = (map) => {
   }
 };
 
+const loadPersistedEmpresaExterna = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_staff_empresa_externa');
+    return saved ? JSON.parse(saved) : {};
+  } catch (e) {
+    return {};
+  }
+};
+
+const persistEmpresaExterna = (map) => {
+  try {
+    localStorage.setItem('keylogistics_staff_empresa_externa', JSON.stringify(map));
+  } catch (e) {
+    console.error('Error persisting empresa externa:', e);
+  }
+};
+
 const loadPersistedStaffPhones = () => {
   try {
     const saved = localStorage.getItem('keylogistics_staff_phones');
@@ -56,6 +73,7 @@ export const useStaffStore = create((set, get) => ({
       
       const tipoMap = loadPersistedTipoDotacion();
       const phoneMap = loadPersistedStaffPhones();
+      const empresaMap = loadPersistedEmpresaExterna();
 
       const enriched = (data || []).map(s => {
         const staffPhone = s.phone || 
@@ -65,10 +83,14 @@ export const useStaffStore = create((set, get) => ({
           (s.name ? phoneMap[s.name.trim()] : null) || 
           '';
 
+        const tipo = s.tipo_dotacion || tipoMap[s.id] || (s.rut ? tipoMap[s.rut] : null) || 'Propia';
+        const empresa = s.empresa_externa || empresaMap[s.id] || (s.rut ? empresaMap[s.rut] : null) || (s.name ? empresaMap[s.name.trim().toLowerCase()] : null) || '';
+
         return {
           ...s,
           phone: staffPhone,
-          tipo_dotacion: s.tipo_dotacion || tipoMap[s.id] || (s.rut ? tipoMap[s.rut] : null) || 'Propia'
+          tipo_dotacion: tipo,
+          empresa_externa: empresa
         };
       });
 
@@ -86,6 +108,7 @@ export const useStaffStore = create((set, get) => ({
     set({ isLoading: true });
     const tipo = staffData.tipo_dotacion || 'Propia';
     const phone = staffData.phone || '';
+    const empresa = staffData.empresa_externa || '';
     try {
       let insertedRow = null;
       try {
@@ -97,7 +120,7 @@ export const useStaffStore = create((set, get) => ({
         insertedRow = data[0];
       } catch (insertErr) {
         // Fallback si las columnas adicionales no existen en Supabase todavía
-        const { tipo_dotacion, phone: _, ...rest } = staffData;
+        const { tipo_dotacion, phone: _, empresa_externa: __, ...rest } = staffData;
         const { data, error } = await supabase
           .from('staff')
           .insert([rest])
@@ -112,6 +135,16 @@ export const useStaffStore = create((set, get) => ({
       if (insertedRow.rut) tipoMap[insertedRow.rut] = tipo;
       persistTipoDotacion(tipoMap);
 
+      // Persistir empresa_externa en mapping local
+      const empresaMap = loadPersistedEmpresaExterna();
+      if (insertedRow.id) empresaMap[insertedRow.id] = empresa;
+      if (insertedRow.rut) empresaMap[insertedRow.rut] = empresa;
+      if (insertedRow.name) {
+        empresaMap[insertedRow.name.trim().toLowerCase()] = empresa;
+        empresaMap[insertedRow.name.trim()] = empresa;
+      }
+      persistEmpresaExterna(empresaMap);
+
       // Persistir teléfono en mapping local
       const phoneMap = loadPersistedStaffPhones();
       if (insertedRow.id) phoneMap[insertedRow.id] = phone;
@@ -122,7 +155,7 @@ export const useStaffStore = create((set, get) => ({
       }
       persistStaffPhones(phoneMap);
 
-      const finalRow = { ...insertedRow, tipo_dotacion: tipo, phone };
+      const finalRow = { ...insertedRow, tipo_dotacion: tipo, phone, empresa_externa: empresa };
 
       set((state) => {
         const newList = [finalRow, ...state.staffList];
@@ -148,10 +181,18 @@ export const useStaffStore = create((set, get) => ({
     try {
       const tipoMap = loadPersistedTipoDotacion();
       const phoneMap = loadPersistedStaffPhones();
+      const empresaMap = loadPersistedEmpresaExterna();
 
       staffArray.forEach(s => {
         const t = s.tipo_dotacion || 'Propia';
         if (s.rut) tipoMap[s.rut] = t;
+        if (s.empresa_externa) {
+          if (s.rut) empresaMap[s.rut] = s.empresa_externa;
+          if (s.name) {
+            empresaMap[s.name.trim().toLowerCase()] = s.empresa_externa;
+            empresaMap[s.name.trim()] = s.empresa_externa;
+          }
+        }
         if (s.phone) {
           if (s.rut) phoneMap[s.rut] = s.phone;
           if (s.name) {
@@ -162,6 +203,7 @@ export const useStaffStore = create((set, get) => ({
       });
       persistTipoDotacion(tipoMap);
       persistStaffPhones(phoneMap);
+      persistEmpresaExterna(empresaMap);
 
       try {
         const { error } = await supabase
@@ -170,8 +212,8 @@ export const useStaffStore = create((set, get) => ({
           .select();
         if (error) throw error;
       } catch (upsertErr) {
-        // Fallback sin tipo_dotacion ni phone si la columna no existe en la BD
-        const sanitized = staffArray.map(({ tipo_dotacion, phone, ...rest }) => rest);
+        // Fallback sin tipo_dotacion, phone ni empresa_externa si las columnas no existen en la BD
+        const sanitized = staffArray.map(({ tipo_dotacion, phone, empresa_externa, ...rest }) => rest);
         const { error } = await supabase
           .from('staff')
           .upsert(sanitized, { onConflict: 'rut' })
@@ -191,19 +233,52 @@ export const useStaffStore = create((set, get) => ({
     }
   },
 
-  updateStaffTipoDotacion: async (staffId, tipo) => {
+  updateStaffTipoDotacion: async (staffId, tipo, empresa = '') => {
     const tipoMap = loadPersistedTipoDotacion();
     tipoMap[staffId] = tipo;
     persistTipoDotacion(tipoMap);
 
+    const empresaMap = loadPersistedEmpresaExterna();
+    empresaMap[staffId] = empresa;
+    persistEmpresaExterna(empresaMap);
+
     set((state) => ({
-      staffList: state.staffList.map(s => s.id === staffId ? { ...s, tipo_dotacion: tipo } : s)
+      staffList: state.staffList.map(s => s.id === staffId ? { ...s, tipo_dotacion: tipo, empresa_externa: empresa } : s)
     }));
 
     try {
-      await supabase.from('staff').update({ tipo_dotacion: tipo }).eq('id', staffId);
+      await supabase.from('staff').update({ tipo_dotacion: tipo, empresa_externa: empresa }).eq('id', staffId);
     } catch (e) {
       // Ignorar si la columna no existe en Supabase, el local storage ya lo respalda
+    }
+  },
+
+  updateStaffEmpresaExterna: async (staffId, empresa, rut = null, name = null) => {
+    const empresaMap = loadPersistedEmpresaExterna();
+    if (staffId) empresaMap[staffId] = empresa;
+    if (rut) empresaMap[rut] = empresa;
+    if (name) {
+      empresaMap[name.trim().toLowerCase()] = empresa;
+      empresaMap[name.trim()] = empresa;
+    }
+    persistEmpresaExterna(empresaMap);
+
+    set((state) => ({
+      staffList: state.staffList.map(s => {
+        const matchesId = staffId && s.id === staffId;
+        const matchesRut = rut && s.rut === rut;
+        const matchesName = name && s.name && s.name.trim().toLowerCase() === name.trim().toLowerCase();
+        if (matchesId || matchesRut || matchesName) {
+          return { ...s, empresa_externa: empresa };
+        }
+        return s;
+      })
+    }));
+
+    if (staffId) {
+      try {
+        await supabase.from('staff').update({ empresa_externa: empresa }).eq('id', staffId);
+      } catch (e) {}
     }
   },
 

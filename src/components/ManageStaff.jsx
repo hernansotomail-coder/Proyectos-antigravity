@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 
 export default function ManageStaff() {
-  const { staffList, fetchStaff, isLoading, updateStaffTipoDotacion, updateStaffPhone } = useStaffStore();
+  const { staffList, fetchStaff, isLoading, updateStaffTipoDotacion, updateStaffPhone, updateStaffEmpresaExterna } = useStaffStore();
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modal State
@@ -27,7 +27,8 @@ export default function ManageStaff() {
       (staff) => 
         staff.name.toLowerCase().includes(lowerTerm) || 
         staff.rut.toLowerCase().includes(lowerTerm) ||
-        (staff.phone && staff.phone.toLowerCase().includes(lowerTerm))
+        (staff.phone && staff.phone.toLowerCase().includes(lowerTerm)) ||
+        (staff.empresa_externa && staff.empresa_externa.toLowerCase().includes(lowerTerm))
     );
   }, [staffList, searchTerm]);
 
@@ -36,6 +37,7 @@ export default function ManageStaff() {
     setEditingStaff({ 
       ...staff, 
       tipo_dotacion: staff.tipo_dotacion || 'Propia',
+      empresa_externa: staff.empresa_externa || '',
       phone: staff.phone || ''
     });
     setIsModalOpen(true);
@@ -83,10 +85,14 @@ export default function ManageStaff() {
     e.preventDefault();
     try {
       const tipo = editingStaff.tipo_dotacion || 'Propia';
+      const empresa = tipo === 'Externo' ? (editingStaff.empresa_externa || '').trim() : '';
       const phone = editingStaff.phone || '';
 
       if (updateStaffTipoDotacion) {
-        await updateStaffTipoDotacion(editingStaff.id, tipo);
+        await updateStaffTipoDotacion(editingStaff.id, tipo, empresa);
+      }
+      if (updateStaffEmpresaExterna) {
+        await updateStaffEmpresaExterna(editingStaff.id, empresa, editingStaff.rut, editingStaff.name);
       }
       if (updateStaffPhone) {
         await updateStaffPhone(editingStaff.id, phone, editingStaff.rut, editingStaff.name);
@@ -99,13 +105,14 @@ export default function ManageStaff() {
             name: editingStaff.name,
             role: editingStaff.role,
             status: editingStaff.status,
-            tipo_dotacion: tipo
+            tipo_dotacion: tipo,
+            empresa_externa: empresa
           })
           .eq('id', editingStaff.id);
 
         if (error) throw error;
       } catch (subErr) {
-        // Fallback si la columna tipo_dotacion no existe en la base de datos
+        // Fallback si la columna tipo_dotacion o empresa_externa no existen en la base de datos
         const { error } = await supabase
           .from('staff')
           .update({
@@ -186,6 +193,11 @@ export default function ManageStaff() {
                     }`}>
                       {staff.tipo_dotacion || 'Propia'}
                     </span>
+                    {staff.tipo_dotacion === 'Externo' && staff.empresa_externa && (
+                      <span className="block text-[11px] text-purple-900 font-semibold mt-0.5 max-w-[150px] truncate" title={staff.empresa_externa}>
+                        {staff.empresa_externa}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {staff.phone ? (
@@ -306,6 +318,15 @@ export default function ManageStaff() {
                   { value: 'Externo', label: 'Externo' }
                 ]}
               />
+              {editingStaff.tipo_dotacion === 'Externo' && (
+                <Input 
+                  label="Nombre de la Empresa Externa *" 
+                  placeholder="Ej. Transportes del Norte SPA" 
+                  value={editingStaff.empresa_externa || ''}
+                  onChange={(e) => setEditingStaff({...editingStaff, empresa_externa: e.target.value})}
+                  required
+                />
+              )}
               <Select 
                 label="Estado"
                 value={editingStaff.status}

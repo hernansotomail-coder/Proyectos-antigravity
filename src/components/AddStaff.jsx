@@ -24,7 +24,7 @@ export default function AddStaff() {
   const [activeTab, setActiveTab] = useState('manual');
   
   // Tab 1: Carga Manual
-  const [formData, setFormData] = useState({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia', phone: '' });
+  const [formData, setFormData] = useState({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia', phone: '', empresa_externa: '' });
   const { addStaff, addStaffBulk, isLoading } = useStaffStore();
 
   const handleManualSubmit = async (e) => {
@@ -33,9 +33,13 @@ export default function AddStaff() {
       toast.error("Por favor completa los campos obligatorios");
       return;
     }
+    if (formData.tipo_dotacion === 'Externo' && !formData.empresa_externa?.trim()) {
+      toast.error("Por favor ingresa el nombre de la empresa externa");
+      return;
+    }
     const success = await addStaff(formData);
     if (success) {
-      setFormData({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia', phone: '' });
+      setFormData({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia', phone: '', empresa_externa: '' });
     }
   };
 
@@ -74,6 +78,7 @@ export default function AddStaff() {
           const rawRole = getValue(row, ['cargo', 'puesto']);
           let rawStatus = getValue(row, ['estado', 'status', 'vigencia']);
           const rawTipo = getValue(row, ['tipo de dotación', 'tipo de dotacion', 'tipo dotacion', 'tipo dotación', 'tipo', 'dotacion', 'dotación']);
+          const rawEmpresa = getValue(row, ['empresa externa', 'empresa', 'proveedor', 'contratista', 'externa']);
           const rawPhone = getValue(row, ['teléfono celular', 'telefono celular', 'celular', 'telefono', 'teléfono', 'fono', 'whatsapp', 'movil', 'móvil']);
 
           let tipoDotacion = 'Propia';
@@ -84,6 +89,9 @@ export default function AddStaff() {
             } else if (s.includes('prop')) {
               tipoDotacion = 'Propia';
             }
+          }
+          if (rawEmpresa && String(rawEmpresa).trim()) {
+            tipoDotacion = 'Externo';
           }
 
           if (rawStatus && rawStatus.toString().toUpperCase().includes('VIGENTE')) {
@@ -103,6 +111,7 @@ export default function AddStaff() {
             role: role,
             status: rawStatus,
             tipo_dotacion: tipoDotacion,
+            empresa_externa: rawEmpresa ? String(rawEmpresa).trim() : '',
             phone: rawPhone ? String(rawPhone).trim() : '',
             isValid: !!formattedRut && !!rawName && !!role
           };
@@ -132,12 +141,13 @@ export default function AddStaff() {
   });
 
   const handleBulkSubmit = async () => {
-    const validData = previewData.filter(d => d.isValid).map(({ rut, name, role, status, tipo_dotacion, phone }) => ({
+    const validData = previewData.filter(d => d.isValid).map(({ rut, name, role, status, tipo_dotacion, empresa_externa, phone }) => ({
       rut: String(rut).trim(),
       name: String(name).trim(),
       role: String(role).trim(),
       status: String(status).trim(),
       tipo_dotacion: tipo_dotacion || 'Propia',
+      empresa_externa: empresa_externa ? String(empresa_externa).trim() : '',
       phone: phone ? String(phone).trim() : ''
     }));
     
@@ -223,6 +233,15 @@ export default function AddStaff() {
               { value: 'Externo', label: 'Externo' }
             ]}
           />
+          {formData.tipo_dotacion === 'Externo' && (
+            <Input 
+              label="Nombre de la Empresa Externa *" 
+              placeholder="Ej. Transportes del Norte SPA" 
+              value={formData.empresa_externa}
+              onChange={(e) => setFormData({...formData, empresa_externa: e.target.value})}
+              required
+            />
+          )}
           <Select 
             label="Estado"
             value={formData.status}
@@ -271,7 +290,7 @@ export default function AddStaff() {
 
               <div className="mt-4 p-4 bg-yellow-50 rounded-lg text-left text-sm text-yellow-800">
                 <span className="font-semibold block mb-1">Columnas en el Excel:</span>
-                "RUT", "Conductor/Auxiliar", "Cargo", "Tipo Dotación", "Teléfono Celular", "Estado"
+                "RUT", "Conductor/Auxiliar", "Cargo", "Tipo Dotación", "Empresa Externa", "Teléfono Celular", "Estado"
               </div>
             </div>
           )}
@@ -317,6 +336,11 @@ export default function AddStaff() {
                           <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${row.tipo_dotacion === 'Externo' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                             {row.tipo_dotacion || 'Propia'}
                           </span>
+                          {row.tipo_dotacion === 'Externo' && row.empresa_externa && (
+                            <span className="block text-[11px] text-purple-900 font-medium mt-0.5">
+                              {row.empresa_externa}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-slate-600 font-mono text-xs">{row.phone || '-'}</td>
                         <td className="px-4 py-3 text-slate-600">

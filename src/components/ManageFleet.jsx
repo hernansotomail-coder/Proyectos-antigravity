@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Edit2, Trash2, Search, X, Check, Truck, UploadCloud, 
   FileSpreadsheet, ArrowRight, CheckCircle2, AlertCircle, RefreshCw, Layers,
-  Eye, EyeOff, Table, Download
+  Eye, EyeOff, Table, Download, Building2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -18,6 +18,8 @@ import { downloadFleetBulkTemplate } from '../lib/excelTemplates';
 export const FLEET_COLUMNS = [
   { key: 'plate', label: 'Patente' },
   { key: 'type', label: 'Tipo' },
+  { key: 'tipo_flota', label: 'Tipo Flota' },
+  { key: 'empresa_externa', label: 'Empresa Externa' },
   { key: 'brand', label: 'Marca' },
   { key: 'model', label: 'Modelo' },
   { key: 'year', label: 'Año' },
@@ -99,8 +101,18 @@ export default function ManageFleet() {
   const { fleetList, fetchFleet, updateFleet, deleteFleet, updateFleetBulkColumns, isLoading } = useFleetStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('Todos');
+  const [fleetTab, setFleetTab] = useState('propia'); // 'propia' | 'externa' | 'todas'
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
+
+  // Conteo de flota propia y externa
+  const propiaCount = useMemo(() => {
+    return fleetList.filter(f => (f.tipo_flota || 'Propia') !== 'Externa' && (!f.empresa_externa || f.empresa_externa.trim() === '')).length;
+  }, [fleetList]);
+
+  const externaCount = useMemo(() => {
+    return fleetList.filter(f => f.tipo_flota === 'Externa' || (f.empresa_externa && f.empresa_externa.trim() !== '')).length;
+  }, [fleetList]);
 
   // Estado del Modal de Carga Masiva por Columnas (Requisito 1 y 3)
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
@@ -133,21 +145,33 @@ export default function ManageFleet() {
   }, [fleetList]);
 
   const filteredFleet = categorized.filter(f => {
+    // 1. Filtrado por Pestaña de Flota (Propia vs Externa vs Todas)
+    const isExternal = f.tipo_flota === 'Externa' || (f.empresa_externa && f.empresa_externa.trim() !== '');
+    if (fleetTab === 'propia' && isExternal) return false;
+    if (fleetTab === 'externa' && !isExternal) return false;
+
+    // 2. Filtrado por Categoría / Tipo
     if (typeFilter !== 'Todos' && f.dashboardCategory !== typeFilter) return false;
     
+    // 3. Filtrado por Búsqueda (Patente, N° Interno, Marca, Empresa Externa)
     if (searchTerm) {
       const lowerSearch = searchTerm.toLowerCase();
       const matchesPlate = f.plate?.toLowerCase().includes(lowerSearch);
       const matchesInternal = f.internal_number?.toLowerCase().includes(lowerSearch);
       const matchesBrand = f.brand?.toLowerCase().includes(lowerSearch);
-      if (!matchesPlate && !matchesInternal && !matchesBrand) return false;
+      const matchesEmpresa = f.empresa_externa?.toLowerCase().includes(lowerSearch);
+      if (!matchesPlate && !matchesInternal && !matchesBrand && !matchesEmpresa) return false;
     }
     return true;
   });
 
   const startEdit = (truck) => {
     setEditingId(truck.id);
-    setEditForm(truck);
+    setEditForm({
+      ...truck,
+      tipo_flota: truck.tipo_flota || (truck.empresa_externa ? 'Externa' : 'Propia'),
+      empresa_externa: truck.empresa_externa || ''
+    });
   };
 
   const cancelEdit = () => {
@@ -158,6 +182,10 @@ export default function ManageFleet() {
   const handleSave = async (id) => {
     if (!editForm.plate) {
       toast.error('La patente es obligatoria');
+      return;
+    }
+    if (editForm.tipo_flota === 'Externa' && (!editForm.empresa_externa || !editForm.empresa_externa.trim())) {
+      toast.error('Debe ingresar el nombre de la empresa externa para un vehículo externo');
       return;
     }
     
@@ -478,6 +506,78 @@ export default function ManageFleet() {
         </div>
       </div>
 
+      {/* Pestañas de Flota: Propia vs Externa vs Toda la Flota (Requisito 2) */}
+      <div className="flex flex-wrap items-center gap-2 mb-4 border-b border-slate-200 pb-3">
+        <button
+          type="button"
+          onClick={() => setFleetTab('propia')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            fleetTab === 'propia'
+              ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-600/20'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+          }`}
+        >
+          <Truck size={15} />
+          <span>Flota Propia</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            fleetTab === 'propia' ? 'bg-blue-700/60 text-white' : 'bg-slate-200 text-slate-700'
+          }`}>
+            {propiaCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFleetTab('externa')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            fleetTab === 'externa'
+              ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-600/20'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+          }`}
+        >
+          <Building2 size={15} />
+          <span>Flota Externa</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            fleetTab === 'externa' ? 'bg-purple-700/60 text-white' : 'bg-purple-100 text-purple-700'
+          }`}>
+            {externaCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFleetTab('todas')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            fleetTab === 'todas'
+              ? 'bg-slate-800 text-white shadow-sm ring-2 ring-slate-800/20'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+          }`}
+        >
+          <Layers size={15} />
+          <span>Toda la Flota</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            fleetTab === 'todas' ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'
+          }`}>
+            {fleetList.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Banner Informativo al estar en la Pestaña de Flota Externa */}
+      {fleetTab === 'externa' && (
+        <div className="mb-4 bg-purple-50/90 border border-purple-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-purple-900 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Building2 size={16} className="text-purple-600 shrink-0" />
+            <span>
+              Pestaña <strong>Flota Externa</strong>: mostrando vehículos tercerizados ({externaCount} registrados).
+            </span>
+          </div>
+          <span className="text-[11px] text-purple-700 font-medium">
+            Agrega nuevos camiones externos desde <strong>Agregar Flota</strong> (con <em>Tipo de Flota: Externa</em>).
+          </span>
+        </div>
+      )}
+
       {/* Tabla de Flota */}
       <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-slate-50">
         <table className="w-full text-xs text-left whitespace-nowrap">
@@ -495,7 +595,19 @@ export default function ManageFleet() {
             {filteredFleet.length === 0 ? (
               <tr>
                 <td colSpan={5 + TABLE_COLUMNS.length} className="px-4 py-8 text-center text-slate-500">
-                  No se encontraron vehículos.
+                  {fleetTab === 'externa' ? (
+                    <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto py-4">
+                      <Building2 size={36} className="text-purple-400" />
+                      <p className="font-semibold text-slate-700">No hay vehículos registrados en Flota Externa</p>
+                      <p className="text-xs text-slate-500">
+                        Puedes agregar vehículos externos desde <strong>Agregar Flota</strong> seleccionando <em>Tipo de Flota: Externa</em>, o editando cualquier vehículo existente en esta tabla.
+                      </p>
+                    </div>
+                  ) : fleetTab === 'propia' ? (
+                    'No se encontraron vehículos de Flota Propia.'
+                  ) : (
+                    'No se encontraron vehículos.'
+                  )}
                 </td>
               </tr>
             ) : (
@@ -542,16 +654,57 @@ export default function ManageFleet() {
                           <button onClick={cancelEdit} disabled={isLoading} className="p-1.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700 rounded transition-colors" title="Cancelar"><X size={16} /></button>
                         </div>
                       </td>
-                      {TABLE_COLUMNS.map(col => (
-                        <td key={col.key} className="px-2 py-1">
-                          <input 
-                            type={col.type || 'text'}
-                            value={editForm[col.key] || ''} 
-                            onChange={(e) => setEditForm({...editForm, [col.key]: e.target.value})}
-                            className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[100px]"
-                          />
-                        </td>
-                      ))}
+                      {TABLE_COLUMNS.map(col => {
+                        if (col.key === 'tipo_flota') {
+                          return (
+                            <td key={col.key} className="px-2 py-1">
+                              <select 
+                                value={editForm.tipo_flota || 'Propia'} 
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setEditForm({
+                                    ...editForm, 
+                                    tipo_flota: val,
+                                    empresa_externa: val === 'Propia' ? '' : editForm.empresa_externa
+                                  });
+                                }}
+                                className="h-7 text-xs border border-slate-200 rounded px-1 min-w-[90px] bg-white font-medium"
+                              >
+                                <option value="Propia">Propia</option>
+                                <option value="Externa">Externa</option>
+                              </select>
+                            </td>
+                          );
+                        }
+                        if (col.key === 'empresa_externa') {
+                          return (
+                            <td key={col.key} className="px-2 py-1">
+                              <input 
+                                type="text"
+                                placeholder={editForm.tipo_flota === 'Externa' ? 'Empresa externa *' : 'Opcional'}
+                                disabled={editForm.tipo_flota !== 'Externa'}
+                                value={editForm.empresa_externa || ''} 
+                                onChange={(e) => setEditForm({...editForm, empresa_externa: e.target.value})}
+                                className={`h-7 text-xs border rounded px-2 min-w-[130px] ${
+                                  editForm.tipo_flota === 'Externa' 
+                                    ? 'border-purple-300 bg-purple-50/50 font-semibold text-purple-900' 
+                                    : 'border-slate-200 bg-slate-100 text-slate-400'
+                                }`}
+                              />
+                            </td>
+                          );
+                        }
+                        return (
+                          <td key={col.key} className="px-2 py-1">
+                            <input 
+                              type={col.type || 'text'}
+                              value={editForm[col.key] || ''} 
+                              onChange={(e) => setEditForm({...editForm, [col.key]: e.target.value})}
+                              className="h-7 text-xs border border-slate-200 rounded px-2 min-w-[100px]"
+                            />
+                          </td>
+                        );
+                      })}
                     </>
                   ) : (
                     <>
@@ -575,11 +728,40 @@ export default function ManageFleet() {
                           <button onClick={() => handleDelete(truck.id)} className="p-1.5 text-red-600 hover:bg-red-100 rounded transition-colors" title="Eliminar"><Trash2 size={16} /></button>
                         </div>
                       </td>
-                      {TABLE_COLUMNS.map(col => (
-                        <td key={col.key} className="px-3 py-2 text-slate-600">
-                          {truck[col.key] || '-'}
-                        </td>
-                      ))}
+                      {TABLE_COLUMNS.map(col => {
+                        if (col.key === 'tipo_flota') {
+                          const isExt = truck.tipo_flota === 'Externa' || (truck.empresa_externa && truck.empresa_externa.trim() !== '');
+                          return (
+                            <td key={col.key} className="px-3 py-2">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isExt
+                                  ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                                  : 'bg-blue-100 text-blue-700 border border-blue-200'
+                              }`}>
+                                {isExt ? 'Externa' : 'Propia'}
+                              </span>
+                            </td>
+                          );
+                        }
+                        if (col.key === 'empresa_externa') {
+                          return (
+                            <td key={col.key} className="px-3 py-2 text-slate-700">
+                              {truck.empresa_externa ? (
+                                <span className="font-semibold text-purple-900 bg-purple-50 px-2 py-0.5 rounded border border-purple-100">
+                                  {truck.empresa_externa}
+                                </span>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )}
+                            </td>
+                          );
+                        }
+                        return (
+                          <td key={col.key} className="px-3 py-2 text-slate-600">
+                            {truck[col.key] || '-'}
+                          </td>
+                        );
+                      })}
                     </>
                   )}
                 </tr>

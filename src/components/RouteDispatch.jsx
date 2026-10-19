@@ -1370,6 +1370,11 @@ export default function RouteDispatch() {
                             }`}>
                               {staff.tipo_dotacion || 'Propia'}
                             </span>
+                            {staff.tipo_dotacion === 'Externo' && staff.empresa_externa && (
+                              <span className="block text-[10px] text-purple-900 font-medium mt-0.5 max-w-[130px] truncate" title={staff.empresa_externa}>
+                                {staff.empresa_externa}
+                              </span>
+                            )}
                           </td>
 
                           {/* Input Número de Celular con auto-guardado */}

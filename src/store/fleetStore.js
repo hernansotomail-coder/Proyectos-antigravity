@@ -78,6 +78,8 @@ export const useFleetStore = create((set, get) => ({
         return {
           ...f,
           ...overrideInfo,
+          tipo_flota: f.tipo_flota || overrideInfo.tipo_flota || 'Propia',
+          empresa_externa: f.empresa_externa || overrideInfo.empresa_externa || '',
           ultima_certificacion: f.ultima_certificacion || washInfo.ultima_certificacion || null,
           fecha_ultimo_lavado: f.fecha_ultimo_lavado || washInfo.fecha_ultimo_lavado || null
         };
@@ -94,20 +96,65 @@ export const useFleetStore = create((set, get) => ({
 
   addFleet: async (fleetData) => {
     set({ isLoading: true });
+    const tipoFlota = fleetData.tipo_flota || (fleetData.empresa_externa ? 'Externa' : 'Propia');
+    const empresaExterna = fleetData.empresa_externa || '';
     try {
-      const { data, error } = await supabase
-        .from('fleet')
-        .insert([fleetData])
-        .select();
+      let insertedRow = null;
+      try {
+        const { data, error } = await supabase
+          .from('fleet')
+          .insert([fleetData])
+          .select();
 
-      if (error) {
-        if (error.code === '23505') {
-          toast.error('Esta patente ya está registrada');
-        } else {
+        if (error) {
+          if (error.code === '23505') {
+            toast.error('Esta patente ya está registrada');
+            return false;
+          }
           throw error;
         }
-        return false;
+        insertedRow = data ? data[0] : null;
+      } catch (insertErr) {
+        // Fallback si tipo_flota o empresa_externa no existen como columnas en Supabase
+        const { tipo_flota, empresa_externa, ...rest } = fleetData;
+        const { data, error } = await supabase
+          .from('fleet')
+          .insert([rest])
+          .select();
+
+        if (error) {
+          if (error.code === '23505') {
+            toast.error('Esta patente ya está registrada');
+            return false;
+          }
+          throw error;
+        }
+        insertedRow = data ? data[0] : null;
       }
+
+      // Persistir en overridesMap
+      const overridesMap = loadPersistedFleetOverrides();
+      const keysToMap = [
+        fleetData.plate ? String(fleetData.plate).trim().toUpperCase() : null,
+        fleetData.internal_number ? String(fleetData.internal_number).trim() : null,
+        insertedRow?.id ? String(insertedRow.id) : null,
+        insertedRow?.plate ? String(insertedRow.plate).trim().toUpperCase() : null,
+        insertedRow?.internal_number ? String(insertedRow.internal_number).trim() : null
+      ].filter(Boolean);
+
+      keysToMap.forEach(k => {
+        overridesMap[k] = {
+          ...(overridesMap[k] || {}),
+          tipo_flota: tipoFlota,
+          empresa_externa: empresaExterna
+        };
+        overridesMap[normalizeVehicleCode(k)] = {
+          ...(overridesMap[normalizeVehicleCode(k)] || {}),
+          tipo_flota: tipoFlota,
+          empresa_externa: empresaExterna
+        };
+      });
+      persistFleetOverrides(overridesMap);
       
       toast.success('Vehículo agregado exitosamente');
       await get().fetchFleet();
@@ -124,12 +171,47 @@ export const useFleetStore = create((set, get) => ({
   addFleetBulk: async (fleetArray) => {
     set({ isLoading: true });
     try {
-      const { data, error } = await supabase
-        .from('fleet')
-        .upsert(fleetArray, { onConflict: 'plate' })
-        .select();
+      const overridesMap = loadPersistedFleetOverrides();
+      fleetArray.forEach(f => {
+        const tipoFlota = f.tipo_flota || (f.empresa_externa ? 'Externa' : 'Propia');
+        const empresa = f.empresa_externa || '';
+        const keys = [
+          f.plate ? String(f.plate).trim().toUpperCase() : null,
+          f.internal_number ? String(f.internal_number).trim() : null
+        ].filter(Boolean);
 
-      if (error) throw error;
+        keys.forEach(k => {
+          overridesMap[k] = {
+            ...(overridesMap[k] || {}),
+            tipo_flota: tipoFlota,
+            empresa_externa: empresa
+          };
+          overridesMap[normalizeVehicleCode(k)] = {
+            ...(overridesMap[normalizeVehicleCode(k)] || {}),
+            tipo_flota: tipoFlota,
+            empresa_externa: empresa
+          };
+        });
+      });
+      persistFleetOverrides(overridesMap);
+
+      try {
+        const { data, error } = await supabase
+          .from('fleet')
+          .upsert(fleetArray, { onConflict: 'plate' })
+          .select();
+
+        if (error) throw error;
+      } catch (upsertErr) {
+        // Fallback si tipo_flota o empresa_externa no existen en la BD
+        const sanitized = fleetArray.map(({ tipo_flota, empresa_externa, ...rest }) => rest);
+        const { error } = await supabase
+          .from('fleet')
+          .upsert(sanitized, { onConflict: 'plate' })
+          .select();
+
+        if (error) throw error;
+      }
       
       await get().fetchFleet();
       toast.success(`${fleetArray.length} vehículos procesados correctamente`);
@@ -145,12 +227,44 @@ export const useFleetStore = create((set, get) => ({
 
   updateFleet: async (id, fleetData) => {
     try {
-      const { error } = await supabase
-        .from('fleet')
-        .update(fleetData)
-        .eq('id', id);
+      // Guardar en overridesMap
+      const overridesMap = loadPersistedFleetOverrides();
+      const current = get().fleetList.find(f => f.id === id);
+      const keys = [
+        id ? String(id) : null,
+        fleetData.plate ? String(fleetData.plate).trim().toUpperCase() : (current?.plate?.toUpperCase()),
+        fleetData.internal_number ? String(fleetData.internal_number).trim() : current?.internal_number
+      ].filter(Boolean);
 
-      if (error) throw error;
+      keys.forEach(k => {
+        overridesMap[k] = {
+          ...(overridesMap[k] || {}),
+          ...fleetData
+        };
+        overridesMap[normalizeVehicleCode(k)] = {
+          ...(overridesMap[normalizeVehicleCode(k)] || {}),
+          ...fleetData
+        };
+      });
+      persistFleetOverrides(overridesMap);
+
+      try {
+        const { error } = await supabase
+          .from('fleet')
+          .update(fleetData)
+          .eq('id', id);
+
+        if (error) throw error;
+      } catch (subErr) {
+        // Fallback sanitizado sin columnas custom si no existen en Supabase
+        const { tipo_flota, empresa_externa, ...rest } = fleetData;
+        const { error } = await supabase
+          .from('fleet')
+          .update(rest)
+          .eq('id', id);
+
+        if (error) throw error;
+      }
       
       toast.success('Vehículo actualizado exitosamente');
       await get().fetchFleet();
