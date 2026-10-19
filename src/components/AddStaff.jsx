@@ -9,15 +9,38 @@ import { UploadCloud, CheckCircle2, AlertCircle, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { downloadStaffBulkTemplate } from '../lib/excelTemplates';
 
-// Utilidad simple para formatear RUT
-const formatRut = (rut) => {
-  if (!rut) return '';
-  const strRut = String(rut);
-  const cleanRut = strRut.replace(/[^0-9kK]/g, '').toUpperCase();
-  if (cleanRut.length <= 1) return cleanRut;
-  const body = cleanRut.slice(0, -1);
-  const dv = cleanRut.slice(-1);
-  return `${body.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${dv}`;
+// Utilidad para formatear RUT o generar identificador único para personal externo sin RUT
+const formatRutOrSynthetic = (rawRut, name, empresa, idx = 0, usedRuts = null) => {
+  let clean = String(rawRut || '').replace(/[^0-9kK]/g, '').toUpperCase();
+  
+  // Si el RUT es ficticio/dummy (< 6 dígitos o vacío o repetitivo como "1", "0", etc.)
+  const isDummy = !clean || clean.length < 6 || /^(\d)\1+$/.test(clean) || clean === '1';
+
+  if (isDummy) {
+    const empCode = (empresa || 'EXT').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'EXT';
+    let candidate = `EXT-${empCode}-${String(idx + 1).padStart(3, '0')}`;
+    let c = 1;
+    while (usedRuts && usedRuts.has(candidate)) {
+      candidate = `EXT-${empCode}-${String(idx + 1).padStart(3, '0')}-${c++}`;
+    }
+    if (usedRuts) usedRuts.add(candidate);
+    return candidate;
+  }
+
+  // RUT chileno real
+  const body = clean.slice(0, -1);
+  const dv = clean.slice(-1);
+  const formatted = `${body.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${dv}`;
+
+  // Si ya se usó este RUT real en otra fila del mismo archivo, evitar colisión
+  if (usedRuts && usedRuts.has(formatted)) {
+    let candidate = `${formatted}-${idx + 1}`;
+    usedRuts.add(candidate);
+    return candidate;
+  }
+
+  if (usedRuts) usedRuts.add(formatted);
+  return formatted;
 };
 
 export default function AddStaff() {
@@ -29,15 +52,31 @@ export default function AddStaff() {
 
   const handleManualSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.rut || !formData.name || !formData.role) {
-      toast.error("Por favor completa los campos obligatorios");
+    if (!formData.name) {
+      toast.error("Por favor completa el nombre");
       return;
     }
     if (formData.tipo_dotacion === 'Externo' && !formData.empresa_externa?.trim()) {
       toast.error("Por favor ingresa el nombre de la empresa externa");
       return;
     }
-    const success = await addStaff(formData);
+
+    let finalRut = formData.rut?.trim();
+    if (formData.tipo_dotacion === 'Externo' && (!finalRut || finalRut.length < 6 || finalRut === '1')) {
+      const empCode = (formData.empresa_externa || 'EXT').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 6) || 'EXT';
+      finalRut = `EXT-${empCode}-${Date.now().toString().slice(-4)}`;
+    } else if (finalRut) {
+      finalRut = formatRutOrSynthetic(finalRut);
+    } else {
+      toast.error("Por favor ingresa el RUT");
+      return;
+    }
+
+    const success = await addStaff({
+      ...formData,
+      rut: finalRut,
+      role: formData.role || (formData.tipo_dotacion === 'Externo' ? 'Conductor / Auxiliar' : 'Auxiliar')
+    });
     if (success) {
       setFormData({ rut: '', name: '', role: '', status: 'Activo', tipo_dotacion: 'Propia', phone: '', empresa_externa: '' });
     }
@@ -72,7 +111,8 @@ export default function AddStaff() {
         };
 
         // Mapear y validar columnas
-        const mappedData = json.map(row => {
+        const usedRuts = new Set();
+        const mappedData = json.map((row, idx) => {
           const rawRut = getValue(row, ['rut', 'rol']);
           const rawName = getValue(row, ['conductor/auxiliar', 'nombre', 'empleado']);
           const rawRole = getValue(row, ['cargo', 'puesto']);
@@ -100,20 +140,19 @@ export default function AddStaff() {
             rawStatus = 'Activo';
           }
 
-          const formattedRut = formatRut(rawRut);
-          
-          // Mapeo simple de cargos si vienen como 'Conductor A4' -> dejarlo pasar, la BD lo acepta.
-          let role = rawRole || 'Auxiliar';
+          const formattedRut = formatRutOrSynthetic(rawRut, rawName, rawEmpresa, idx, usedRuts);
+          let role = rawRole ? String(rawRole).trim() : (tipoDotacion === 'Externo' ? 'Conductor / Auxiliar' : 'Auxiliar');
+          const cleanPhone = rawPhone && String(rawPhone).trim() !== '1' ? String(rawPhone).trim() : '';
 
           return {
             rut: formattedRut,
-            name: rawName || '',
+            name: rawName ? String(rawName).trim() : '',
             role: role,
             status: rawStatus,
             tipo_dotacion: tipoDotacion,
             empresa_externa: rawEmpresa ? String(rawEmpresa).trim() : '',
-            phone: rawPhone ? String(rawPhone).trim() : '',
-            isValid: !!formattedRut && !!rawName && !!role
+            phone: cleanPhone,
+            isValid: !!formattedRut && !!rawName
           };
         });
 

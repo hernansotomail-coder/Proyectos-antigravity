@@ -183,50 +183,83 @@ export const useStaffStore = create((set, get) => ({
       const phoneMap = loadPersistedStaffPhones();
       const empresaMap = loadPersistedEmpresaExterna();
 
+      // Deduplicar por RUT (manteniendo la última fila del archivo si se repite)
+      const uniqueMap = new Map();
       staffArray.forEach(s => {
+        if (!s || !s.rut) return;
+        uniqueMap.set(s.rut, s);
+
         const t = s.tipo_dotacion || 'Propia';
-        if (s.rut) tipoMap[s.rut] = t;
+        tipoMap[s.rut] = t;
+
         if (s.empresa_externa) {
-          if (s.rut) empresaMap[s.rut] = s.empresa_externa;
+          empresaMap[s.rut] = s.empresa_externa;
           if (s.name) {
             empresaMap[s.name.trim().toLowerCase()] = s.empresa_externa;
             empresaMap[s.name.trim()] = s.empresa_externa;
           }
         }
         if (s.phone) {
-          if (s.rut) phoneMap[s.rut] = s.phone;
+          phoneMap[s.rut] = s.phone;
           if (s.name) {
             phoneMap[s.name.trim().toLowerCase()] = s.phone;
             phoneMap[s.name.trim()] = s.phone;
           }
         }
       });
+
       persistTipoDotacion(tipoMap);
       persistStaffPhones(phoneMap);
       persistEmpresaExterna(empresaMap);
 
-      try {
+      const uniqueList = Array.from(uniqueMap.values());
+      if (uniqueList.length === 0) {
+        toast.error('No se encontraron registros válidos para procesar');
+        return false;
+      }
+
+      // Sanitizar columnas reconocidas por la tabla staff en Supabase (rut, name, role, status)
+      const sanitized = uniqueList.map(({ rut, name, role, status }) => ({
+        rut: String(rut).trim(),
+        name: String(name || '').trim(),
+        role: String(role || 'Auxiliar').trim(),
+        status: String(status || 'Activo').trim()
+      }));
+
+      // Inserción por lotes (chunks) de 50 para máxima estabilidad
+      const chunkSize = 50;
+      let totalInserted = 0;
+
+      for (let i = 0; i < sanitized.length; i += chunkSize) {
+        const chunk = sanitized.slice(i, i + chunkSize);
         const { error } = await supabase
           .from('staff')
-          .upsert(staffArray, { onConflict: 'rut' })
-          .select();
-        if (error) throw error;
-      } catch (upsertErr) {
-        // Fallback sin tipo_dotacion, phone ni empresa_externa si las columnas no existen en la BD
-        const sanitized = staffArray.map(({ tipo_dotacion, phone, empresa_externa, ...rest }) => rest);
-        const { error } = await supabase
-          .from('staff')
-          .upsert(sanitized, { onConflict: 'rut' })
-          .select();
-        if (error) throw error;
+          .upsert(chunk, { onConflict: 'rut' });
+
+        if (error) {
+          console.warn('Fallo lote en Supabase, intentando inserción fila por fila...', error);
+          // Fallback individual si falla un lote
+          for (const item of chunk) {
+            try {
+              const { error: singleErr } = await supabase
+                .from('staff')
+                .upsert([item], { onConflict: 'rut' });
+              if (!singleErr) totalInserted++;
+            } catch (e) {
+              console.error('Error insertando fila:', item, e);
+            }
+          }
+        } else {
+          totalInserted += chunk.length;
+        }
       }
 
       await get().fetchStaff();
-      toast.success(`${staffArray.length} registros procesados correctamente`);
+      toast.success(`${totalInserted} colaborador(es) procesados correctamente`);
       return true;
     } catch (err) {
-      console.error(err);
-      toast.error('Error en la carga masiva');
+      console.error('Error en addStaffBulk:', err);
+      toast.error(err?.message || 'Error en la carga masiva');
       return false;
     } finally {
       set({ isLoading: false });
