@@ -275,6 +275,7 @@ export default function AssignmentControl() {
     assignTruckToRows,
     assignRamplaToRows,
     clearSlotFromRows,
+    deleteAssignmentRows,
     saveDisponibilizacion,
     recordChangeAudit,
     aperturarRutaEnDisponibilizacion,
@@ -548,6 +549,24 @@ export default function AssignmentControl() {
 
   // Entidad enfocada (al pinchar en Dotación o Camión para ver solo sus rutas asignadas - Requisito 4)
   const [focusedEntity, setFocusedEntity] = useState(null);
+
+  // Modal de confirmación para eliminar rutas (individual y lote)
+  const [routeToDelete, setRouteToDelete] = useState(null);
+  const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState(false);
+
+  const handleConfirmDeleteSingle = () => {
+    if (!routeToDelete) return;
+    deleteAssignmentRows(activeDate, [routeToDelete.id]);
+    setSelectedRowIds(prev => prev.filter(id => id !== routeToDelete.id));
+    setRouteToDelete(null);
+  };
+
+  const handleConfirmDeleteBatch = () => {
+    if (!selectedRowIds || selectedRowIds.length === 0) return;
+    deleteAssignmentRows(activeDate, selectedRowIds);
+    setSelectedRowIds([]);
+    setIsBatchDeleteModalOpen(false);
+  };
 
   // Asignaciones actuales de la fecha activa
   const assignmentsForDate = useMemo(() => {
@@ -1436,10 +1455,19 @@ export default function AssignmentControl() {
                 clearSlotFromRows(activeDate, selectedRowIds, 'rampla');
                 clearSlotFromRows(activeDate, selectedRowIds, 'vuelta');
               }}
-              className="bg-white/10 hover:bg-red-500/80 text-white text-[11px] font-semibold px-2 py-0.5 rounded-lg transition-colors"
-              title="Limpiar todas las asignaciones"
+              className="bg-white/10 hover:bg-amber-500/80 text-white text-[11px] font-semibold px-2 py-0.5 rounded-lg transition-colors"
+              title="Limpiar asignaciones (desasigna dotación y camión sin eliminar la ruta)"
+            >
+              Limpiar asignaciones
+            </button>
+
+            <button
+              onClick={() => setIsBatchDeleteModalOpen(true)}
+              className="bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg transition-colors shadow-sm flex items-center gap-1"
+              title="Eliminar rutas seleccionadas de la Disponibilización"
             >
               <Trash2 size={12} />
+              Eliminar ({selectedRowIds.length})
             </button>
 
             <button
@@ -1689,6 +1717,7 @@ export default function AssignmentControl() {
                     <th className="px-2.5 py-2">Referencia</th>
                     <th className="px-2.5 py-2 text-center">Cantidad de Locales</th>
                     <th className="px-2.5 py-2 text-right">Metros cúbicos</th>
+                    <th className="px-2 py-2 text-center w-12 text-slate-500">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
@@ -2037,13 +2066,25 @@ export default function AssignmentControl() {
                         <td className="px-2.5 py-2 text-right font-mono font-bold text-emerald-700">
                           {row.m3 || 0}
                         </td>
+
+                        {/* 15. Acción Eliminar Ruta */}
+                        <td className="px-2 py-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setRouteToDelete(row)}
+                            className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors inline-flex items-center justify-center"
+                            title={`Eliminar Ruta ${row.ruta} de Disponibilización`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
 
                   {filteredAssignments.length === 0 && (
                     <tr>
-                      <td colSpan="14" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="15" className="px-4 py-12 text-center text-slate-500">
                         No hay servicios para la fecha {activeDate}. Ve al menú <span className="font-bold text-blue-600">Planificación &gt; Asignación diaria</span> para cargar y transmitir la planilla de ruteo.
                       </td>
                     </tr>
@@ -3221,6 +3262,80 @@ export default function AssignmentControl() {
                   Guardar y Transmitir a Histórico
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMACIÓN: ELIMINAR RUTA INDIVIDUAL */}
+      {routeToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-red-600 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Eliminar Ruta</h3>
+                <p className="text-xs text-slate-500">Fecha: {activeDate}</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-4">
+              ¿Estás seguro de eliminar la <strong>Ruta {routeToDelete.ruta}</strong> ({routeToDelete.cliente})? Esta acción eliminará el servicio de la Disponibilización del {activeDate}.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRouteToDelete(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteSingle}
+                className="px-4 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-sm transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 size={13} />
+                Sí, eliminar ruta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMACIÓN: ELIMINAR RUTAS EN LOTE */}
+      {isBatchDeleteModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95">
+            <div className="flex items-center gap-3 text-red-600 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Eliminar Rutas Seleccionadas</h3>
+                <p className="text-xs text-slate-500">Fecha: {activeDate}</p>
+              </div>
+            </div>
+            <p className="text-sm text-slate-600 mb-4">
+              ¿Estás seguro de eliminar las <strong>{selectedRowIds.length}</strong> rutas seleccionadas de la Disponibilización del {activeDate}?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsBatchDeleteModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteBatch}
+                className="px-4 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-sm transition-colors flex items-center gap-1.5"
+              >
+                <Trash2 size={13} />
+                Sí, eliminar {selectedRowIds.length} rutas
+              </button>
             </div>
           </div>
         </div>

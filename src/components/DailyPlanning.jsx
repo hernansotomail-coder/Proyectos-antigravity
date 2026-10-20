@@ -47,7 +47,10 @@ export default function DailyPlanning() {
     transformRawRows, 
     transmitToDisponibilizacion,
     aperturarRuta,
-    transmitSpecificRoutesToDisponibilizacion
+    transmitSpecificRoutesToDisponibilizacion,
+    transmittedAssignments,
+    transmitSpecialRoutes,
+    selectedDisponibilizarDate
   } = usePlanningStore();
   const { user } = useAuthStore();
 
@@ -57,6 +60,15 @@ export default function DailyPlanning() {
   const [isLoading, setIsLoading] = useState(false);
   const [routeTypeFilter, setRouteTypeFilter] = useState('all'); // 'all' | 'standard' | 'special'
   const [selectedRouteIds, setSelectedRouteIds] = useState([]);
+
+  // Estados para Modal de Rutas Especiales
+  const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
+  const [specialDate, setSpecialDate] = useState(selectedDisponibilizarDate || '14-10-2026');
+  const [specialFileName, setSpecialFileName] = useState('');
+  const [isAnalyzingSpecial, setIsAnalyzingSpecial] = useState(false);
+  const [specialAnalysisResult, setSpecialAnalysisResult] = useState(null);
+  const [selectedSpecialRouteIds, setSelectedSpecialRouteIds] = useState([]);
+  const [expandedSpecialRouteId, setExpandedSpecialRouteId] = useState(null);
 
   // Mantener seleccionadas por defecto las rutas cargadas
   React.useEffect(() => {
@@ -132,6 +144,210 @@ export default function DailyPlanning() {
 
     reader.readAsBinaryString(file);
     e.target.value = ''; // reset input
+  };
+
+  // Procesamiento y Detección de Rutas Especiales (Requisito 3)
+  const handleSpecialFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsAnalyzingSpecial(true);
+    setSpecialFileName(file.name);
+    const reader = new FileReader();
+
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+        const sheetName = wb.SheetNames.find(s => s.toLowerCase() === 'sheet1') || wb.SheetNames[0];
+        const ws = wb.Sheets[sheetName];
+        const rawData = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+        if (!rawData || rawData.length === 0) {
+          toast.error('El archivo Excel no contiene filas o está vacío.');
+          setIsAnalyzingSpecial(false);
+          return;
+        }
+
+        const validRows = rawData.filter(row => {
+          const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
+          return String(rutaRaw).trim().length > 0;
+        });
+
+        if (validRows.length === 0) {
+          toast.error('No se encontraron filas con número de ruta en el archivo.');
+          setIsAnalyzingSpecial(false);
+          return;
+        }
+
+        const targetDate = specialDate || '14-10-2026';
+        const alreadyTransmitted = transmittedAssignments[targetDate] || [];
+        const transmittedDestinos = new Set();
+        const transmittedRouteNumbers = new Set();
+
+        alreadyTransmitted.forEach(r => {
+          if (r.ruta) transmittedRouteNumbers.add(String(r.ruta).trim().toUpperCase());
+          (r.paradas || []).forEach(p => {
+            const d = String(p.destino || '').trim().toUpperCase();
+            if (d) transmittedDestinos.add(d);
+          });
+        });
+
+        // Agrupar filas del Excel
+        const groups = new Map();
+        validRows.forEach((row, idx) => {
+          const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
+          const ruta = String(rutaRaw).trim();
+          if (!ruta) return;
+
+          const rowDate = normalizeDate(row.Fecha || row.fecha) || targetDate;
+          if (rowDate && rowDate !== targetDate && (row.Fecha || row.fecha)) {
+            return;
+          }
+
+          const nombreRuta = String(row['Nombre Ruta'] || row.nombre_ruta || row.NombreRuta || row.Cliente || '').trim();
+          const destino = String(row.Destino || row.destino || '').trim();
+          const direccion = String(row.Direccion || row.Dirección || row.direccion || '').trim();
+          const comuna = String(row.Comuna || row.comuna || '').trim();
+          const volumen = parseFloat(String(row.Volumen || row.volumen || 0).replace(',', '.')) || 0;
+          const peso = parseFloat(String(row.Peso || row.peso || 0).replace(',', '.')) || 0;
+          const cantCJ = parseFloat(String(row.cantCJ || row.cantcj || row.CantCJ || row.Cajas || 0).replace(',', '.')) || 0;
+          const secuencia = row.Secuencia || row.secuencia || idx + 1;
+          const ambiente = String(row.Ambiente || row.ambiente || row.Amb || 'S').trim().toUpperCase() || 'S';
+          const horaIni = row.HoraIni || row.hora_ini || '';
+          const horaFin = row.HoraFin || row.hora_fin || '';
+          const transportista = String(row.Transportista || row.transportista || row.Transp || '').trim();
+
+          const groupKey = `${ruta}:::${nombreRuta || 'Sin Nombre'}`;
+          if (!groups.has(groupKey)) {
+            groups.set(groupKey, {
+              id: `special-${ruta}-${Date.now()}-${idx}`,
+              ruta,
+              nombreRuta: nombreRuta || `Ruta ${ruta}`,
+              fecha: targetDate,
+              transportistasSet: new Set(),
+              destinosSet: new Set(),
+              sumaVolumen: 0,
+              sumaPeso: 0,
+              sumaCantCJ: 0,
+              paradasMap: new Map()
+            });
+          }
+
+          const g = groups.get(groupKey);
+          if (destino) g.destinosSet.add(destino);
+          if (transportista) g.transportistasSet.add(transportista);
+          g.sumaVolumen += volumen;
+          g.sumaPeso += peso;
+          g.sumaCantCJ += cantCJ;
+
+          const paradaKey = `${secuencia}:::${ambiente}`;
+          if (g.paradasMap.has(paradaKey)) {
+            const p = g.paradasMap.get(paradaKey);
+            p.volumen = Number((p.volumen + volumen).toFixed(4));
+            p.peso = Number((p.peso + peso).toFixed(2));
+            p.cantCJ = Math.round(p.cantCJ + cantCJ);
+            if (!p.destino && destino) p.destino = destino;
+            if (!p.direccion && direccion) p.direccion = direccion;
+            if (!p.comuna && comuna) p.comuna = comuna;
+          } else {
+            const isNewDest = destino ? !transmittedDestinos.has(destino.toUpperCase()) : true;
+            g.paradasMap.set(paradaKey, {
+              id: `sp-${ruta}-s${secuencia}-${ambiente}-${g.paradasMap.size}`,
+              secuencia,
+              ambiente,
+              destino,
+              direccion,
+              comuna,
+              horaIni,
+              horaFin,
+              cantCJ: Math.round(cantCJ),
+              peso: Number(peso.toFixed(2)),
+              volumen: Number(volumen.toFixed(4)),
+              transportista,
+              isNewDestino: isNewDest
+            });
+          }
+        });
+
+        // Filtrar solo las rutas DIFERENTES con destinos no transmitidos previamente
+        const candidateRoutes = Array.from(groups.values()).map(g => {
+          const paradas = Array.from(g.paradasMap.values());
+          const newParadas = paradas.filter(p => p.isNewDestino);
+          const distinctNewDestinos = new Set(newParadas.map(p => p.destino).filter(Boolean));
+          const isNewRoute = !transmittedRouteNumbers.has(String(g.ruta).trim().toUpperCase());
+
+          return {
+            id: g.id,
+            ruta: g.ruta,
+            nombreRuta: g.nombreRuta,
+            fecha: g.fecha,
+            transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
+            recuentoDestino: g.destinosSet.size || paradas.length || 1,
+            sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
+            sumaPeso: Number(g.sumaPeso.toFixed(2)),
+            sumaCantCJ: Math.round(g.sumaCantCJ),
+            paradas,
+            newParadas,
+            newDestinosCount: distinctNewDestinos.size,
+            isNewRoute,
+            hasNewDestinos: distinctNewDestinos.size > 0
+          };
+        });
+
+        // Rutas que son nuevas o tienen destinos no transmitidos previamente
+        const specialRoutes = candidateRoutes.filter(r => r.isNewRoute || r.hasNewDestinos);
+
+        setSpecialAnalysisResult({
+          targetDate,
+          totalParsedRoutes: candidateRoutes.length,
+          specialRoutes,
+          transmittedRoutesCount: alreadyTransmitted.length,
+          transmittedDestinosCount: transmittedDestinos.size
+        });
+
+        setSelectedSpecialRouteIds(specialRoutes.map(r => r.id));
+
+        if (specialRoutes.length > 0) {
+          toast.success(`Se encontraron ${specialRoutes.length} rutas diferentes con destinos no transmitidos.`);
+        } else {
+          toast.info(`No se encontraron rutas con destinos nuevos. Todos los destinos ya fueron transmitidos para la fecha ${targetDate}.`);
+        }
+      } catch (err) {
+        console.error('Error procesando rutas especiales:', err);
+        toast.error('Error al analizar archivo para rutas especiales.');
+      } finally {
+        setIsAnalyzingSpecial(false);
+      }
+    };
+
+    reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const handleConfirmTransmitSpecialRoutes = () => {
+    if (!specialAnalysisResult || !specialAnalysisResult.specialRoutes) return;
+    const targetRoutes = specialAnalysisResult.specialRoutes.filter(r => 
+      selectedSpecialRouteIds.includes(r.id)
+    );
+
+    if (targetRoutes.length === 0) {
+      toast.warning('Selecciona al menos una ruta especial para transmitir.');
+      return;
+    }
+
+    const ok = transmitSpecialRoutes(specialDate, targetRoutes);
+    if (ok) {
+      setIsSpecialModalOpen(false);
+      setSpecialAnalysisResult(null);
+      setSpecialFileName('');
+      toast.success('Rutas Especiales transmitidas con éxito.', {
+        action: {
+          label: 'Ver Disponibilización',
+          onClick: () => navigate('/assignment')
+        }
+      });
+    }
   };
 
   // Run transformation
@@ -383,6 +599,19 @@ export default function DailyPlanning() {
               Transmitir a Disponibilización
             </Button>
           )}
+
+          {/* Botón Rutas Especiales (Requisito 3) */}
+          <Button
+            onClick={() => {
+              setSpecialDate(selectedDisponibilizarDate || '14-10-2026');
+              setIsSpecialModalOpen(true);
+            }}
+            className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-sm transition-all"
+            title="Cargar archivo Sheet1 y detectar rutas con destinos no transmitidos previamente"
+          >
+            <Sparkles size={14} />
+            Rutas Especiales
+          </Button>
         </div>
       </div>
 
@@ -966,6 +1195,369 @@ export default function DailyPlanning() {
                 </Button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CARGAR RUTAS ESPECIALES (Requisito 3) */}
+      {isSpecialModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[92vh] flex flex-col p-6 animate-in fade-in zoom-in-95 overflow-hidden">
+            
+            {/* Header del modal */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                  <Sparkles size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                    Cargar Rutas Especiales
+                    <span className="bg-purple-100 text-purple-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-purple-200">
+                      Hoja Sheet1
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Selecciona la fecha y carga el Excel para identificar automáticamente rutas diferentes con destinos no transmitidos previamente.
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setIsSpecialModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Configuración de Fecha y Carga de Archivo */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4 border-b border-slate-100 shrink-0">
+              {/* Selector de Fecha */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-2">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    1. Fecha de Planificación:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={specialDate}
+                      onChange={(e) => setSpecialDate(e.target.value)}
+                      placeholder="DD-MM-YYYY"
+                      className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 w-36 font-mono"
+                    />
+                    {/* Botones de fechas rápidas si existen */}
+                    {Object.keys(transmittedAssignments || {}).slice(0, 3).map(d => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setSpecialDate(d)}
+                        className={`text-[11px] px-2 py-1 rounded-lg font-bold transition-all ${
+                          specialDate === d
+                            ? 'bg-purple-600 text-white shadow-2xs'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                  <span>
+                    Rutas ya en Disponibilización: <strong className="text-slate-700">{(transmittedAssignments[specialDate] || []).length}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Selector de Archivo Excel Sheet1 */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-2">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    2. Archivo Excel (Sheet1):
+                  </label>
+                  <label className="cursor-pointer inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs">
+                    <Upload size={14} />
+                    {specialFileName ? 'Cambiar Archivo' : 'Seleccionar Archivo Excel'}
+                    <input 
+                      type="file" 
+                      accept=".xlsx, .xls, .csv" 
+                      onChange={handleSpecialFileUpload} 
+                      className="hidden" 
+                    />
+                  </label>
+                  {specialFileName && (
+                    <span className="ml-2 text-xs font-medium text-slate-700 truncate inline-block max-w-[180px] align-middle">
+                      {specialFileName}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  Debe contener la hoja <strong className="text-slate-600">Sheet1</strong> con columnas de Ruta, Destino, Secuencia, etc.
+                </p>
+              </div>
+            </div>
+
+            {/* Área de Resultados y Análisis */}
+            <div className="flex-1 flex flex-col min-h-0 py-3 overflow-hidden">
+              {isAnalyzingSpecial ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-500 gap-3">
+                  <div className="w-8 h-8 border-3 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-xs font-semibold">Analizando archivo y comparando con destinos transmitidos...</p>
+                </div>
+              ) : !specialAnalysisResult ? (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
+                  <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-400 flex items-center justify-center mb-2">
+                    <FileSpreadsheet size={24} />
+                  </div>
+                  <h4 className="text-xs font-bold text-slate-600">Selecciona la fecha y sube el archivo Excel</h4>
+                  <p className="text-[11px] text-slate-400 max-w-sm mt-1">
+                    El sistema comparará cada ruta y destino del archivo contra lo que ya fue transmitido a Disponibilización para esa fecha.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-1 flex flex-col min-h-0 gap-3 overflow-hidden">
+                  {/* Resumen KPIs del Análisis */}
+                  <div className="grid grid-cols-4 gap-2 shrink-0">
+                    <div className="bg-purple-50 border border-purple-200 p-2.5 rounded-xl">
+                      <p className="text-[10px] font-bold text-purple-700 uppercase">Rutas Especiales</p>
+                      <p className="text-xl font-black text-purple-900">{specialAnalysisResult.specialRoutes.length}</p>
+                    </div>
+                    <div className="bg-indigo-50 border border-indigo-200 p-2.5 rounded-xl">
+                      <p className="text-[10px] font-bold text-indigo-700 uppercase">Destinos Nuevos</p>
+                      <p className="text-xl font-black text-indigo-900">
+                        {specialAnalysisResult.specialRoutes.reduce((acc, r) => acc + (r.newDestinosCount || 0), 0)}
+                      </p>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 p-2.5 rounded-xl">
+                      <p className="text-[10px] font-bold text-emerald-700 uppercase">Volumen Total (m³)</p>
+                      <p className="text-xl font-black text-emerald-900">
+                        {specialAnalysisResult.specialRoutes.reduce((acc, r) => acc + (parseFloat(r.sumaVolumen) || 0), 0).toFixed(3)}
+                      </p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-xl">
+                      <p className="text-[10px] font-bold text-amber-700 uppercase">Peso Total (kg)</p>
+                      <p className="text-xl font-black text-amber-900">
+                        {specialAnalysisResult.specialRoutes.reduce((acc, r) => acc + (parseFloat(r.sumaPeso) || 0), 0).toFixed(1)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Acciones de selección rápida */}
+                  <div className="flex items-center justify-between text-xs text-slate-500 px-1 shrink-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-700">
+                        {selectedSpecialRouteIds.length} seleccionada(s) de {specialAnalysisResult.specialRoutes.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSpecialRouteIds(specialAnalysisResult.specialRoutes.map(r => r.id))}
+                        className="text-purple-600 hover:underline font-bold text-[11px]"
+                      >
+                        Seleccionar todas
+                      </button>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSpecialRouteIds([])}
+                        className="text-slate-400 hover:text-red-600 hover:underline text-[11px]"
+                      >
+                        Limpiar
+                      </button>
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      Comparado con {specialAnalysisResult.transmittedRoutesCount} rutas previas ({specialAnalysisResult.transmittedDestinosCount} destinos conocidos)
+                    </span>
+                  </div>
+
+                  {/* Listado de Rutas Especiales Detectadas */}
+                  {specialAnalysisResult.specialRoutes.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50 rounded-xl border border-slate-200">
+                      <CheckCircle2 size={32} className="text-emerald-500 mb-2" />
+                      <h4 className="text-sm font-bold text-slate-700">No hay destinos nuevos</h4>
+                      <p className="text-xs text-slate-500 max-w-sm mt-1">
+                        Todos los destinos de las {specialAnalysisResult.totalParsedRoutes} rutas leídas del archivo ya fueron transmitidos previamente para la fecha {specialDate}.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex-1 overflow-auto border border-slate-200 rounded-xl">
+                      <table className="w-full text-left text-xs whitespace-nowrap">
+                        <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-10 text-[11px]">
+                          <tr>
+                            <th className="px-3 py-2 text-center w-8">
+                              <input 
+                                type="checkbox"
+                                checked={selectedSpecialRouteIds.length === specialAnalysisResult.specialRoutes.length && specialAnalysisResult.specialRoutes.length > 0}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedSpecialRouteIds(specialAnalysisResult.specialRoutes.map(r => r.id));
+                                  } else {
+                                    setSelectedSpecialRouteIds([]);
+                                  }
+                                }}
+                                className="rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                              />
+                            </th>
+                            <th className="px-3 py-2 text-center">Tipo</th>
+                            <th className="px-3 py-2">N° Ruta</th>
+                            <th className="px-3 py-2">Cliente / Nombre Ruta</th>
+                            <th className="px-3 py-2">Transportista</th>
+                            <th className="px-3 py-2 text-center">Destinos Nuevos</th>
+                            <th className="px-3 py-2 text-center">Total Locales</th>
+                            <th className="px-3 py-2 text-right">Volumen (m³)</th>
+                            <th className="px-3 py-2 text-right">Peso (kg)</th>
+                            <th className="px-3 py-2 text-center w-16">Detalle</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {specialAnalysisResult.specialRoutes.map((route) => {
+                            const isSelected = selectedSpecialRouteIds.includes(route.id);
+                            const isExpanded = expandedSpecialRouteId === route.id;
+
+                            return (
+                              <React.Fragment key={route.id}>
+                                <tr className={`transition-colors ${isSelected ? 'bg-purple-50/60' : 'hover:bg-slate-50'}`}>
+                                  <td className="px-3 py-2 text-center">
+                                    <input 
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => {
+                                        setSelectedSpecialRouteIds(prev => 
+                                          prev.includes(route.id) ? prev.filter(id => id !== route.id) : [...prev, route.id]
+                                        );
+                                      }}
+                                      className="rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    {route.isNewRoute ? (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">
+                                        NUEVA RUTA
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200">
+                                        DESTINOS NUEVOS
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-2 font-mono font-bold text-slate-800">
+                                    {route.ruta}
+                                  </td>
+                                  <td className="px-3 py-2 font-semibold text-slate-700 max-w-[200px] truncate">
+                                    {route.nombreRuta}
+                                  </td>
+                                  <td className="px-3 py-2 text-slate-500 text-[11px]">
+                                    {route.transportista || '—'}
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className="bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full text-[11px]">
+                                      +{route.newDestinosCount}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-center font-bold text-slate-700">
+                                    {route.recuentoDestino}
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-mono font-bold text-emerald-700">
+                                    {route.sumaVolumen}
+                                  </td>
+                                  <td className="px-3 py-2 text-right font-mono text-slate-600">
+                                    {route.sumaPeso}
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedSpecialRouteId(isExpanded ? null : route.id)}
+                                      className="text-purple-600 hover:text-purple-800 text-[11px] font-bold p-1 rounded hover:bg-purple-50 transition-colors"
+                                      title="Ver paradas de la ruta"
+                                    >
+                                      {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                    </button>
+                                  </td>
+                                </tr>
+
+                                {/* Fila expandida con detalle de paradas */}
+                                {isExpanded && (
+                                  <tr className="bg-slate-50/70">
+                                    <td colSpan="10" className="p-3 pl-12 border-y border-purple-100">
+                                      <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
+                                        <h5 className="font-bold text-xs text-slate-700 mb-2 flex items-center gap-2">
+                                          <span>Paradas de la Ruta {route.ruta} ({route.paradas.length} total):</span>
+                                          <span className="text-purple-700 font-semibold text-[11px]">
+                                            • {route.newParadas.length} parada(s) no transmitida(s) previamente
+                                          </span>
+                                        </h5>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-auto">
+                                          {route.paradas.map((p, pIdx) => (
+                                            <div 
+                                              key={p.id || pIdx}
+                                              className={`p-2 rounded-lg border text-xs flex items-center justify-between ${
+                                                p.isNewDestino 
+                                                  ? 'bg-purple-50/80 border-purple-300 font-medium' 
+                                                  : 'bg-slate-50 border-slate-200 text-slate-500'
+                                              }`}
+                                            >
+                                              <div className="flex items-center gap-1.5 truncate">
+                                                <span className="font-mono text-slate-400 text-[11px]">#{p.secuencia}</span>
+                                                <span className="truncate font-bold text-slate-800">{p.destino}</span>
+                                                {p.comuna && (
+                                                  <span className="text-slate-400 text-[10px]">({p.comuna})</span>
+                                                )}
+                                              </div>
+                                              <div className="flex items-center gap-2 shrink-0">
+                                                <span className="text-[10px] text-slate-600">{p.volumen} m³</span>
+                                                {p.isNewDestino ? (
+                                                  <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-purple-600 text-white uppercase">
+                                                    Nuevo
+                                                  </span>
+                                                ) : (
+                                                  <span className="text-[9px] text-slate-400 italic">
+                                                    Ya existía
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Footer del Modal */}
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100 shrink-0">
+              <span className="text-[11px] text-slate-500">
+                Se agregarán o actualizarán en Disponibilización para el <strong className="text-slate-800">{specialDate}</strong>.
+              </span>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setIsSpecialModalOpen(false)}
+                  className="text-xs"
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  onClick={handleConfirmTransmitSpecialRoutes}
+                  disabled={!specialAnalysisResult || selectedSpecialRouteIds.length === 0}
+                  className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                >
+                  <Send size={14} />
+                  Transmitir Rutas Especiales ({selectedSpecialRouteIds.length})
+                </Button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

@@ -33,6 +33,27 @@ const persistConductorPhones = (map) => {
   }
 };
 
+// Helper para obtener paradas únicas deduplicadas por destino y comuna (evita duplicados por multi-ambiente C/R/S)
+export const getUniqueParadas = (paradas) => {
+  if (!paradas || !Array.isArray(paradas)) return [];
+  const seen = new Set();
+  const unique = [];
+  paradas.forEach((p) => {
+    const dest = String(p.destino || '').trim();
+    const com = String(p.comuna || '').trim();
+    const key = `${dest.toLowerCase()}:::${com.toLowerCase()}`;
+    if (!key || key === ':::') {
+      unique.push(p);
+      return;
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(p);
+    }
+  });
+  return unique;
+};
+
 // Formateador de mensaje individual para WhatsApp
 export const buildSingleRouteWhatsAppMessage = (row, fecha) => {
   const conductor = row.conductor_name?.trim() || 'Sin Conductor asignado';
@@ -41,7 +62,8 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha) => {
   const vuelta = row.n_vuelta || '1';
   const ruta = row.ruta || 'S/N';
   const cliente = row.cliente || 'Centralizado';
-  const locales = row.locales || (row.paradas && row.paradas.length) || 1;
+  const uniqueParadas = getUniqueParadas(row.paradas);
+  const locales = row.locales || (uniqueParadas.length > 0 ? uniqueParadas.length : 1);
   const m3 = (parseFloat(row.m3) || 0).toFixed(3);
   const camion = row.camion?.trim() || '';
 
@@ -60,17 +82,17 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha) => {
   msg += `📍 *Locales / Paradas:* ${locales}\n`;
   msg += `📦 *Carga:* ${m3} m³\n`;
 
-  // Detalle de paradas si existen
-  if (row.paradas && row.paradas.length > 0) {
-    msg += `\n📋 *Detalle de Paradas (${row.paradas.length}):*\n`;
-    row.paradas.slice(0, 10).forEach((p, idx) => {
-      const sec = p.secuencia || (idx + 1);
+  // Detalle de paradas si existen (deduplicadas para no repetir destinos por multi-ambiente)
+  if (uniqueParadas && uniqueParadas.length > 0) {
+    msg += `\n📋 *Detalle de Paradas (${uniqueParadas.length}):*\n`;
+    uniqueParadas.slice(0, 15).forEach((p, idx) => {
+      const sec = idx + 1;
       const dest = p.destino || 'Destino';
       const com = p.comuna ? ` (${p.comuna})` : '';
       msg += `  ${sec}. ${dest}${com}\n`;
     });
-    if (row.paradas.length > 10) {
-      msg += `  ... y ${row.paradas.length - 10} paradas más\n`;
+    if (uniqueParadas.length > 15) {
+      msg += `  ... y ${uniqueParadas.length - 15} paradas más\n`;
     }
   }
 
@@ -99,7 +121,7 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     const vuelta = r.n_vuelta || '1';
     const ruta = r.ruta || 'S/N';
     const cliente = r.cliente || 'Centralizado';
-    const loc = r.locales || (r.paradas && r.paradas.length) || 1;
+    const loc = r.locales || (r.paradas && getUniqueParadas(r.paradas).length) || 1;
     const m3Val = parseFloat(r.m3) || 0;
 
     totalLocales += Number(loc);
@@ -129,7 +151,7 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha) => {
   
   const totalRutas = rows.length;
   const totalM3 = rows.reduce((acc, r) => acc + (parseFloat(r.m3) || 0), 0).toFixed(3);
-  const totalLoc = rows.reduce((acc, r) => acc + (parseInt(r.locales, 10) || (r.paradas?.length || 1)), 0);
+  const totalLoc = rows.reduce((acc, r) => acc + (parseInt(r.locales, 10) || (getUniqueParadas(r.paradas).length || 1)), 0);
 
   msg += `📊 *Total Rutas:* ${totalRutas} | *Locales:* ${totalLoc} | *Carga:* ${totalM3} m³\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
@@ -139,7 +161,7 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha) => {
     const aux = r.aux1_name || 'Sin aux';
     const vuelta = r.n_vuelta ? `(V.${r.n_vuelta})` : '';
     const m3 = (parseFloat(r.m3) || 0).toFixed(2);
-    const loc = r.locales || (r.paradas?.length || 1);
+    const loc = r.locales || (getUniqueParadas(r.paradas).length || 1);
 
     msg += `${idx + 1}️⃣ *Ruta ${r.ruta}* ${vuelta} - ${r.cliente}\n`;
     msg += `   👤 Cond: *${cond}*\n`;
@@ -470,7 +492,7 @@ export default function RouteDispatch() {
   }, [rawRows]);
 
   const totalLocales = useMemo(() => {
-    return rawRows.reduce((acc, r) => acc + (parseInt(r.locales, 10) || (r.paradas?.length || 1)), 0);
+    return rawRows.reduce((acc, r) => acc + (parseInt(r.locales, 10) || (getUniqueParadas(r.paradas).length || 1)), 0);
   }, [rawRows]);
 
   const totalM3 = useMemo(() => {
@@ -884,7 +906,7 @@ export default function RouteDispatch() {
                       {/* 6. Locales */}
                       <td className="py-2.5 px-3 text-center font-bold text-slate-800">
                         <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full text-[11px]">
-                          {row.locales || (row.paradas && row.paradas.length) || 1}
+                          {row.locales || (row.paradas && getUniqueParadas(row.paradas).length) || 1}
                         </span>
                       </td>
 
