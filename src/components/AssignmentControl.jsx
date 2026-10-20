@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
-import { useFleetStore } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { useAuthStore } from '../store/authStore';
@@ -278,8 +278,13 @@ export default function AssignmentControl() {
     saveDisponibilizacion,
     recordChangeAudit,
     aperturarRutaEnDisponibilizacion,
-    addExtraServices
+    addExtraServices,
+    initPlanningFromDb
   } = usePlanningStore();
+
+  useEffect(() => {
+    initPlanningFromDb?.();
+  }, [initPlanningFromDb]);
 
   const availableDates = useMemo(() => {
     const dates = Object.keys(transmittedAssignments);
@@ -342,6 +347,7 @@ export default function AssignmentControl() {
 
   // Filtro de estado documental para camiones (Requisito 3)
   const [truckDocFilter, setTruckDocFilter] = useState('todos'); // 'todos' | 'al_dia' | 'alertas'
+  const [truckTipoFilter, setTruckTipoFilter] = useState('todos'); // 'todos' | 'propia' | 'externa'
 
   const [sortVueltasAsc, setSortVueltasAsc] = useState(false);
   const [sortTrucksAsc, setSortTrucksAsc] = useState(false);
@@ -638,12 +644,24 @@ export default function AssignmentControl() {
   // Camiones clasificados en 3 categorías con evaluación de salud documental (Requisito 3)
   const { camionesList, tractosList, semirremolquesList } = useMemo(() => {
     const activeTrucks = (fleetList || [])
-      .filter(t => t && (t.status === 'Activo' || !t.status))
       .filter(t => {
+        if (!t) return false;
+        const st = (t.status || '').toLowerCase().trim();
+        const isInactive = ['inactivo', 'baja', 'de baja', 'dado de baja', 'taller', 'en taller', 'desactivado'].includes(st);
+        if (isInactive) return false;
+
+        // Filtro por tipo de flota (Propia / Externa / Todos)
+        if (truckTipoFilter !== 'todos') {
+          const isExt = isVehicleExternal(t);
+          if (truckTipoFilter === 'externa' && !isExt) return false;
+          if (truckTipoFilter === 'propia' && isExt) return false;
+        }
+
         const search = (truckSearch || '').toLowerCase();
         const matches = (t.internal_number || '').toLowerCase().includes(search) || 
                (t.plate || '').toLowerCase().includes(search) ||
-               (t.brand || '').toLowerCase().includes(search);
+               (t.brand || '').toLowerCase().includes(search) ||
+               (t.empresa_externa || '').toLowerCase().includes(search);
         if (!matches) return false;
 
         const health = getTruckDocumentHealth(t);
@@ -684,7 +702,7 @@ export default function AssignmentControl() {
       tractosList: tractos.sort(sortByViajes),
       semirremolquesList: semis.sort(sortByViajes)
     };
-  }, [fleetList, sortTrucksAsc, truckSearch, viajesPorCamion, truckDocFilter]);
+  }, [fleetList, sortTrucksAsc, truckSearch, viajesPorCamion, truckDocFilter, truckTipoFilter]);
 
   // Filas filtradas de la matriz (Soporta filtro por focusedEntity - Requisito 4)
   const filteredAssignments = useMemo(() => {
@@ -2299,6 +2317,17 @@ export default function AssignmentControl() {
               <option value="al_dia">Al día (Sin alertas)</option>
               <option value="alertas">Con alertas o vencidos</option>
             </select>
+            {/* Filtro por origen de flota (Propia / Externa) */}
+            <select
+              value={truckTipoFilter}
+              onChange={e => setTruckTipoFilter(e.target.value)}
+              className="w-full text-[9px] font-bold border border-slate-200 rounded p-1 bg-slate-50 text-slate-700 focus:outline-none"
+              title="Filtrar por origen de flota (Propia vs Externa)"
+            >
+              <option value="todos">Flota: Todas (Propia + Externa)</option>
+              <option value="propia">Solo Flota Propia</option>
+              <option value="externa">Solo Flota Externa</option>
+            </select>
           </div>
 
           <div className="flex-1 overflow-y-auto p-1 space-y-1">
@@ -2346,6 +2375,14 @@ export default function AssignmentControl() {
                       <span className="text-[10px] text-slate-500 font-bold">
                         {truck.plate}
                       </span>
+                      {isVehicleExternal(truck) && (
+                        <span 
+                          className="text-[8px] font-black px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200 uppercase truncate max-w-[85px]" 
+                          title={`Flota Externa: ${truck.empresa_externa || 'Tercero'}`}
+                        >
+                          {truck.empresa_externa || 'EXTERNO'}
+                        </span>
+                      )}
                     </div>
                     {/* Badge de viajes basado en vueltas distintas - clickeable para filtrar (Requisito 4) */}
                     <button

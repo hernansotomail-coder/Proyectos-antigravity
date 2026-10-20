@@ -39,3 +39,14 @@ ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS tipo_dotacion TEXT DEFAULT 'Pr
 ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS empresa_externa TEXT;
 ALTER TABLE public.staff ADD COLUMN IF NOT EXISTS phone TEXT;
 
+-- Tabla para sincronización de Disponibilización entre notebooks / computadores
+CREATE TABLE IF NOT EXISTS public.planning_assignments (
+    fecha TEXT PRIMARY KEY,
+    assignments JSONB NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.planning_assignments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Permitir todo a planning anonimo" ON public.planning_assignments FOR ALL USING (true);
+
+

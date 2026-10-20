@@ -77,6 +77,22 @@ export const inferEmpresaExterna = (f, overrideInfo = {}) => {
   return '';
 };
 
+export const isVehicleExternal = (f) => {
+  if (!f) return false;
+  if (f.tipo_flota === 'Externa') return true;
+  if (f.empresa_externa && String(f.empresa_externa).trim() !== '') return true;
+  const st = (f.status || '').trim();
+  const stLower = st.toLowerCase();
+  if (stLower.startsWith('externo_') || stLower.includes('externo') || stLower.startsWith('transportes')) {
+    return true;
+  }
+  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
+  if (st && !standardStatuses.includes(stLower)) {
+    return true;
+  }
+  return false;
+};
+
 export const useFleetStore = create((set, get) => ({
   fleetList: [],
   isLoading: false,

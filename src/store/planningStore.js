@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
+import { supabase } from '../lib/supabase';
 import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
 
 const PRELOADED_ROUTES_MAP = new Map();
@@ -236,6 +237,46 @@ export const ensureRowTransportista = (row) => {
   return 'T300';
 };
 
+export const persistAssignmentsToDb = async (fecha, assignments) => {
+  try {
+    if (!fecha || !assignments) return;
+    await supabase
+      .from('planning_assignments')
+      .upsert({
+        fecha,
+        assignments,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'fecha' });
+  } catch (e) {
+    // Si la tabla no existe aún en Supabase, falla silenciosamente y mantiene localStorage
+  }
+};
+
+export const fetchAssignmentsFromDb = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('planning_assignments')
+      .select('*');
+    if (error) return null;
+    if (data && data.length > 0) {
+      const map = {};
+      data.forEach(item => {
+        if (item.fecha && item.assignments) {
+          map[item.fecha] = item.assignments.map(r => ({
+            ...r,
+            transportista: ensureRowTransportista(r),
+            paradas: healParadasWithPreloaded(r.ruta, r.paradas)
+          }));
+        }
+      });
+      return map;
+    }
+  } catch (e) {
+    return null;
+  }
+  return null;
+};
+
 const loadPersistedAssignments = () => {
   try {
     const saved = localStorage.getItem('keylogistics_transmitted_assignments');
@@ -262,6 +303,11 @@ const loadPersistedAssignments = () => {
 const persistAssignments = (data) => {
   try {
     localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(data));
+    if (data && typeof data === 'object') {
+      Object.entries(data).forEach(([fecha, rows]) => {
+        persistAssignmentsToDb(fecha, rows);
+      });
+    }
   } catch (e) {
     console.error('Error saving transmitted assignments to localStorage:', e);
   }
@@ -996,6 +1042,35 @@ export const usePlanningStore = create((set, get) => ({
     return true;
   },
 
+  // Inicializar y sincronizar asignaciones desde Supabase
+  initPlanningFromDb: async () => {
+    try {
+      const dbMap = await fetchAssignmentsFromDb();
+      if (dbMap && Object.keys(dbMap).length > 0) {
+        set(state => {
+          const merged = { ...state.transmittedAssignments, ...dbMap };
+          const mergedSaved = { ...state.savedRuteoByDate, ...dbMap };
+          return {
+            transmittedAssignments: merged,
+            savedRuteoByDate: mergedSaved
+          };
+        });
+      } else {
+        // Si Supabase no tiene asignaciones pero localmente sí tenemos, sincronizar a Supabase
+        const current = get().transmittedAssignments;
+        if (current && typeof current === 'object') {
+          Object.entries(current).forEach(([f, rows]) => {
+            if (rows && rows.length > 0) {
+              persistAssignmentsToDb(f, rows);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Error inicializando planning desde DB:', e);
+    }
+  },
+
   // Set selected date for Disponibilización
   setSelectedDisponibilizarDate: (date) => {
     set({ selectedDisponibilizarDate: date });
@@ -1064,6 +1139,9 @@ export const usePlanningStore = create((set, get) => ({
       camion: truckIdentifier,
       tipo_equipo: truck.type || 'Camión'
     };
+    if (truck.empresa_externa) {
+      updates.transportista = truck.empresa_externa;
+    }
 
     get().batchUpdateRows(fecha, rowIds, updates);
     toast.success(`Camión ${truckIdentifier} asignado a ${rowIds.length} fila(s)`);
