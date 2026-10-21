@@ -36,6 +36,71 @@ export function AmbienteBadge({ ambiente }) {
   );
 }
 
+// Extractor inteligente de datos desde cualquier hoja de Excel (soporta títulos en fila 1, cabeceras en fila 3, saltos de filas, etc.)
+export const extractDataFromWorkbook = (wb) => {
+  let bestSheetName = '';
+  let bestRows = [];
+
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    if (!ws || !ws['!ref']) continue;
+
+    const sheetData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (!sheetData || sheetData.length === 0) continue;
+
+    let headerIdx = -1;
+    for (let i = 0; i < Math.min(sheetData.length, 35); i++) {
+      const row = sheetData[i];
+      if (!Array.isArray(row)) continue;
+      const lower = row.map(c => String(c || '').trim().toLowerCase());
+      const hasRuta = lower.some(c => c === 'ruta' || c === 'n° ruta' || c === 'n*interno' || c === 'rutaid');
+      const hasDestino = lower.some(c => c === 'destino' || c === 'nombre ruta' || c === 'cliente' || c === 'secuencia');
+      if (hasRuta && hasDestino) {
+        headerIdx = i;
+        break;
+      }
+    }
+
+    if (headerIdx >= 0) {
+      const header = sheetData[headerIdx].map(h => String(h || '').trim());
+      const parsedRows = [];
+      for (let i = headerIdx + 1; i < sheetData.length; i++) {
+        const row = sheetData[i];
+        if (!row || row.every(cell => cell === '' || cell === null || cell === undefined)) continue;
+        const firstCell = String(row[0] || '').trim().toLowerCase();
+        if (firstCell.startsWith('total') || firstCell.startsWith('etiquetas de fila')) continue;
+
+        const obj = {};
+        header.forEach((colName, colIdx) => {
+          if (colName) {
+            obj[colName] = row[colIdx] !== undefined ? row[colIdx] : '';
+          }
+        });
+
+        const rVal = String(obj.Ruta || obj.ruta || obj['N° Ruta'] || obj.RutaId || '').trim();
+        if (rVal && !rVal.toLowerCase().startsWith('total')) {
+          parsedRows.push(obj);
+        }
+      }
+
+      if (parsedRows.length > bestRows.length) {
+        bestRows = parsedRows;
+        bestSheetName = name;
+      }
+    }
+  }
+
+  // Fallback si no se encontró con cabecera inteligente
+  if (bestRows.length === 0) {
+    const fallbackSheetName = wb.SheetNames.find(s => s.toLowerCase() === 'sheet1') || wb.SheetNames[0];
+    const ws = wb.Sheets[fallbackSheetName];
+    const fallbackData = ws ? XLSX.utils.sheet_to_json(ws, { defval: '' }) : [];
+    return { sheetName: fallbackSheetName, rows: fallbackData };
+  }
+
+  return { sheetName: bestSheetName, rows: bestRows };
+};
+
 export default function DailyPlanning() {
   const navigate = useNavigate();
   const { 
@@ -64,6 +129,9 @@ export default function DailyPlanning() {
   // Estados para Modal de Rutas Especiales
   const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
   const [specialDate, setSpecialDate] = useState(selectedDisponibilizarDate || '14-10-2026');
+  const [specialCompareDate, setSpecialCompareDate] = useState('auto'); // 'auto' | 'specialDate' | specific date | 'all'
+  const [detectedFileDate, setDetectedFileDate] = useState('');
+  const [specialRawRows, setSpecialRawRows] = useState([]);
   const [specialFileName, setSpecialFileName] = useState('');
   const [isAnalyzingSpecial, setIsAnalyzingSpecial] = useState(false);
   const [specialAnalysisResult, setSpecialAnalysisResult] = useState(null);
@@ -88,7 +156,7 @@ export default function DailyPlanning() {
     fecha: ''
   });
 
-  // Handle Excel file upload
+  // Handle Excel file upload (usa extractor inteligente de cabeceras)
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -100,22 +168,16 @@ export default function DailyPlanning() {
       try {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
+        const { sheetName, rows } = extractDataFromWorkbook(wb);
 
-        // Find sheet named 'Sheet1' (case insensitive) or fallback to first sheet
-        const sheetName = wb.SheetNames.find(s => s.toLowerCase() === 'sheet1') || wb.SheetNames[0];
-        const ws = wb.Sheets[sheetName];
-        
-        // Convert to JSON
-        const rawData = XLSX.utils.sheet_to_json(ws, { defval: '' });
-
-        if (!rawData || rawData.length === 0) {
+        if (!rows || rows.length === 0) {
           toast.error('El archivo Excel no contiene filas o está vacío.');
           setIsLoading(false);
           return;
         }
 
         // Requisito 1: Aceptar todas las rutas válidas (incluyendo >4 dígitos y las que parten con 0)
-        const validRows = rawData.filter(row => {
+        const validRows = rows.filter(row => {
           const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
           return String(rutaRaw).trim().length > 0;
         });
@@ -146,7 +208,174 @@ export default function DailyPlanning() {
     e.target.value = ''; // reset input
   };
 
-  // Procesamiento y Detección de Rutas Especiales (Requisito 3)
+  // Motor de Análisis y Detección de Rutas Especiales (Requisito 3)
+  const analyzeSpecialRoutes = (rows, targetDate, compareMode = specialCompareDate) => {
+    if (!rows || rows.length === 0) return;
+
+    // Detectar fechas presentes en el archivo
+    const fileDates = Array.from(new Set(rows.map(r => normalizeDate(r.Fecha || r.fecha)).filter(Boolean)));
+    if (fileDates.length > 0) {
+      setDetectedFileDate(fileDates[0]);
+    }
+
+    // Determinar la fecha/conjunto contra el cual comparar destinos
+    let effectiveCompareDate = compareMode;
+    if (effectiveCompareDate === 'auto') {
+      if ((transmittedAssignments[targetDate] || []).length > 0) {
+        effectiveCompareDate = targetDate;
+      } else {
+        const otherWithRoutes = Object.keys(transmittedAssignments || {}).find(
+          d => (transmittedAssignments[d] || []).length > 0
+        );
+        effectiveCompareDate = otherWithRoutes || targetDate;
+      }
+    }
+
+    const transmittedDestinos = new Set();
+    const transmittedRouteNumbers = new Set();
+    let baselineRoutes = [];
+
+    if (effectiveCompareDate === 'all') {
+      Object.values(transmittedAssignments || {}).forEach(arr => {
+        (arr || []).forEach(r => {
+          baselineRoutes.push(r);
+          if (r.ruta) transmittedRouteNumbers.add(String(r.ruta).trim().toUpperCase());
+          (r.paradas || []).forEach(p => {
+            const d = String(p.destino || '').trim().toUpperCase();
+            if (d) transmittedDestinos.add(d);
+          });
+        });
+      });
+    } else {
+      baselineRoutes = transmittedAssignments[effectiveCompareDate] || [];
+      baselineRoutes.forEach(r => {
+        if (r.ruta) transmittedRouteNumbers.add(String(r.ruta).trim().toUpperCase());
+        (r.paradas || []).forEach(p => {
+          const d = String(p.destino || '').trim().toUpperCase();
+          if (d) transmittedDestinos.add(d);
+        });
+      });
+    }
+
+    // Agrupar filas del Excel en rutas candidatas para targetDate (¡Sin descartar filas por fecha!)
+    const groups = new Map();
+    rows.forEach((row, idx) => {
+      const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
+      const ruta = String(rutaRaw).trim();
+      if (!ruta) return;
+
+      const nombreRuta = String(row['Nombre Ruta'] || row.nombre_ruta || row.NombreRuta || row.Cliente || '').trim();
+      const destino = String(row.Destino || row.destino || '').trim();
+      const direccion = String(row.Direccion || row.Dirección || row.direccion || '').trim();
+      const comuna = String(row.Comuna || row.comuna || '').trim();
+      const volumen = parseFloat(String(row.Volumen || row.volumen || 0).replace(',', '.')) || 0;
+      const peso = parseFloat(String(row.Peso || row.peso || 0).replace(',', '.')) || 0;
+      const cantCJ = parseFloat(String(row.cantCJ || row.cantcj || row.CantCJ || row.Cajas || 0).replace(',', '.')) || 0;
+      const secuencia = row.Secuencia || row.secuencia || idx + 1;
+      const ambiente = String(row.Ambiente || row.ambiente || row.Amb || 'S').trim().toUpperCase() || 'S';
+      const horaIni = row.HoraIni || row.hora_ini || '';
+      const horaFin = row.HoraFin || row.hora_fin || '';
+      const transportista = String(row.Transportista || row.transportista || row.Transp || '').trim();
+
+      const groupKey = `${ruta}:::${nombreRuta || 'Sin Nombre'}`;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          id: `special-${ruta}-${Date.now()}-${idx}`,
+          ruta,
+          nombreRuta: nombreRuta || `Ruta ${ruta}`,
+          fecha: targetDate,
+          transportistasSet: new Set(),
+          destinosSet: new Set(),
+          sumaVolumen: 0,
+          sumaPeso: 0,
+          sumaCantCJ: 0,
+          paradasMap: new Map()
+        });
+      }
+
+      const g = groups.get(groupKey);
+      if (destino) g.destinosSet.add(destino);
+      if (transportista) g.transportistasSet.add(transportista);
+      g.sumaVolumen += volumen;
+      g.sumaPeso += peso;
+      g.sumaCantCJ += cantCJ;
+
+      const paradaKey = `${secuencia}:::${ambiente}`;
+      if (g.paradasMap.has(paradaKey)) {
+        const p = g.paradasMap.get(paradaKey);
+        p.volumen = Number((p.volumen + volumen).toFixed(4));
+        p.peso = Number((p.peso + peso).toFixed(2));
+        p.cantCJ = Math.round(p.cantCJ + cantCJ);
+        if (!p.destino && destino) p.destino = destino;
+        if (!p.direccion && direccion) p.direccion = direccion;
+        if (!p.comuna && comuna) p.comuna = comuna;
+      } else {
+        const isNewDest = destino ? !transmittedDestinos.has(destino.toUpperCase()) : true;
+        g.paradasMap.set(paradaKey, {
+          id: `sp-${ruta}-s${secuencia}-${ambiente}-${g.paradasMap.size}`,
+          secuencia,
+          ambiente,
+          destino,
+          direccion,
+          comuna,
+          horaIni,
+          horaFin,
+          cantCJ: Math.round(cantCJ),
+          peso: Number(peso.toFixed(2)),
+          volumen: Number(volumen.toFixed(4)),
+          transportista,
+          isNewDestino: isNewDest
+        });
+      }
+    });
+
+    // Rutas candidatas
+    const candidateRoutes = Array.from(groups.values()).map(g => {
+      const paradas = Array.from(g.paradasMap.values());
+      const newParadas = paradas.filter(p => p.isNewDestino);
+      const distinctNewDestinos = new Set(newParadas.map(p => p.destino).filter(Boolean));
+      const isNewRoute = !transmittedRouteNumbers.has(String(g.ruta).trim().toUpperCase());
+
+      return {
+        id: g.id,
+        ruta: g.ruta,
+        nombreRuta: g.nombreRuta,
+        fecha: targetDate,
+        transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
+        recuentoDestino: g.destinosSet.size || paradas.length || 1,
+        sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
+        sumaPeso: Number(g.sumaPeso.toFixed(2)),
+        sumaCantCJ: Math.round(g.sumaCantCJ),
+        paradas,
+        newParadas,
+        newDestinosCount: distinctNewDestinos.size,
+        isNewRoute,
+        hasNewDestinos: distinctNewDestinos.size > 0
+      };
+    });
+
+    // Rutas especiales: nuevas o con destinos nuevos no transmitidos previamente
+    const specialRoutes = candidateRoutes.filter(r => r.isNewRoute || r.hasNewDestinos);
+
+    setSpecialAnalysisResult({
+      targetDate,
+      compareDate: effectiveCompareDate,
+      totalParsedRoutes: candidateRoutes.length,
+      specialRoutes,
+      transmittedRoutesCount: baselineRoutes.length,
+      transmittedDestinosCount: transmittedDestinos.size
+    });
+
+    setSelectedSpecialRouteIds(specialRoutes.map(r => r.id));
+
+    if (specialRoutes.length > 0) {
+      toast.success(`Se encontraron ${specialRoutes.length} rutas especiales con destinos no transmitidos.`);
+    } else {
+      toast.info(`No se encontraron diferencias. Todos los destinos ya coinciden con las rutas de ${effectiveCompareDate}.`);
+    }
+  };
+
+  // Carga y procesamiento del archivo de Rutas Especiales
   const handleSpecialFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -159,17 +388,15 @@ export default function DailyPlanning() {
       try {
         const bstr = evt.target?.result;
         const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
-        const sheetName = wb.SheetNames.find(s => s.toLowerCase() === 'sheet1') || wb.SheetNames[0];
-        const ws = wb.Sheets[sheetName];
-        const rawData = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        const { sheetName, rows } = extractDataFromWorkbook(wb);
 
-        if (!rawData || rawData.length === 0) {
+        if (!rows || rows.length === 0) {
           toast.error('El archivo Excel no contiene filas o está vacío.');
           setIsAnalyzingSpecial(false);
           return;
         }
 
-        const validRows = rawData.filter(row => {
+        const validRows = rows.filter(row => {
           const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
           return String(rutaRaw).trim().length > 0;
         });
@@ -180,139 +407,8 @@ export default function DailyPlanning() {
           return;
         }
 
-        const targetDate = specialDate || '14-10-2026';
-        const alreadyTransmitted = transmittedAssignments[targetDate] || [];
-        const transmittedDestinos = new Set();
-        const transmittedRouteNumbers = new Set();
-
-        alreadyTransmitted.forEach(r => {
-          if (r.ruta) transmittedRouteNumbers.add(String(r.ruta).trim().toUpperCase());
-          (r.paradas || []).forEach(p => {
-            const d = String(p.destino || '').trim().toUpperCase();
-            if (d) transmittedDestinos.add(d);
-          });
-        });
-
-        // Agrupar filas del Excel
-        const groups = new Map();
-        validRows.forEach((row, idx) => {
-          const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
-          const ruta = String(rutaRaw).trim();
-          if (!ruta) return;
-
-          const rowDate = normalizeDate(row.Fecha || row.fecha) || targetDate;
-          if (rowDate && rowDate !== targetDate && (row.Fecha || row.fecha)) {
-            return;
-          }
-
-          const nombreRuta = String(row['Nombre Ruta'] || row.nombre_ruta || row.NombreRuta || row.Cliente || '').trim();
-          const destino = String(row.Destino || row.destino || '').trim();
-          const direccion = String(row.Direccion || row.Dirección || row.direccion || '').trim();
-          const comuna = String(row.Comuna || row.comuna || '').trim();
-          const volumen = parseFloat(String(row.Volumen || row.volumen || 0).replace(',', '.')) || 0;
-          const peso = parseFloat(String(row.Peso || row.peso || 0).replace(',', '.')) || 0;
-          const cantCJ = parseFloat(String(row.cantCJ || row.cantcj || row.CantCJ || row.Cajas || 0).replace(',', '.')) || 0;
-          const secuencia = row.Secuencia || row.secuencia || idx + 1;
-          const ambiente = String(row.Ambiente || row.ambiente || row.Amb || 'S').trim().toUpperCase() || 'S';
-          const horaIni = row.HoraIni || row.hora_ini || '';
-          const horaFin = row.HoraFin || row.hora_fin || '';
-          const transportista = String(row.Transportista || row.transportista || row.Transp || '').trim();
-
-          const groupKey = `${ruta}:::${nombreRuta || 'Sin Nombre'}`;
-          if (!groups.has(groupKey)) {
-            groups.set(groupKey, {
-              id: `special-${ruta}-${Date.now()}-${idx}`,
-              ruta,
-              nombreRuta: nombreRuta || `Ruta ${ruta}`,
-              fecha: targetDate,
-              transportistasSet: new Set(),
-              destinosSet: new Set(),
-              sumaVolumen: 0,
-              sumaPeso: 0,
-              sumaCantCJ: 0,
-              paradasMap: new Map()
-            });
-          }
-
-          const g = groups.get(groupKey);
-          if (destino) g.destinosSet.add(destino);
-          if (transportista) g.transportistasSet.add(transportista);
-          g.sumaVolumen += volumen;
-          g.sumaPeso += peso;
-          g.sumaCantCJ += cantCJ;
-
-          const paradaKey = `${secuencia}:::${ambiente}`;
-          if (g.paradasMap.has(paradaKey)) {
-            const p = g.paradasMap.get(paradaKey);
-            p.volumen = Number((p.volumen + volumen).toFixed(4));
-            p.peso = Number((p.peso + peso).toFixed(2));
-            p.cantCJ = Math.round(p.cantCJ + cantCJ);
-            if (!p.destino && destino) p.destino = destino;
-            if (!p.direccion && direccion) p.direccion = direccion;
-            if (!p.comuna && comuna) p.comuna = comuna;
-          } else {
-            const isNewDest = destino ? !transmittedDestinos.has(destino.toUpperCase()) : true;
-            g.paradasMap.set(paradaKey, {
-              id: `sp-${ruta}-s${secuencia}-${ambiente}-${g.paradasMap.size}`,
-              secuencia,
-              ambiente,
-              destino,
-              direccion,
-              comuna,
-              horaIni,
-              horaFin,
-              cantCJ: Math.round(cantCJ),
-              peso: Number(peso.toFixed(2)),
-              volumen: Number(volumen.toFixed(4)),
-              transportista,
-              isNewDestino: isNewDest
-            });
-          }
-        });
-
-        // Filtrar solo las rutas DIFERENTES con destinos no transmitidos previamente
-        const candidateRoutes = Array.from(groups.values()).map(g => {
-          const paradas = Array.from(g.paradasMap.values());
-          const newParadas = paradas.filter(p => p.isNewDestino);
-          const distinctNewDestinos = new Set(newParadas.map(p => p.destino).filter(Boolean));
-          const isNewRoute = !transmittedRouteNumbers.has(String(g.ruta).trim().toUpperCase());
-
-          return {
-            id: g.id,
-            ruta: g.ruta,
-            nombreRuta: g.nombreRuta,
-            fecha: g.fecha,
-            transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
-            recuentoDestino: g.destinosSet.size || paradas.length || 1,
-            sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
-            sumaPeso: Number(g.sumaPeso.toFixed(2)),
-            sumaCantCJ: Math.round(g.sumaCantCJ),
-            paradas,
-            newParadas,
-            newDestinosCount: distinctNewDestinos.size,
-            isNewRoute,
-            hasNewDestinos: distinctNewDestinos.size > 0
-          };
-        });
-
-        // Rutas que son nuevas o tienen destinos no transmitidos previamente
-        const specialRoutes = candidateRoutes.filter(r => r.isNewRoute || r.hasNewDestinos);
-
-        setSpecialAnalysisResult({
-          targetDate,
-          totalParsedRoutes: candidateRoutes.length,
-          specialRoutes,
-          transmittedRoutesCount: alreadyTransmitted.length,
-          transmittedDestinosCount: transmittedDestinos.size
-        });
-
-        setSelectedSpecialRouteIds(specialRoutes.map(r => r.id));
-
-        if (specialRoutes.length > 0) {
-          toast.success(`Se encontraron ${specialRoutes.length} rutas diferentes con destinos no transmitidos.`);
-        } else {
-          toast.info(`No se encontraron rutas con destinos nuevos. Todos los destinos ya fueron transmitidos para la fecha ${targetDate}.`);
-        }
+        setSpecialRawRows(validRows);
+        analyzeSpecialRoutes(validRows, specialDate, specialCompareDate);
       } catch (err) {
         console.error('Error procesando rutas especiales:', err);
         toast.error('Error al analizar archivo para rutas especiales.');
@@ -341,6 +437,7 @@ export default function DailyPlanning() {
       setIsSpecialModalOpen(false);
       setSpecialAnalysisResult(null);
       setSpecialFileName('');
+      setSpecialRawRows([]);
       toast.success('Rutas Especiales transmitidas con éxito.', {
         action: {
           label: 'Ver Disponibilización',
@@ -1231,28 +1328,35 @@ export default function DailyPlanning() {
             </div>
 
             {/* Configuración de Fecha y Carga de Archivo */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4 border-b border-slate-100 shrink-0">
-              {/* Selector de Fecha */}
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 py-4 border-b border-slate-100 shrink-0">
+              
+              {/* 1. Selector de Fecha de Planificación */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-1.5">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
                     1. Fecha de Planificación:
                   </label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <input
                       type="text"
                       value={specialDate}
-                      onChange={(e) => setSpecialDate(e.target.value)}
+                      onChange={(e) => {
+                        const newD = e.target.value;
+                        setSpecialDate(newD);
+                        if (specialRawRows.length > 0) analyzeSpecialRoutes(specialRawRows, newD, specialCompareDate);
+                      }}
                       placeholder="DD-MM-YYYY"
-                      className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 w-36 font-mono"
+                      className="px-2.5 py-1 text-xs font-bold border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-purple-500 w-32 font-mono"
                     />
-                    {/* Botones de fechas rápidas si existen */}
-                    {Object.keys(transmittedAssignments || {}).slice(0, 3).map(d => (
+                    {Object.keys(transmittedAssignments || {}).slice(0, 2).map(d => (
                       <button
                         key={d}
                         type="button"
-                        onClick={() => setSpecialDate(d)}
-                        className={`text-[11px] px-2 py-1 rounded-lg font-bold transition-all ${
+                        onClick={() => {
+                          setSpecialDate(d);
+                          if (specialRawRows.length > 0) analyzeSpecialRoutes(specialRawRows, d, specialCompareDate);
+                        }}
+                        className={`text-[10px] px-2 py-1 rounded-lg font-bold transition-all ${
                           specialDate === d
                             ? 'bg-purple-600 text-white shadow-2xs'
                             : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
@@ -1262,41 +1366,98 @@ export default function DailyPlanning() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Banner si el archivo tiene fecha distinta */}
+                  {detectedFileDate && detectedFileDate !== specialDate && (
+                    <div className="flex items-center justify-between gap-1 mt-1.5 bg-purple-100/90 border border-purple-200 px-2 py-1 rounded-lg text-[10px] text-purple-900">
+                      <span>Archivo trae: <strong>{detectedFileDate}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSpecialDate(detectedFileDate);
+                          if (specialRawRows.length > 0) analyzeSpecialRoutes(specialRawRows, detectedFileDate, specialCompareDate);
+                        }}
+                        className="text-purple-700 underline font-bold hover:text-purple-950"
+                      >
+                        Usar fecha archivo
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                  <span>
-                    Rutas ya en Disponibilización: <strong className="text-slate-700">{(transmittedAssignments[specialDate] || []).length}</strong>
-                  </span>
+                <div className="text-[10px] text-slate-500 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block"></span>
+                  <span>Rutas actuales en {specialDate}: <strong className="text-slate-700">{(transmittedAssignments[specialDate] || []).length}</strong></span>
                 </div>
               </div>
 
-              {/* Selector de Archivo Excel Sheet1 */}
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-2">
+              {/* 2. Selector de Comparación de Destinos */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-1.5">
                 <div>
                   <label className="text-xs font-bold text-slate-700 block mb-1">
-                    2. Archivo Excel (Sheet1):
+                    2. Comparar destinos contra:
                   </label>
-                  <label className="cursor-pointer inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs">
-                    <Upload size={14} />
-                    {specialFileName ? 'Cambiar Archivo' : 'Seleccionar Archivo Excel'}
-                    <input 
-                      type="file" 
-                      accept=".xlsx, .xls, .csv" 
-                      onChange={handleSpecialFileUpload} 
-                      className="hidden" 
-                    />
-                  </label>
-                  {specialFileName && (
-                    <span className="ml-2 text-xs font-medium text-slate-700 truncate inline-block max-w-[180px] align-middle">
-                      {specialFileName}
+                  <select
+                    value={specialCompareDate}
+                    onChange={(e) => {
+                      const mode = e.target.value;
+                      setSpecialCompareDate(mode);
+                      if (specialRawRows.length > 0) analyzeSpecialRoutes(specialRawRows, specialDate, mode);
+                    }}
+                    className="text-xs font-semibold px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white w-full focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-pointer"
+                  >
+                    <option value="auto">Automático (Recomendado)</option>
+                    <option value={specialDate}>Fecha Planificación: {specialDate} ({(transmittedAssignments[specialDate] || []).length} rutas)</option>
+                    {Object.keys(transmittedAssignments || {})
+                      .filter(d => d !== specialDate && (transmittedAssignments[d] || []).length > 0)
+                      .map(d => (
+                        <option key={d} value={d}>Fecha {d} ({(transmittedAssignments[d] || []).length} rutas)</option>
+                      ))
+                    }
+                    <option value="all">Todas las fechas transmitidas (Global)</option>
+                  </select>
+                </div>
+                <div className="text-[10px] text-slate-500 leading-tight">
+                  {specialAnalysisResult?.compareDate ? (
+                    <span>
+                      Comparando con: <strong className="text-purple-700 font-bold">{specialAnalysisResult.compareDate === 'all' ? 'Todas las fechas' : specialAnalysisResult.compareDate}</strong> ({specialAnalysisResult.transmittedRoutesCount} rutas base)
                     </span>
+                  ) : (
+                    <span>Compara destinos para detectar paradas o rutas que no existían.</span>
                   )}
                 </div>
+              </div>
+
+              {/* 3. Selector de Archivo Excel */}
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-between gap-1.5">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    3. Archivo Excel (Sheet1):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-2xs">
+                      <Upload size={13} />
+                      {specialFileName ? 'Cambiar' : 'Subir Excel'}
+                      <input 
+                        type="file" 
+                        accept=".xlsx, .xls, .csv" 
+                        onChange={handleSpecialFileUpload} 
+                        className="hidden" 
+                      />
+                    </label>
+                    {specialFileName && (
+                      <span className="text-[11px] font-medium text-slate-700 truncate max-w-[130px]" title={specialFileName}>
+                        {specialFileName}
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <p className="text-[10px] text-slate-400">
-                  Debe contener la hoja <strong className="text-slate-600">Sheet1</strong> con columnas de Ruta, Destino, Secuencia, etc.
+                  {specialRawRows.length > 0 
+                    ? `✓ ${specialRawRows.length} filas leídas exitosamente` 
+                    : 'Excel con columnas de Ruta, Destino, Secuencia'}
                 </p>
               </div>
+
             </div>
 
             {/* Área de Resultados y Análisis */}
@@ -1377,7 +1538,7 @@ export default function DailyPlanning() {
                       <CheckCircle2 size={32} className="text-emerald-500 mb-2" />
                       <h4 className="text-sm font-bold text-slate-700">No hay destinos nuevos</h4>
                       <p className="text-xs text-slate-500 max-w-sm mt-1">
-                        Todos los destinos de las {specialAnalysisResult.totalParsedRoutes} rutas leídas del archivo ya fueron transmitidos previamente para la fecha {specialDate}.
+                        Todos los destinos de las {specialAnalysisResult.totalParsedRoutes} rutas leídas del archivo ya coinciden con las rutas transmitidas de {specialAnalysisResult.compareDate === 'all' ? 'todas las fechas' : specialAnalysisResult.compareDate}.
                       </p>
                     </div>
                   ) : (
