@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   Download, Calendar, Search, Filter, Layers, 
@@ -195,6 +195,29 @@ function formatBannerDate(dateStr) {
   }
   return dateStr;
 }
+
+// Limpiador del nombre del Cliente para el título del Banner (Requisito 3)
+// Quita números, sufijos como "-01" y deja solo el texto en mayúsculas
+export const cleanClientNameForBanner = (rawClient) => {
+  if (!rawClient) return '';
+  return String(rawClient)
+    .replace(/^RUTA\s+/i, '')       // Quita prefijo "RUTA " si existe
+    .replace(/[-–—]\s*\d+/g, '')     // Quita sufijos como "-01", "-02"
+    .replace(/\d+/g, '')             // Quita cualquier número (0..9)
+    .replace(/[-–—]/g, ' ')          // Quita guiones huérfanos
+    .replace(/\s+/g, ' ')            // Normaliza espacios
+    .trim()
+    .toUpperCase();
+};
+
+// Normalizador de búsqueda insensible a acentos y mayúsculas
+export const normalizeSearchText = (text) => {
+  if (!text) return '';
+  return String(text)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+};
 
 // Opciones de Turno solicitadas
 const TURNO_OPTIONS = [
@@ -443,7 +466,11 @@ export default function RuteoView() {
     }));
   }, [savedRuteoByDate, transmittedAssignments, activeDate]);
 
-  // FILTROS MULTI-SELECCIÓN
+  // ==========================================
+  // FILTRO RÁPIDO GLOBAL Y FILTROS COMBINADOS (Requisitos 1 y 2)
+  // ==========================================
+  const [quickSearch, setQuickSearch] = useState('');
+
   const [selectedTransportistas, setSelectedTransportistas] = useState([]);
   const [selectedClientes, setSelectedClientes] = useState([]);
   const [selectedRutas, setSelectedRutas] = useState([]);
@@ -451,81 +478,221 @@ export default function RuteoView() {
   const [selectedAuxiliares, setSelectedAuxiliares] = useState([]);
   const [selectedVueltas, setSelectedVueltas] = useState([]);
 
-  // Listas de opciones para los filtros
+  const normalizedQuickTerm = useMemo(() => {
+    return normalizeSearchText(quickSearch.trim());
+  }, [quickSearch]);
+
+  // Función para evaluar si una ruta coincide con el Filtro Rápido en cualquier columna
+  const matchRouteQuickSearch = useCallback((r, term) => {
+    if (!term) return true;
+
+    // Buscar en campos básicos de la ruta
+    const basicFields = [
+      r.ruta,
+      r.cliente,
+      r.transportista,
+      r.camion,
+      r.conductor_name,
+      r.conductor_rut,
+      r.aux1_name,
+      r.aux2_name,
+      r.n_vuelta ? `Vuelta ${r.n_vuelta}` : '',
+      r.tipo_servicio,
+      r.tipo_equipo,
+      r.rampla,
+      r.referencia
+    ];
+
+    for (const field of basicFields) {
+      if (field && normalizeSearchText(field).includes(term)) return true;
+    }
+
+    // Buscar en paradas de la ruta (destino, comuna, dirección)
+    if (r.paradas && r.paradas.length > 0) {
+      for (const p of r.paradas) {
+        if (p.destino && normalizeSearchText(p.destino).includes(term)) return true;
+        if (p.comuna && normalizeSearchText(p.comuna).includes(term)) return true;
+        if (p.direccion && normalizeSearchText(p.direccion).includes(term)) return true;
+      }
+    }
+
+    // Buscar en metadatos/overrides de Ruteo
+    const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+    const hasAssignment = !!(r.camion && r.conductor_name);
+    const tripKey = hasAssignment
+      ? `${r.camion.trim()}:::${r.conductor_name.trim()}:::${vueltaKey}`
+      : `single:::${r.ruta}:::${r.id}`;
+    const overrides = ruteoOverrides?.[activeDate]?.[tripKey];
+
+    if (overrides) {
+      if (overrides.turno && normalizeSearchText(overrides.turno).includes(term)) return true;
+      if (overrides.hora_cita && normalizeSearchText(overrides.hora_cita).includes(term)) return true;
+      if (overrides.prioridad && normalizeSearchText(overrides.prioridad).includes(term)) return true;
+      if (overrides.destino_prioritario && normalizeSearchText(overrides.destino_prioritario).includes(term)) return true;
+    }
+
+    return false;
+  }, [activeDate, ruteoOverrides]);
+
+  // Función unificada para verificar si una ruta cumple los filtros (excluyendo un filtro para cálculo de opciones combinadas)
+  const isRouteMatching = useCallback((r, excludeFilter = null) => {
+    // 1. Filtro Rápido global
+    if (normalizedQuickTerm) {
+      if (!matchRouteQuickSearch(r, normalizedQuickTerm)) return false;
+    }
+
+    // 2. Transportista
+    if (excludeFilter !== 'transportista' && selectedTransportistas.length > 0) {
+      const tVal = r.transportista || 'Sin Transportista';
+      if (!selectedTransportistas.includes(tVal)) return false;
+    }
+
+    // 3. Cliente
+    if (excludeFilter !== 'cliente' && selectedClientes.length > 0) {
+      const cVal = r.cliente || 'Sin Cliente';
+      if (!selectedClientes.includes(cVal)) return false;
+    }
+
+    // 4. Ruta
+    if (excludeFilter !== 'ruta' && selectedRutas.length > 0) {
+      const rVal = String(r.ruta || '');
+      if (!selectedRutas.includes(rVal)) return false;
+    }
+
+    // 5. Conductor
+    if (excludeFilter !== 'conductor' && selectedConductores.length > 0) {
+      const condVal = r.conductor_name || 'Sin Asignar';
+      if (!selectedConductores.includes(condVal)) return false;
+    }
+
+    // 6. Auxiliar
+    if (excludeFilter !== 'auxiliar' && selectedAuxiliares.length > 0) {
+      const hasAux = (r.aux1_name && selectedAuxiliares.includes(r.aux1_name)) ||
+                    (r.aux2_name && selectedAuxiliares.includes(r.aux2_name));
+      if (!hasAux) return false;
+    }
+
+    // 7. Vuelta
+    if (excludeFilter !== 'vuelta' && selectedVueltas.length > 0) {
+      const vLabel = r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta';
+      if (!selectedVueltas.includes(vLabel)) return false;
+    }
+
+    return true;
+  }, [
+    normalizedQuickTerm,
+    matchRouteQuickSearch,
+    selectedTransportistas,
+    selectedClientes,
+    selectedRutas,
+    selectedConductores,
+    selectedAuxiliares,
+    selectedVueltas
+  ]);
+
+  // Listas de opciones dinámicas y combinadas (Requisito 2)
   const transportistasList = useMemo(() => {
-    const set = new Set(currentRoutes.map(r => r.transportista || 'Sin Transportista').filter(Boolean));
-    return Array.from(set).sort();
-  }, [currentRoutes]);
+    const set = new Set();
+    selectedTransportistas.forEach(t => set.add(t));
+    currentRoutes.forEach(r => {
+      if (isRouteMatching(r, 'transportista')) {
+        set.add(r.transportista || 'Sin Transportista');
+      }
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [currentRoutes, isRouteMatching, selectedTransportistas]);
 
   const clientesList = useMemo(() => {
-    const set = new Set(currentRoutes.map(r => r.cliente || 'Sin Cliente').filter(Boolean));
-    return Array.from(set).sort();
-  }, [currentRoutes]);
+    const set = new Set();
+    selectedClientes.forEach(c => set.add(c));
+    currentRoutes.forEach(r => {
+      if (isRouteMatching(r, 'cliente')) {
+        set.add(r.cliente || 'Sin Cliente');
+      }
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [currentRoutes, isRouteMatching, selectedClientes]);
 
   const rutasList = useMemo(() => {
-    const set = new Set(currentRoutes.map(r => String(r.ruta || '')).filter(Boolean));
-    return Array.from(set).sort((a, b) => {
+    const set = new Set();
+    selectedRutas.forEach(r => set.add(r));
+    currentRoutes.forEach(r => {
+      if (isRouteMatching(r, 'ruta')) {
+        if (r.ruta) set.add(String(r.ruta));
+      }
+    });
+    return Array.from(set).filter(Boolean).sort((a, b) => {
       const numA = parseInt(a, 10);
       const numB = parseInt(b, 10);
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
       return a.localeCompare(b);
     });
-  }, [currentRoutes]);
+  }, [currentRoutes, isRouteMatching, selectedRutas]);
 
   const conductoresList = useMemo(() => {
-    const set = new Set(currentRoutes.map(r => r.conductor_name || 'Sin Asignar').filter(Boolean));
-    return Array.from(set).sort();
-  }, [currentRoutes]);
+    const set = new Set();
+    selectedConductores.forEach(c => set.add(c));
+    currentRoutes.forEach(r => {
+      if (isRouteMatching(r, 'conductor')) {
+        set.add(r.conductor_name || 'Sin Asignar');
+      }
+    });
+    return Array.from(set).filter(Boolean).sort();
+  }, [currentRoutes, isRouteMatching, selectedConductores]);
 
   const auxiliaresList = useMemo(() => {
     const set = new Set();
+    selectedAuxiliares.forEach(a => set.add(a));
     currentRoutes.forEach(r => {
-      if (r.aux1_name) set.add(r.aux1_name);
-      if (r.aux2_name) set.add(r.aux2_name);
+      if (isRouteMatching(r, 'auxiliar')) {
+        if (r.aux1_name) set.add(r.aux1_name);
+        if (r.aux2_name) set.add(r.aux2_name);
+      }
     });
-    return Array.from(set).sort();
-  }, [currentRoutes]);
+    return Array.from(set).filter(Boolean).sort();
+  }, [currentRoutes, isRouteMatching, selectedAuxiliares]);
 
   const vueltasList = useMemo(() => {
     const set = new Set();
+    selectedVueltas.forEach(v => set.add(v));
     currentRoutes.forEach(r => {
-      if (r.n_vuelta) set.add(`Vuelta ${r.n_vuelta}`);
-      else set.add('Sin Vuelta');
-    });
-    return Array.from(set).sort();
-  }, [currentRoutes]);
-
-  // Filtrado de rutas según filtros multi-selección
-  const filteredRoutes = useMemo(() => {
-    return currentRoutes.filter(r => {
-      if (selectedTransportistas.length > 0) {
-        const tVal = r.transportista || 'Sin Transportista';
-        if (!selectedTransportistas.includes(tVal)) return false;
-      }
-      if (selectedClientes.length > 0) {
-        const cVal = r.cliente || 'Sin Cliente';
-        if (!selectedClientes.includes(cVal)) return false;
-      }
-      if (selectedRutas.length > 0) {
-        const rVal = String(r.ruta || '');
-        if (!selectedRutas.includes(rVal)) return false;
-      }
-      if (selectedConductores.length > 0) {
-        const condVal = r.conductor_name || 'Sin Asignar';
-        if (!selectedConductores.includes(condVal)) return false;
-      }
-      if (selectedAuxiliares.length > 0) {
-        const hasAux = (r.aux1_name && selectedAuxiliares.includes(r.aux1_name)) ||
-                      (r.aux2_name && selectedAuxiliares.includes(r.aux2_name));
-        if (!hasAux) return false;
-      }
-      if (selectedVueltas.length > 0) {
+      if (isRouteMatching(r, 'vuelta')) {
         const vLabel = r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Sin Vuelta';
-        if (!selectedVueltas.includes(vLabel)) return false;
+        set.add(vLabel);
       }
-      return true;
     });
-  }, [currentRoutes, selectedTransportistas, selectedClientes, selectedRutas, selectedConductores, selectedAuxiliares, selectedVueltas]);
+    return Array.from(set).filter(Boolean).sort();
+  }, [currentRoutes, isRouteMatching, selectedVueltas]);
+
+  // Rutas filtradas aplicando todos los filtros combinados + Filtro Rápido
+  const filteredRoutes = useMemo(() => {
+    return currentRoutes.filter(r => isRouteMatching(r, null));
+  }, [currentRoutes, isRouteMatching]);
+
+  // ==========================================
+  // TÍTULO DINÁMICO DEL BANNER SEGÚN CLIENTE (Requisito 3)
+  // Quita cualquier numeración y deja solo el texto de la columna
+  // ==========================================
+  const bannerClientTitle = useMemo(() => {
+    if (selectedClientes.length > 0) {
+      const cleanedNames = Array.from(new Set(
+        selectedClientes.map(cleanClientNameForBanner).filter(Boolean)
+      ));
+      if (cleanedNames.length > 0) {
+        return cleanedNames.join(' + ');
+      }
+    }
+
+    // Si no hay filtro de cliente activo pero todas las rutas filtradas pertenecen a un solo cliente:
+    const activeRouteClients = Array.from(new Set(
+      filteredRoutes.map(r => cleanClientNameForBanner(r.cliente)).filter(Boolean)
+    ));
+    if (activeRouteClients.length === 1) {
+      return activeRouteClients[0];
+    }
+
+    return 'FAST FOOD';
+  }, [selectedClientes, filteredRoutes]);
 
   // ==========================================
   // CONSOLIDACIÓN DE VIAJES (TRIPS) EN MATRIZ
@@ -713,7 +880,8 @@ export default function RuteoView() {
     }, 0);
   }, [filteredRoutes]);
 
-  const hasActiveFilters = selectedTransportistas.length > 0 || 
+  const hasActiveFilters = quickSearch.trim() !== '' ||
+    selectedTransportistas.length > 0 || 
     selectedClientes.length > 0 || 
     selectedRutas.length > 0 || 
     selectedConductores.length > 0 || 
@@ -721,6 +889,7 @@ export default function RuteoView() {
     selectedVueltas.length > 0;
 
   const handleResetFilters = () => {
+    setQuickSearch('');
     setSelectedTransportistas([]);
     setSelectedClientes([]);
     setSelectedRutas([]);
@@ -768,7 +937,8 @@ export default function RuteoView() {
       const ws = XLSX.utils.json_to_sheet(exportRows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Matriz Ruteo');
-      XLSX.writeFile(wb, `Asignacion_Rutas_${activeDate}.xlsx`);
+      const safeTitle = bannerClientTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+      XLSX.writeFile(wb, `Asignacion_Rutas_${safeTitle}_${activeDate}.xlsx`);
 
       toast.success(`Matriz Excel generada con éxito (${exportRows.length} viajes exportados).`);
     } catch (err) {
@@ -854,9 +1024,9 @@ export default function RuteoView() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 p-4 gap-3.5 overflow-hidden">
+    <div className="flex flex-col h-full bg-slate-50 p-4 gap-3 overflow-hidden">
       
-      {/* 1. Header Superior de Control y Filtros */}
+      {/* 1. Header Superior de Control */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div>
           <div className="flex items-center gap-2">
@@ -866,7 +1036,7 @@ export default function RuteoView() {
             <h1 className="text-lg font-black text-slate-800">Matriz de Asignación de Rutas</h1>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Vista ejecutiva consolidada por viaje. Asigna Turnos, Horas Cita masivas, Prioridades y Destinos destacados.
+            Vista ejecutiva consolidada por viaje. Búsqueda rápida, filtros combinados dinámicos, turnos, horarios y destinos destacados.
           </p>
         </div>
 
@@ -891,7 +1061,7 @@ export default function RuteoView() {
         </div>
       </div>
 
-      {/* 2. Barra de Filtros Dinámicos Multi-Selección */}
+      {/* 2. Barra de Filtros Dinámicos Combinados con Filtro Rápido (Requisitos 1 y 2) */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-3 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
         <div className="flex items-center gap-2.5 flex-wrap">
           {/* Selector Fecha */}
@@ -917,6 +1087,35 @@ export default function RuteoView() {
             </div>
           </div>
 
+          {/* 1. FILTRO RÁPIDO PARA BUSCAR POR CUALQUIER COLUMNA (Requisito 1) */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
+              <Search size={11} className="text-blue-600" />
+              Filtro Rápido
+            </span>
+            <div className="relative flex items-center">
+              <Search size={13} className="absolute left-2.5 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={quickSearch}
+                onChange={e => setQuickSearch(e.target.value)}
+                placeholder="Buscar en matriz..."
+                className="pl-8 pr-7 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 hover:bg-white focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium text-slate-800 w-44 sm:w-56 transition-all shadow-2xs"
+              />
+              {quickSearch && (
+                <button
+                  type="button"
+                  onClick={() => setQuickSearch('')}
+                  className="absolute right-2 text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-200 transition-colors"
+                  title="Borrar búsqueda"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 2. FILTROS COMBINADOS DINÁMICOS (Requisito 2) */}
           <MultiSelectFilter
             label="Transportista"
             options={transportistasList}
@@ -1118,12 +1317,12 @@ export default function RuteoView() {
       {/* 5. TABLA MATRIZ ENTERPRISE TIPO FOTO ADJUNTA */}
       <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
         
-        {/* Banner Superior Estilo Enterprise: ASIGNACIÓN DE RUTAS - FAST FOOD */}
+        {/* Banner Superior Estilo Enterprise: ASIGNACIÓN DE RUTAS - [CLIENTE DINÁMICO] (Requisito 3) */}
         <div className="bg-[#132c54] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm">
           <div>
             <h2 className="text-base sm:text-lg font-black tracking-wider uppercase text-white flex items-center gap-2">
               <Truck size={20} className="text-amber-400" />
-              ASIGNACIÓN DE RUTAS - FAST FOOD
+              ASIGNACIÓN DE RUTAS - {bannerClientTitle}
             </h2>
             <p className="text-xs text-amber-300 font-bold tracking-wide mt-0.5">
               Despacho {formatBannerDate(activeDate)}
