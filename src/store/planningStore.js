@@ -493,6 +493,25 @@ export const persistChangeHistory = (data) => {
   }
 };
 
+export const loadPersistedRuteoOverrides = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_ruteo_overrides_v1');
+    if (saved) return JSON.parse(saved);
+    return {};
+  } catch (e) {
+    console.error('Error loading ruteo overrides from localStorage:', e);
+    return {};
+  }
+};
+
+export const persistRuteoOverrides = (data) => {
+  try {
+    localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(data));
+  } catch (e) {
+    console.error('Error saving ruteo overrides to localStorage:', e);
+  }
+};
+
 const createInitialTransformedRoutes = () => {
   if (PRELOADED_EXCEL_ROUTES && PRELOADED_EXCEL_ROUTES.length > 0) {
     return PRELOADED_EXCEL_ROUTES;
@@ -602,6 +621,9 @@ export const usePlanningStore = create((set, get) => ({
 
   // Historial de cambios y auditoría para "Histórico de cambios" (Requisito 2)
   changeHistoryList: loadPersistedChangeHistory(),
+
+  // Metadatos y modificaciones en el sub-menú Ruteo: { [fecha]: { [tripKey]: { turno, hora_cita, prioridad, destino_prioritario } } }
+  ruteoOverrides: loadPersistedRuteoOverrides(),
 
   // Set Raw Rows imported from Excel Sheet1
   setRawRows: (rows, name = '') => {
@@ -1377,6 +1399,47 @@ export const usePlanningStore = create((set, get) => ({
     persistChangeHistory([]);
     set({ changeHistoryList: [] });
     toast.info('Histórico de cambios vaciado');
+  },
+
+  // ACTUALIZAR METADATOS DE RUTEO (Turno, Hora Cita, Prioridad, Destino Prioritario)
+  updateRuteoTripField: (fecha, tripKey, field, value) => {
+    set(state => {
+      const dateOverrides = state.ruteoOverrides[fecha] || {};
+      const tripData = dateOverrides[tripKey] || {};
+      const updatedDateOverrides = {
+        ...dateOverrides,
+        [tripKey]: {
+          ...tripData,
+          [field]: value
+        }
+      };
+      const nextOverrides = {
+        ...state.ruteoOverrides,
+        [fecha]: updatedDateOverrides
+      };
+      persistRuteoOverrides(nextOverrides);
+      return { ruteoOverrides: nextOverrides };
+    });
+  },
+
+  // ACTUALIZACIÓN MASIVA DE METADATOS DE RUTEO PARA FILAS SELECCIONADAS
+  batchUpdateRuteoTripField: (fecha, tripKeys, updates) => {
+    if (!tripKeys || tripKeys.length === 0) return;
+    set(state => {
+      const dateOverrides = { ...(state.ruteoOverrides[fecha] || {}) };
+      tripKeys.forEach(tripKey => {
+        dateOverrides[tripKey] = {
+          ...(dateOverrides[tripKey] || {}),
+          ...updates
+        };
+      });
+      const nextOverrides = {
+        ...state.ruteoOverrides,
+        [fecha]: dateOverrides
+      };
+      persistRuteoOverrides(nextOverrides);
+      return { ruteoOverrides: nextOverrides };
+    });
   },
 
   // APERTURAR RUTA EN DISPONIBILIZACIÓN (Requisito 1)
