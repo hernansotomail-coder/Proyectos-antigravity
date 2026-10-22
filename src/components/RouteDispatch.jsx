@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   MessageSquare, Send, Copy, Check, Search, Calendar, 
   Users, Truck, Layers, Filter, Eye, Phone, 
-  Sparkles, ExternalLink, CheckCircle2, AlertCircle, X, ChevronDown,
+  Sparkles, ExternalLink, CheckCircle2, AlertCircle, X, ChevronDown, ChevronRight, ChevronUp,
   Download, Smartphone, Save, UserCheck, RefreshCw, PhoneCall
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -110,7 +110,7 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha) => {
   return msg;
 };
 
-// Formateador de mensaje consolidado para un Conductor / Dupla (todas sus rutas en un solo mensaje)
+// Formateador de mensaje consolidado para un Conductor / Dupla (agrupado por N° Vuelta / Viaje)
 export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows, fecha) => {
   let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${fecha}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -123,63 +123,141 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
   }
   
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `📋 *Rutas y Vueltas Asignadas (${rows.length}):*\n\n`;
 
-  let totalLocales = 0;
-  let totalM3 = 0;
-
-  // Ordenar por vuelta (V.1, V.2, V.3...)
-  const sortedRows = [...rows].sort((a, b) => {
-    const vA = parseInt(String(a.n_vuelta || '1').replace(/\D/g, ''), 10) || 1;
-    const vB = parseInt(String(b.n_vuelta || '1').replace(/\D/g, ''), 10) || 1;
-    return vA - vB;
+  // Agrupar filas por N° Vuelta (Requisito 2: cada N° Vuelta representa UN SOLO VIAJE)
+  const vueltasMap = new Map();
+  rows.forEach(r => {
+    const rawVuelta = String(r.n_vuelta || '1').trim();
+    const match = rawVuelta.match(/\d+/);
+    const num = match ? parseInt(match[0], 10) : 1;
+    const key = num;
+    
+    if (!vueltasMap.has(key)) {
+      vueltasMap.set(key, {
+        vueltaNum: num,
+        label: `Vuelta ${num}`,
+        rows: []
+      });
+    }
+    vueltasMap.get(key).rows.push(r);
   });
 
-  sortedRows.forEach((r, idx) => {
-    const vuelta = r.n_vuelta ? (String(r.n_vuelta).toLowerCase().includes('vuelta') ? r.n_vuelta : `Vuelta ${r.n_vuelta}`) : `Vuelta ${idx + 1}`;
-    const ruta = r.ruta || 'S/N';
-    const cliente = r.cliente || 'Centralizado';
-    const uniqueParadas = getUniqueParadas(r.paradas);
-    const loc = r.locales || (uniqueParadas.length > 0 ? uniqueParadas.length : 1);
-    const m3Val = parseFloat(r.m3) || 0;
-    const camionRow = r.camion?.trim();
-    const turno = r.turno?.trim();
-    const horaCita = r.hora_cita?.trim();
-    const prioridad = r.prioridad?.trim();
-    const destinoPrioritario = r.destino_prioritario?.trim();
+  // Ordenar viajes por número de vuelta ascendente (1, 2, 3...)
+  const sortedViajes = Array.from(vueltasMap.values()).sort((a, b) => a.vueltaNum - b.vueltaNum);
 
-    totalLocales += Number(loc);
-    totalM3 += m3Val;
+  msg += `📋 *Itinerario de Viajes (${sortedViajes.length} ${sortedViajes.length === 1 ? 'Viaje' : 'Viajes'} | ${rows.length} ${rows.length === 1 ? 'Ruta' : 'Rutas'}):*\n\n`;
 
-    msg += `🔹 *${idx + 1}. ${vuelta.toUpperCase()} - RUTA ${ruta}*\n`;
-    if (camionRow) msg += `   • 🚚 Camión: *${camionRow}*\n`;
-    msg += `   • 🏢 Cliente: ${cliente}\n`;
-    if (turno) msg += `   • 🕐 Turno: ${turno}\n`;
-    if (horaCita) msg += `   • ⏰ Hora Cita / Llegada: ${horaCita}\n`;
-    if (prioridad && prioridad !== 'Normal') msg += `   • 🚨 Prioridad: ${prioridad.toUpperCase()}\n`;
-    if (destinoPrioritario) msg += `   • ⭐ Destino Prioritario: ${destinoPrioritario}\n`;
-    msg += `   • 📍 Locales: ${loc} | 📦 Volumen: ${m3Val.toFixed(3)} m³\n`;
-    if (r.rampla) msg += `   • 🚛 Rampla: ${r.rampla}\n`;
+  let grandTotalLocales = 0;
+  let grandTotalM3 = 0;
 
-    if (uniqueParadas && uniqueParadas.length > 0) {
-      msg += `   • 📋 Paradas (${uniqueParadas.length}):\n`;
-      uniqueParadas.slice(0, 10).forEach((p, pIdx) => {
-        const dest = p.destino || 'Destino';
-        const com = p.comuna ? ` (${p.comuna})` : '';
-        const isDestPrio = destinoPrioritario && dest.toLowerCase().includes(destinoPrioritario.toLowerCase());
-        msg += `     ${pIdx + 1}. ${dest}${com}${isDestPrio ? ' ⭐ [PRIORITARIO]' : ''}\n`;
+  sortedViajes.forEach((viaje, idx) => {
+    const viajeRows = viaje.rows;
+    const isMultiRuta = viajeRows.length > 1;
+
+    // Rutas involucradas en este viaje
+    const rutasArr = viajeRows.map(r => r.ruta || 'S/N');
+    const rutasStr = rutasArr.join(' + ');
+
+    // Clientes
+    const clientesArr = Array.from(new Set(viajeRows.map(r => r.cliente?.trim()).filter(Boolean)));
+    const clientesStr = clientesArr.join(' / ') || 'Centralizado';
+
+    // Camiones en este viaje
+    const viajeCamiones = Array.from(new Set(viajeRows.map(r => r.camion?.trim()).filter(Boolean)));
+    const camionStr = viajeCamiones.join(', ');
+
+    // Turno y Hora Cita
+    const turnosArr = Array.from(new Set(viajeRows.map(r => r.turno?.trim()).filter(Boolean)));
+    const citasArr = Array.from(new Set(viajeRows.map(r => r.hora_cita?.trim()).filter(Boolean)));
+    const turnoStr = turnosArr.join(' / ');
+    const citaStr = citasArr.join(' / ');
+
+    // Prioridad
+    const prioArr = Array.from(new Set(viajeRows.map(r => r.prioridad?.trim()).filter(p => p && p !== 'Normal')));
+    const destPrioArr = Array.from(new Set(viajeRows.map(r => r.destino_prioritario?.trim()).filter(Boolean)));
+
+    // Totales del viaje
+    let viajeLocales = 0;
+    let viajeM3 = 0;
+    viajeRows.forEach(r => {
+      const uParadas = getUniqueParadas(r.paradas);
+      const loc = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
+      viajeLocales += loc;
+      viajeM3 += parseFloat(r.m3) || 0;
+    });
+
+    grandTotalLocales += viajeLocales;
+    grandTotalM3 += viajeM3;
+
+    // Título de este viaje (considerando rutas agrupadas como un solo viaje)
+    if (isMultiRuta) {
+      msg += `🔄 *VIAJE ${idx + 1} (VUELTA ${viaje.vueltaNum}) - COMBINADO (Rutas: ${rutasStr})*\n`;
+    } else {
+      msg += `🔄 *VIAJE ${idx + 1} (VUELTA ${viaje.vueltaNum}) - RUTA ${rutasStr}*\n`;
+    }
+
+    if (camionStr) msg += `   • 🚚 Camión: *${camionStr}*\n`;
+    msg += `   • 🏢 Cliente: ${clientesStr}\n`;
+    if (turnoStr) msg += `   • 🕐 Turno: ${turnoStr}\n`;
+    if (citaStr) msg += `   • ⏰ Hora Cita / Llegada: ${citaStr}\n`;
+    if (prioArr.length > 0) msg += `   • 🚨 Prioridad: ${prioArr.map(p => p.toUpperCase()).join(' / ')}\n`;
+    if (destPrioArr.length > 0) msg += `   • ⭐ Destino Prioritario: ${destPrioArr.join(', ')}\n`;
+    msg += `   • 📍 Locales Viaje: ${viajeLocales} | 📦 Volumen Viaje: ${viajeM3.toFixed(3)} m³\n`;
+
+    // Si tiene múltiples rutas en la misma vuelta, desglosar sub-cargas y paradas organizadas
+    if (isMultiRuta) {
+      msg += `\n   📦 *Detalle de Carga por Ruta:*\n`;
+      viajeRows.forEach(r => {
+        const uParadas = getUniqueParadas(r.paradas);
+        const loc = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
+        const m3Val = (parseFloat(r.m3) || 0).toFixed(3);
+        msg += `   ▫️ *Ruta ${r.ruta || 'S/N'}* (${r.cliente || 'Centralizado'}): ${loc} locales | ${m3Val} m³\n`;
       });
-      if (uniqueParadas.length > 10) {
-        msg += `     ... y ${uniqueParadas.length - 10} paradas más\n`;
+
+      msg += `\n   📋 *Itinerario de Paradas Combinadas:*\n`;
+      let stopCounter = 1;
+      viajeRows.forEach(r => {
+        const uParadas = getUniqueParadas(r.paradas);
+        if (uParadas.length > 0) {
+          msg += `   🔸 *Ruta ${r.ruta || 'S/N'}:*\n`;
+          uParadas.slice(0, 10).forEach(p => {
+            const dest = p.destino || 'Destino';
+            const com = p.comuna ? ` (${p.comuna})` : '';
+            const isDestPrio = destPrioArr.some(dp => dest.toLowerCase().includes(dp.toLowerCase()));
+            msg += `     ${stopCounter}. ${dest}${com}${isDestPrio ? ' ⭐ [PRIORITARIO]' : ''}\n`;
+            stopCounter++;
+          });
+          if (uParadas.length > 10) {
+            msg += `     ... y ${uParadas.length - 10} paradas más en ruta ${r.ruta}\n`;
+          }
+        }
+      });
+    } else {
+      // Ruta única
+      const singleRow = viajeRows[0];
+      const uParadas = getUniqueParadas(singleRow.paradas);
+      if (uParadas.length > 0) {
+        msg += `   📋 *Paradas (${uParadas.length}):*\n`;
+        uParadas.slice(0, 12).forEach((p, pIdx) => {
+          const dest = p.destino || 'Destino';
+          const com = p.comuna ? ` (${p.comuna})` : '';
+          const isDestPrio = destPrioArr.some(dp => dest.toLowerCase().includes(dp.toLowerCase()));
+          msg += `     ${pIdx + 1}. ${dest}${com}${isDestPrio ? ' ⭐ [PRIORITARIO]' : ''}\n`;
+        });
+        if (uParadas.length > 12) {
+          msg += `     ... y ${uParadas.length - 12} paradas más\n`;
+        }
       }
     }
+
     msg += `\n`;
   });
 
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `📊 *Totales del Conductor:*\n`;
-  msg += `• Total Locales: *${totalLocales}*\n`;
-  msg += `• Total Volumen: *${totalM3.toFixed(3)} m³*\n`;
+  msg += `• Total Viajes: *${sortedViajes.length} ${sortedViajes.length === 1 ? 'viaje' : 'viajes'} (${rows.length} ${rows.length === 1 ? 'ruta' : 'rutas'})*\n`;
+  msg += `• Total Locales: *${grandTotalLocales}*\n`;
+  msg += `• Total Volumen: *${grandTotalM3.toFixed(3)} m³*\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `_Favor confirmar recepción del itinerario._`;
 
@@ -456,18 +534,64 @@ export default function RouteDispatch() {
       groups[condName].rows.push(row);
     });
 
-    return Object.values(groups).map(g => ({
-      ...g,
-      camionStr: Array.from(g.camiones).join(', ') || 'Sin Camión Asignado',
-      totalM3Formatted: g.totalM3.toFixed(3),
+    return Object.values(groups).map(g => {
       // Ordenar vueltas ascendentemente V.1, V.2, V.3...
-      rows: g.rows.sort((a, b) => {
+      const sorted = g.rows.sort((a, b) => {
         const vA = parseInt(String(a.n_vuelta || '1').replace(/\D/g, ''), 10) || 1;
         const vB = parseInt(String(b.n_vuelta || '1').replace(/\D/g, ''), 10) || 1;
         return vA - vB;
-      })
-    }));
+      });
+
+      // Calcular cantidad de viajes únicos (vueltas únicas consolidadas)
+      const uniqueVueltasSet = new Set(
+        sorted.map(r => {
+          const match = String(r.n_vuelta || '1').match(/\d+/);
+          return match ? match[0] : String(r.n_vuelta || '1');
+        })
+      );
+
+      return {
+        ...g,
+        camionStr: Array.from(g.camiones).join(', ') || 'Sin Camión Asignado',
+        totalM3Formatted: g.totalM3.toFixed(3),
+        totalViajes: uniqueVueltasSet.size,
+        rows: sorted
+      };
+    });
   }, [filteredRows]);
+
+  // Estado para colapsar/expandir el detalle de rutas por conductor (Requisito 1)
+  const [collapsedConductorMap, setCollapsedConductorMap] = useState({});
+  // Estado para expandir paradas en filas específicas
+  const [expandedParadasRowId, setExpandedParadasRowId] = useState({});
+
+  const isConductorCollapsed = (conductorName) => !!collapsedConductorMap[conductorName];
+
+  const toggleConductorCollapse = (conductorName) => {
+    setCollapsedConductorMap(prev => ({
+      ...prev,
+      [conductorName]: !prev[conductorName]
+    }));
+  };
+
+  const handleExpandAll = () => {
+    setCollapsedConductorMap({});
+  };
+
+  const handleCollapseAll = () => {
+    const map = {};
+    groupedByConductor.forEach(g => {
+      map[g.conductor] = true;
+    });
+    setCollapsedConductorMap(map);
+  };
+
+  const toggleParadasRow = (rowKey) => {
+    setExpandedParadasRowId(prev => ({
+      ...prev,
+      [rowKey]: !prev[rowKey]
+    }));
+  };
 
   // Abrir WhatsApp en Personal
   const handleOpenWhatsApp = (phone, text) => {
@@ -809,6 +933,28 @@ export default function RouteDispatch() {
               <option value="3">Vuelta 3</option>
             </select>
           </div>
+
+          {/* Botones globales Expandir Todo / Contraer Todo (Requisito 1) */}
+          <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
+            <button
+              type="button"
+              onClick={handleCollapseAll}
+              className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 transition-colors"
+              title="Contraer todas las tablas de detalle de rutas"
+            >
+              <ChevronRight size={13} />
+              Contraer todo
+            </button>
+            <button
+              type="button"
+              onClick={handleExpandAll}
+              className="flex items-center gap-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg border border-indigo-200 transition-colors"
+              title="Expandir todas las tablas de detalle de rutas"
+            >
+              <ChevronDown size={13} />
+              Expandir todo
+            </button>
+          </div>
         </div>
 
         {/* Acciones en lote de selección */}
@@ -854,6 +1000,7 @@ export default function RouteDispatch() {
               selectedDate
             );
             const isGroupCopied = copiedId === `grp-${group.conductor}`;
+            const isCollapsed = isConductorCollapsed(group.conductor);
 
             return (
               <div 
@@ -863,15 +1010,39 @@ export default function RouteDispatch() {
                 {/* Encabezado del Conductor */}
                 <div className="bg-slate-50/90 border-b border-slate-200/80 p-3.5 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3.5 flex-wrap">
+                    {/* Viñeta para expandir / contraer al lado del conductor */}
+                    <button
+                      type="button"
+                      onClick={() => toggleConductorCollapse(group.conductor)}
+                      className={`p-1.5 rounded-lg border transition-all flex items-center justify-center shrink-0 ${
+                        isCollapsed
+                          ? 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'
+                          : 'bg-indigo-50 border-indigo-200 text-indigo-600 hover:bg-indigo-100'
+                      }`}
+                      title={isCollapsed ? "Clic para expandir el detalle de rutas" : "Clic para contraer el detalle de rutas"}
+                    >
+                      <ChevronDown
+                        size={15}
+                        className={`transition-transform duration-200 ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}
+                      />
+                    </button>
+
                     {/* Conductor & Celular */}
                     <div className="flex flex-col">
                       <div className="flex items-center gap-2">
-                        <span className="font-black text-slate-900 text-sm">{group.conductor}</span>
+                        <span 
+                          onClick={() => toggleConductorCollapse(group.conductor)}
+                          className="font-black text-slate-900 text-sm cursor-pointer hover:text-indigo-600 transition-colors"
+                          title="Clic para expandir/contraer"
+                        >
+                          {group.conductor}
+                        </span>
                         {group.rut && (
                           <span className="text-[10px] text-slate-400 font-mono">({group.rut})</span>
                         )}
                         <span className="bg-indigo-100 text-indigo-800 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                          {group.rows.length} {group.rows.length === 1 ? 'vuelta' : 'vueltas'}
+                          {group.totalViajes} {group.totalViajes === 1 ? 'viaje' : 'viajes'}
+                          {group.rows.length !== group.totalViajes && ` (${group.rows.length} rutas)`}
                         </span>
                       </div>
 
@@ -941,6 +1112,24 @@ export default function RouteDispatch() {
 
                   {/* Acciones WhatsApp consolidadas para este conductor */}
                   <div className="flex items-center gap-2">
+                    {/* Botón Viñeta Expandir/Contraer Detalle */}
+                    <button
+                      type="button"
+                      onClick={() => toggleConductorCollapse(group.conductor)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border transition-all ${
+                        isCollapsed
+                          ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 shadow-2xs'
+                      }`}
+                      title={isCollapsed ? "Expandir el detalle de rutas" : "Contraer el detalle de rutas"}
+                    >
+                      <ChevronDown
+                        size={14}
+                        className={`transition-transform duration-200 ${isCollapsed ? '-rotate-90 text-indigo-500' : 'rotate-0 text-slate-500'}`}
+                      />
+                      <span>{isCollapsed ? `Ver Detalle (${group.rows.length})` : 'Contraer Detalle'}</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handleCopyText(groupMsg, `grp-${group.conductor}`)}
@@ -949,7 +1138,7 @@ export default function RouteDispatch() {
                           ? 'bg-green-100 border-green-300 text-green-700' 
                           : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100 hover:text-slate-900 shadow-2xs'
                       }`}
-                      title="Copiar itinerario completo de todas las vueltas para WhatsApp"
+                      title="Copiar itinerario completo agrupado por viaje para WhatsApp"
                     >
                       {isGroupCopied ? <Check size={13} className="text-green-600" /> : <Copy size={13} />}
                       <span>{isGroupCopied ? '¡Copiado!' : 'Copiar Itinerario'}</span>
@@ -962,7 +1151,7 @@ export default function RouteDispatch() {
                       title={condPhone ? `Enviar itinerario completo por WhatsApp a ${group.conductor} (${condPhone})` : 'Abrir WhatsApp'}
                     >
                       <MessageSquare size={13} />
-                      <span>Enviar WhatsApp ({group.rows.length} {group.rows.length === 1 ? 'Vuelta' : 'Vueltas'})</span>
+                      <span>Enviar WhatsApp ({group.totalViajes} {group.totalViajes === 1 ? 'Viaje' : 'Viajes'})</span>
                     </button>
 
                     <button
@@ -976,190 +1165,249 @@ export default function RouteDispatch() {
                   </div>
                 </div>
 
-                {/* Tabla de Vueltas de este Conductor (V.1, V.2, V.3...) */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-slate-100/70 text-slate-600 border-b border-slate-200 text-[10px] uppercase font-bold tracking-wider select-none">
-                      <tr>
-                        <th className="py-2 px-3 text-center w-20">N° Vuelta</th>
-                        <th className="py-2 px-3 text-center w-20 font-mono">N° Ruta</th>
-                        <th className="py-2 px-3 w-32">Camión</th>
-                        <th className="py-2 px-3 min-w-[150px]">Cliente</th>
-                        <th className="py-2 px-3 text-center w-20">Turno</th>
-                        <th className="py-2 px-3 text-center w-24">Hora Cita</th>
-                        <th className="py-2 px-3 text-center w-32">Prioridad</th>
-                        <th className="py-2 px-3 text-center w-16">Locales</th>
-                        <th className="py-2 px-3 text-right w-20">m³</th>
-                        <th className="py-2 px-3 min-w-[200px]">Paradas / Destinos</th>
-                        <th className="py-2 px-3 text-center w-28">Acción Ruta</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {group.rows.map((row, rIdx) => {
-                        const isPrioUrgente = row.prioridad === 'Prioridad urgente';
-                        const isUrgente = row.prioridad === 'Urgente';
-                        const isRedespacho = row.prioridad === 'Redespacho';
-                        const uniqueParadas = getUniqueParadas(row.paradas);
-                        const singleMsg = buildSingleRouteWhatsAppMessage(row, selectedDate);
-                        const isSingleCopied = copiedId === row.id;
-
-                        let rowBgClass = 'hover:bg-slate-50/80';
-                        if (isPrioUrgente) {
-                          rowBgClass = 'bg-[#ffd6d6]/70 hover:bg-[#fecaca] text-[#7f1d1d] font-semibold border-l-4 border-l-[#fca5a5]';
-                        } else if (isUrgente) {
-                          rowBgClass = 'bg-[#ffedd5]/70 hover:bg-[#fed7aa] text-[#7c2d12] font-semibold border-l-4 border-l-[#fdba74]';
-                        } else if (isRedespacho) {
-                          rowBgClass = 'bg-[#fef9c3]/70 hover:bg-[#fef08a] text-[#713f12] font-semibold border-l-4 border-l-[#fde047]';
-                        }
+                {/* Detalle de Rutas (Expandible/Colapsable - Requisito 1) */}
+                {isCollapsed ? (
+                  <div
+                    onClick={() => toggleConductorCollapse(group.conductor)}
+                    className="px-4 py-2.5 bg-slate-50/60 hover:bg-indigo-50/30 border-t border-slate-100 flex items-center justify-between cursor-pointer text-xs text-slate-600 transition-colors group/collapsed"
+                    title="Clic para expandir el detalle completo de las rutas"
+                  >
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-bold text-slate-400">Rutas en este viaje:</span>
+                      {group.rows.map((r, i) => {
+                        const isPrioUrg = r.prioridad === 'Prioridad urgente';
+                        const isUrg = r.prioridad === 'Urgente';
+                        const isRed = r.prioridad === 'Redespacho';
+                        let badgeColor = 'bg-slate-100 text-slate-700 border-slate-200';
+                        if (isPrioUrg) badgeColor = 'bg-[#ffd6d6] text-[#7f1d1d] border-[#fca5a5]';
+                        else if (isUrg) badgeColor = 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74]';
+                        else if (isRed) badgeColor = 'bg-[#fef9c3] text-[#713f12] border-[#fde047]';
 
                         return (
-                          <tr key={row.id || rIdx} className={`transition-colors ${rowBgClass}`}>
-                            {/* N° Vuelta */}
-                            <td className="py-2 px-3 text-center">
-                              <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-bold bg-slate-200/80 text-slate-800">
-                                V.{row.n_vuelta || '1'}
+                          <span
+                            key={i}
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold border shadow-2xs ${badgeColor}`}
+                          >
+                            <span className="text-[10px] font-extrabold uppercase opacity-80">V.{r.n_vuelta || '1'}</span>
+                            <span className="font-mono">Ruta {r.ruta || 'S/N'}</span>
+                            <span className="font-normal opacity-85 text-[11px]">— {r.cliente || 'Centralizado'}</span>
+                            {r.destino_prioritario && (
+                              <span className="text-[10px] text-red-700 bg-white/90 px-1 py-0.2 rounded font-bold">
+                                ⭐ {r.destino_prioritario}
                               </span>
-                            </td>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center gap-1 text-indigo-600 font-bold text-xs group-hover/collapsed:translate-x-0.5 transition-transform shrink-0 ml-3">
+                      <span>Expandir detalle</span>
+                      <ChevronDown size={14} className="-rotate-90" />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-100/70 text-slate-600 border-b border-slate-200 text-[10px] uppercase font-bold tracking-wider select-none">
+                        <tr>
+                          <th className="py-2 px-3 text-center w-20">N° Vuelta</th>
+                          <th className="py-2 px-3 text-center w-20 font-mono">N° Ruta</th>
+                          <th className="py-2 px-3 w-32">Camión</th>
+                          <th className="py-2 px-3 min-w-[150px]">Cliente</th>
+                          <th className="py-2 px-3 text-center w-20">Turno</th>
+                          <th className="py-2 px-3 text-center w-24">Hora Cita</th>
+                          <th className="py-2 px-3 text-center w-32">Prioridad</th>
+                          <th className="py-2 px-3 text-center w-16">Locales</th>
+                          <th className="py-2 px-3 text-right w-20">m³</th>
+                          <th className="py-2 px-3 min-w-[200px]">Paradas / Destinos</th>
+                          <th className="py-2 px-3 text-center w-28">Acción Ruta</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700">
+                        {group.rows.map((row, rIdx) => {
+                          const isPrioUrgente = row.prioridad === 'Prioridad urgente';
+                          const isUrgente = row.prioridad === 'Urgente';
+                          const isRedespacho = row.prioridad === 'Redespacho';
+                          const uniqueParadas = getUniqueParadas(row.paradas);
+                          const singleMsg = buildSingleRouteWhatsAppMessage(row, selectedDate);
+                          const isSingleCopied = copiedId === row.id;
+                          const rowKey = row.id || `${row.ruta}-${rIdx}`;
+                          const isParadasExpanded = !!expandedParadasRowId[rowKey];
 
-                            {/* N° Ruta */}
-                            <td className="py-2 px-3 text-center font-mono font-black text-blue-700">
-                              <span className="bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                                {row.ruta || '—'}
-                              </span>
-                            </td>
+                          let rowBgClass = 'hover:bg-slate-50/80';
+                          if (isPrioUrgente) {
+                            rowBgClass = 'bg-[#ffd6d6]/70 hover:bg-[#fecaca] text-[#7f1d1d] font-semibold border-l-4 border-l-[#fca5a5]';
+                          } else if (isUrgente) {
+                            rowBgClass = 'bg-[#ffedd5]/70 hover:bg-[#fed7aa] text-[#7c2d12] font-semibold border-l-4 border-l-[#fdba74]';
+                          } else if (isRedespacho) {
+                            rowBgClass = 'bg-[#fef9c3]/70 hover:bg-[#fef08a] text-[#713f12] font-semibold border-l-4 border-l-[#fde047]';
+                          }
 
-                            {/* Camión (Requisito 1) */}
-                            <td className="py-2 px-3 font-semibold text-slate-800">
-                              <div className="flex items-center gap-1">
-                                <Truck size={12} className="text-slate-400 shrink-0" />
-                                <span>{row.camion || 'Sin asignar'}</span>
-                              </div>
-                            </td>
-
-                            {/* Cliente */}
-                            <td className="py-2 px-3">
-                              <div className="flex flex-col">
-                                <span className="font-semibold text-slate-800">{row.cliente || 'Centralizado'}</span>
-                                {row.destino_prioritario && (
-                                  <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 border border-red-300 font-bold text-[10px] px-1.5 py-0.2 rounded w-fit mt-0.5">
-                                    ⭐ {row.destino_prioritario}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* Turno */}
-                            <td className="py-2 px-3 text-center">
-                              {row.turno ? (
-                                <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200">
-                                  {row.turno}
+                          return (
+                            <tr key={row.id || rIdx} className={`transition-colors ${rowBgClass}`}>
+                              {/* N° Vuelta */}
+                              <td className="py-2 px-3 text-center">
+                                <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full text-xs font-bold bg-slate-200/80 text-slate-800">
+                                  V.{row.n_vuelta || '1'}
                                 </span>
-                              ) : (
-                                <span className="text-slate-400 text-[11px]">—</span>
-                              )}
-                            </td>
+                              </td>
 
-                            {/* Hora Cita */}
-                            <td className="py-2 px-3 text-center">
-                              {row.hora_cita ? (
-                                <span className="inline-block px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
-                                  {row.hora_cita}
+                              {/* N° Ruta */}
+                              <td className="py-2 px-3 text-center font-mono font-black text-blue-700">
+                                <span className="bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                                  {row.ruta || '—'}
                                 </span>
-                              ) : (
-                                <span className="text-slate-400 text-[11px]">—</span>
-                              )}
-                            </td>
+                              </td>
 
-                            {/* Prioridad con Colores Pastel */}
-                            <td className="py-2 px-3 text-center">
-                              {row.prioridad && row.prioridad !== 'Normal' ? (
-                                <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-black border ${
-                                  isPrioUrgente
-                                    ? 'bg-[#ffd6d6] text-[#7f1d1d] border-[#fca5a5]'
-                                    : isUrgente
-                                    ? 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74]'
-                                    : 'bg-[#fef9c3] text-[#713f12] border-[#fde047]'
-                                }`}>
-                                  {row.prioridad}
-                                </span>
-                              ) : (
-                                <span className="text-slate-400 text-[11px]">Normal</span>
-                              )}
-                            </td>
+                              {/* Camión (Requisito 1) */}
+                              <td className="py-2 px-3 font-semibold text-slate-800">
+                                <div className="flex items-center gap-1">
+                                  <Truck size={12} className="text-slate-400 shrink-0" />
+                                  <span>{row.camion || 'Sin asignar'}</span>
+                                </div>
+                              </td>
 
-                            {/* Locales */}
-                            <td className="py-2 px-3 text-center font-bold text-slate-800">
-                              <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full text-[11px]">
-                                {row.locales || uniqueParadas.length || 1}
-                              </span>
-                            </td>
-
-                            {/* m³ */}
-                            <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
-                              {(parseFloat(row.m3) || 0).toFixed(3)}
-                            </td>
-
-                            {/* Paradas / Destinos */}
-                            <td className="py-2 px-3 text-[11px] text-slate-600 max-w-[280px]">
-                              {uniqueParadas && uniqueParadas.length > 0 ? (
-                                <div className="truncate" title={uniqueParadas.map(p => p.destino).join(', ')}>
-                                  {uniqueParadas.slice(0, 3).map((p, pI) => (
-                                    <span key={pI} className="inline-block bg-slate-100 px-1.5 py-0.2 rounded text-[10px] mr-1 mb-0.5 border border-slate-200">
-                                      {p.destino}
-                                    </span>
-                                  ))}
-                                  {uniqueParadas.length > 3 && (
-                                    <span className="text-[10px] text-slate-400 font-semibold">
-                                      +{uniqueParadas.length - 3} más
+                              {/* Cliente */}
+                              <td className="py-2 px-3">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-slate-800">{row.cliente || 'Centralizado'}</span>
+                                  {row.destino_prioritario && (
+                                    <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 border border-red-300 font-bold text-[10px] px-1.5 py-0.2 rounded w-fit mt-0.5">
+                                      ⭐ {row.destino_prioritario}
                                     </span>
                                   )}
                                 </div>
-                              ) : (
-                                <span className="text-slate-400 italic">—</span>
-                              )}
-                            </td>
+                              </td>
 
-                            {/* Acción Ruta Individual */}
-                            <td className="py-2 px-3 text-center">
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyText(singleMsg, row.id)}
-                                  className={`p-1 rounded border transition-all ${
-                                    isSingleCopied
-                                      ? 'bg-green-100 border-green-300 text-green-700'
-                                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                                  }`}
-                                  title="Copiar texto de esta ruta individual"
-                                >
-                                  {isSingleCopied ? <Check size={11} className="text-green-600" /> : <Copy size={11} />}
-                                </button>
+                              {/* Turno */}
+                              <td className="py-2 px-3 text-center">
+                                {row.turno ? (
+                                  <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                                    {row.turno}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px]">—</span>
+                                )}
+                              </td>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handlePreviewSingle(row)}
-                                  className="p-1 rounded border bg-white border-slate-200 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
-                                  title="Ver vista previa individual"
-                                >
-                                  <Eye size={11} />
-                                </button>
+                              {/* Hora Cita */}
+                              <td className="py-2 px-3 text-center">
+                                {row.hora_cita ? (
+                                  <span className="inline-block px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                                    {row.hora_cita}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px]">—</span>
+                                )}
+                              </td>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenWhatsApp(condPhone, singleMsg)}
-                                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200 transition-colors"
-                                  title="Enviar solo esta ruta"
-                                >
-                                  WA
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              {/* Prioridad con Colores Pastel */}
+                              <td className="py-2 px-3 text-center">
+                                {row.prioridad && row.prioridad !== 'Normal' ? (
+                                  <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-black border ${
+                                    isPrioUrgente
+                                      ? 'bg-[#ffd6d6] text-[#7f1d1d] border-[#fca5a5]'
+                                      : isUrgente
+                                      ? 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74]'
+                                      : 'bg-[#fef9c3] text-[#713f12] border-[#fde047]'
+                                  }`}>
+                                    {row.prioridad}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 text-[11px]">Normal</span>
+                                )}
+                              </td>
+
+                              {/* Locales */}
+                              <td className="py-2 px-3 text-center font-bold text-slate-800">
+                                <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full text-[11px]">
+                                  {row.locales || uniqueParadas.length || 1}
+                                </span>
+                              </td>
+
+                              {/* m³ */}
+                              <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">
+                                {(parseFloat(row.m3) || 0).toFixed(3)}
+                              </td>
+
+                              {/* Paradas / Destinos con expandir/contraer paradas */}
+                              <td className="py-2 px-3 text-[11px] text-slate-600 max-w-[280px]">
+                                {uniqueParadas && uniqueParadas.length > 0 ? (
+                                  <div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {(isParadasExpanded ? uniqueParadas : uniqueParadas.slice(0, 3)).map((p, pI) => {
+                                        const isDestPrio = row.destino_prioritario && p.destino?.toLowerCase().includes(row.destino_prioritario.toLowerCase());
+                                        return (
+                                          <span
+                                            key={pI}
+                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] border ${
+                                              isDestPrio
+                                                ? 'bg-red-50 text-red-700 border-red-200 font-bold'
+                                                : 'bg-slate-100 text-slate-700 border-slate-200'
+                                            }`}
+                                          >
+                                            {p.destino}{p.comuna ? ` (${p.comuna})` : ''}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                    {uniqueParadas.length > 3 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleParadasRow(rowKey)}
+                                        className="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold underline mt-1 block"
+                                      >
+                                        {isParadasExpanded ? '▲ Ver menos' : `▼ +${uniqueParadas.length - 3} paradas más`}
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 italic">—</span>
+                                )}
+                              </td>
+
+                              {/* Acción Ruta Individual */}
+                              <td className="py-2 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyText(singleMsg, row.id)}
+                                    className={`p-1 rounded border transition-all ${
+                                      isSingleCopied
+                                        ? 'bg-green-100 border-green-300 text-green-700'
+                                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                    }`}
+                                    title="Copiar texto de esta ruta individual"
+                                  >
+                                    {isSingleCopied ? <Check size={11} className="text-green-600" /> : <Copy size={11} />}
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePreviewSingle(row)}
+                                    className="p-1 rounded border bg-white border-slate-200 text-slate-400 hover:text-blue-600 hover:bg-blue-50"
+                                    title="Ver vista previa individual"
+                                  >
+                                    <Eye size={11} />
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenWhatsApp(condPhone, singleMsg)}
+                                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-600 hover:text-white border border-emerald-200 transition-colors"
+                                    title="Enviar solo esta ruta"
+                                  >
+                                    WA
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             );
           })
@@ -1317,7 +1565,7 @@ export default function RouteDispatch() {
                           <div className="flex items-center gap-2">
                             <h4 className="font-bold text-slate-900 text-sm">{group.conductor}</h4>
                             <span className="text-[10px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full">
-                              {group.rows.length} {group.rows.length === 1 ? 'ruta' : 'rutas'}
+                              {group.totalViajes} {group.totalViajes === 1 ? 'viaje' : 'viajes'} ({group.rows.length} {group.rows.length === 1 ? 'ruta' : 'rutas'})
                             </span>
                           </div>
                           <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
