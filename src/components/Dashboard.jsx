@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useStaffStore } from '../store/staffStore';
+import { useStaffStore, isStaffExternal } from '../store/staffStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { Select } from './ui/Select';
 import { Input } from './ui/Input';
@@ -71,7 +71,7 @@ export default function Dashboard() {
 
   // Data processing - Solo considerar dotación Propia en Dashboard según requerimiento
   const filteredStaff = useMemo(() => {
-    let list = (staffList || []).filter(s => (s.tipo_dotacion || 'Propia').toLowerCase() === 'propia');
+    let list = (staffList || []).filter(s => !isStaffExternal(s));
     if (roleFilters.length > 0) {
       list = list.filter(s => roleFilters.includes(s.role));
     }

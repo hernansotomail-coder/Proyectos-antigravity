@@ -1,3 +1,15 @@
+
+export const isStaffExternal = (s) => {
+  if (!s) return false;
+  if ((s.tipo_dotacion || '').toLowerCase() === 'externo') return true;
+  if (s.empresa_externa && String(s.empresa_externa).trim() !== '') return true;
+  if (s.rut && String(s.rut).toUpperCase().startsWith('EXT-')) return true;
+  return false;
+};
+
+export const inferTipoDotacion = (s) => {
+  return isStaffExternal(s) ? 'Externo' : 'Propia';
+};
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
@@ -83,8 +95,9 @@ export const useStaffStore = create((set, get) => ({
           (s.name ? phoneMap[s.name.trim()] : null) || 
           '';
 
-        const tipo = s.tipo_dotacion || tipoMap[s.id] || (s.rut ? tipoMap[s.rut] : null) || 'Propia';
+        const rawTipo = s.tipo_dotacion || tipoMap[s.id] || (s.rut ? tipoMap[s.rut] : null) || 'Propia';
         const empresa = s.empresa_externa || empresaMap[s.id] || (s.rut ? empresaMap[s.rut] : null) || (s.name ? empresaMap[s.name.trim().toLowerCase()] : null) || '';
+        const tipo = (empresa || (s.rut && String(s.rut).startsWith('EXT-')) || rawTipo.toLowerCase() === 'externo') ? 'Externo' : rawTipo;
 
         return {
           ...s,
@@ -247,13 +260,20 @@ export const useStaffStore = create((set, get) => ({
         return false;
       }
 
-      // Sanitizar columnas reconocidas por la tabla staff en Supabase (rut, name, role, status)
-      const sanitized = uniqueList.map(({ rut, name, role, status }) => ({
-        rut: String(rut).trim(),
-        name: String(name || '').trim(),
-        role: String(role || 'Auxiliar').trim(),
-        status: String(status || 'Activo').trim()
-      }));
+      // Sanitizar columnas reconocidas por la tabla staff en Supabase (rut, name, role, status, tipo_dotacion, empresa_externa, phone)
+      const sanitized = uniqueList.map(({ rut, name, role, status, tipo_dotacion, empresa_externa, phone }) => {
+        const cleanEmpresa = empresa_externa ? String(empresa_externa).trim() : '';
+        const isExt = (tipo_dotacion && tipo_dotacion.toLowerCase() === 'externo') || !!cleanEmpresa || String(rut).startsWith('EXT-');
+        return {
+          rut: String(rut).trim(),
+          name: String(name || '').trim(),
+          role: String(role || 'Auxiliar').trim(),
+          status: String(status || 'Activo').trim(),
+          tipo_dotacion: isExt ? 'Externo' : (tipo_dotacion || 'Propia'),
+          empresa_externa: cleanEmpresa || null,
+          phone: phone ? String(phone).trim() : null
+        };
+      });
 
       // Inserción por lotes (chunks) de 50 para máxima estabilidad
       const chunkSize = 50;
