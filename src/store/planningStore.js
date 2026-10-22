@@ -1336,9 +1336,9 @@ export const usePlanningStore = create((set, get) => ({
     return true;
   },
 
-  // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo", actualiza baseline y guarda en histórico
+  // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo" y a "Envío de rutas", actualiza baseline y guarda en histórico
   saveDisponibilizacion: (fecha) => {
-    const { transmittedAssignments, savedRuteoBaseline } = get();
+    const { transmittedAssignments, savedRuteoBaseline, ruteoOverrides } = get();
     const rows = transmittedAssignments[fecha] || [];
 
     if (rows.length === 0) {
@@ -1346,20 +1346,45 @@ export const usePlanningStore = create((set, get) => ({
       return false;
     }
 
-    const synced = syncHistoryAndSavedForDate(get(), fecha, rows);
+    // Enriquecer cada fila con los metadatos de Ruteo (Turno, Hora Cita, Prioridad, Destino Prioritario)
+    const dateOverrides = ruteoOverrides?.[fecha] || {};
+    const enrichedRows = rows.map(r => {
+      const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const hasAssignment = !!(r.camion && r.conductor_name);
+      const tripKey = hasAssignment
+        ? `${r.camion.trim()}:::${r.conductor_name.trim()}:::${vueltaKey}`
+        : `single:::${r.ruta}:::${r.id}`;
+      const ov = dateOverrides[tripKey] || {};
+      return {
+        ...r,
+        turno: ov.turno !== undefined ? ov.turno : (r.turno || ''),
+        hora_cita: ov.hora_cita !== undefined ? ov.hora_cita : (r.hora_cita || ''),
+        prioridad: ov.prioridad !== undefined ? ov.prioridad : (r.prioridad || 'Normal'),
+        destino_prioritario: ov.destino_prioritario !== undefined ? ov.destino_prioritario : (r.destino_prioritario || '')
+      };
+    });
+
+    const synced = syncHistoryAndSavedForDate(get(), fecha, enrichedRows);
     const updatedBaseline = {
       ...(savedRuteoBaseline || {}),
-      [fecha]: JSON.parse(JSON.stringify(rows))
+      [fecha]: JSON.parse(JSON.stringify(enrichedRows))
     };
     persistSavedBaseline(updatedBaseline);
 
+    const updatedAssignments = {
+      ...(transmittedAssignments || {}),
+      [fecha]: enrichedRows
+    };
+    persistAssignments(updatedAssignments);
+
     set({
+      transmittedAssignments: updatedAssignments,
       ...synced,
       savedRuteoBaseline: updatedBaseline,
       selectedRuteoDate: fecha
     });
 
-    toast.success(`¡Disponibilización del ${fecha} guardada y transmitida a Ruteo!`);
+    toast.success(`¡Disponibilización del ${fecha} guardada y transmitida a Envío de rutas!`);
     return true;
   },
 

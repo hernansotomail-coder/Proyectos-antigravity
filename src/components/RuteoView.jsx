@@ -903,7 +903,7 @@ export default function RuteoView() {
   };
 
   // ==========================================
-  // EXPORTACIÓN A EXCEL DE LA NUEVA MATRIZ
+  // EXPORTACIÓN A EXCEL CON FORMATO Y COLORES (SpreadsheetML)
   // ==========================================
   const handleExportExcel = () => {
     if (tripsList.length === 0) {
@@ -912,35 +912,355 @@ export default function RuteoView() {
     }
 
     try {
-      const exportRows = tripsList.map(trip => {
-        const zonaCompleta = trip.zonaItems.map(z => z.text).join(' | ');
-        return {
-          'Fecha': trip.fecha,
-          'Operación': trip.operacionStr,
-          'Ruta': trip.rutasStr,
-          'Camión': trip.camion,
-          'N° de vuelta': trip.displayVuelta,
-          'Conductor': trip.conductor_name,
-          'Auxiliar': trip.auxiliares.length > 0 ? trip.auxiliares.join(', ') : '-',
-          'Zona': zonaCompleta,
-          'Destino Prioritario': trip.destino_prioritario || '',
-          'Vol Carga (m³)': trip.totalM3,
-          'Locales': trip.totalLocales,
-          'Peso Total (kg)': trip.totalPeso,
-          'Cajas (CJ)': trip.totalCajas,
-          'Turno': trip.turno || '',
-          'Hora Cita': trip.hora_cita || '',
-          'Prioridad': trip.prioridad || 'Normal'
-        };
+      const escapeXml = (unsafe) => {
+        if (unsafe === null || unsafe === undefined) return '';
+        return String(unsafe)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+      };
+
+      const bannerTitle = `ASIGNACIÓN DE RUTAS - ${bannerClientTitle}`;
+      const subtitle = `Despacho ${formatBannerDate(activeDate)} | Base: Lago Riñihue 02319, San Bernardo`;
+
+      let xml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+<Styles>
+  <Style ss:ID="Default" ss:Name="Normal">
+    <Alignment ss:Vertical="Center"/>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
+  </Style>
+  <Style ss:ID="BannerTitle">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Font ss:FontName="Calibri" ss:Size="13" ss:Color="#FFFFFF" ss:Bold="1"/>
+    <Interior ss:Color="#132C54" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="BannerSubtitle">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FDE047" ss:Bold="1"/>
+    <Interior ss:Color="#132C54" ss:Pattern="Solid"/>
+  </Style>
+
+  <!-- Encabezados de Columna -->
+  <Style ss:ID="ColHeaderLeft">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FFFFFF" ss:Bold="1"/>
+    <Interior ss:Color="#183564" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="ColHeaderCenter">
+    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FFFFFF" ss:Bold="1"/>
+    <Interior ss:Color="#183564" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="ColHeaderRight">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#22447C"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FFFFFF" ss:Bold="1"/>
+    <Interior ss:Color="#183564" ss:Pattern="Solid"/>
+  </Style>
+
+  <!-- Prioridad urgente (Rojo Pastel: #FFD6D6, Texto: #7F1D1D, Borde: #FCA5A5) -->
+  <Style ss:ID="Row_PrioUrgente_Left">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7F1D1D" ss:Bold="1"/>
+    <Interior ss:Color="#FFD6D6" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_PrioUrgente_Center">
+    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7F1D1D" ss:Bold="1"/>
+    <Interior ss:Color="#FFD6D6" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_PrioUrgente_Right">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FCA5A5"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7F1D1D" ss:Bold="1"/>
+    <Interior ss:Color="#FFD6D6" ss:Pattern="Solid"/>
+    <NumberFormat ss:Format="#,##0.000"/>
+  </Style>
+
+  <!-- Urgente (Naranjo Pastel: #FFEDD5, Texto: #7C2D12, Borde: #FDBA74) -->
+  <Style ss:ID="Row_Urgente_Left">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7C2D12" ss:Bold="1"/>
+    <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_Urgente_Center">
+    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7C2D12" ss:Bold="1"/>
+    <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_Urgente_Right">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7C2D12" ss:Bold="1"/>
+    <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
+    <NumberFormat ss:Format="#,##0.000"/>
+  </Style>
+
+  <!-- Redespacho (Amarillo Pastel: #FEF9C3, Texto: #713F12, Borde: #FDE047) -->
+  <Style ss:ID="Row_Redespacho_Left">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
+    <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_Redespacho_Center">
+    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
+    <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_Redespacho_Right">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
+    <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
+    <NumberFormat ss:Format="#,##0.000"/>
+  </Style>
+
+  <!-- Filas Normales Pares (Blanco) -->
+  <Style ss:ID="Row_NormalEven_Left">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
+    <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_NormalEven_Center">
+    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
+    <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_NormalEven_Right">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
+    <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
+    <NumberFormat ss:Format="#,##0.000"/>
+  </Style>
+
+  <!-- Filas Normales Impares (Gris Claro) -->
+  <Style ss:ID="Row_NormalOdd_Left">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
+    <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_NormalOdd_Center">
+    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
+    <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="Row_NormalOdd_Right">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
+    <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
+    <NumberFormat ss:Format="#,##0.000"/>
+  </Style>
+</Styles>
+
+<Worksheet ss:Name="Matriz Ruteo">
+  <Table>
+    <Column ss:Width="85"/>
+    <Column ss:Width="140"/>
+    <Column ss:Width="110"/>
+    <Column ss:Width="110"/>
+    <Column ss:Width="95"/>
+    <Column ss:Width="180"/>
+    <Column ss:Width="150"/>
+    <Column ss:Width="420"/>
+    <Column ss:Width="85"/>
+    <Column ss:Width="80"/>
+    <Column ss:Width="90"/>
+    <Column ss:Width="130"/>
+    <Column ss:Width="160"/>
+
+    <!-- Banner Superior -->
+    <Row ss:Height="26">
+      <Cell ss:MergeAcross="12" ss:StyleID="BannerTitle"><Data ss:Type="String">${escapeXml(bannerTitle)}</Data></Cell>
+    </Row>
+    <Row ss:Height="20">
+      <Cell ss:MergeAcross="12" ss:StyleID="BannerSubtitle"><Data ss:Type="String">${escapeXml(subtitle)}</Data></Cell>
+    </Row>
+    <Row ss:Height="6"/>
+
+    <!-- Fila de Encabezados -->
+    <Row ss:Height="24">
+      <Cell ss:StyleID="ColHeaderCenter"><Data ss:Type="String">Fecha</Data></Cell>
+      <Cell ss:StyleID="ColHeaderLeft"><Data ss:Type="String">Operación</Data></Cell>
+      <Cell ss:StyleID="ColHeaderCenter"><Data ss:Type="String">Ruta</Data></Cell>
+      <Cell ss:StyleID="ColHeaderLeft"><Data ss:Type="String">Camión</Data></Cell>
+      <Cell ss:StyleID="ColHeaderCenter"><Data ss:Type="String">N° de vuelta</Data></Cell>
+      <Cell ss:StyleID="ColHeaderLeft"><Data ss:Type="String">Conductor</Data></Cell>
+      <Cell ss:StyleID="ColHeaderLeft"><Data ss:Type="String">Auxiliar</Data></Cell>
+      <Cell ss:StyleID="ColHeaderLeft"><Data ss:Type="String">Zona (Ruta, Cliente, Comuna Más Lejana, LC, m³)</Data></Cell>
+      <Cell ss:StyleID="ColHeaderRight"><Data ss:Type="String">Vol Carga</Data></Cell>
+      <Cell ss:StyleID="ColHeaderCenter"><Data ss:Type="String">Turno</Data></Cell>
+      <Cell ss:StyleID="ColHeaderCenter"><Data ss:Type="String">Hora Cita</Data></Cell>
+      <Cell ss:StyleID="ColHeaderCenter"><Data ss:Type="String">Prioridad</Data></Cell>
+      <Cell ss:StyleID="ColHeaderLeft"><Data ss:Type="String">Destino Prioritario</Data></Cell>
+    </Row>
+`;
+
+      tripsList.forEach((trip, idx) => {
+        const isPrioUrgente = trip.prioridad === 'Prioridad urgente';
+        const isUrgente = trip.prioridad === 'Urgente';
+        const isRedespacho = trip.prioridad === 'Redespacho';
+
+        let prefix = idx % 2 === 0 ? 'Row_NormalEven' : 'Row_NormalOdd';
+        if (isPrioUrgente) prefix = 'Row_PrioUrgente';
+        else if (isUrgente) prefix = 'Row_Urgente';
+        else if (isRedespacho) prefix = 'Row_Redespacho';
+
+        const left = `${prefix}_Left`;
+        const center = `${prefix}_Center`;
+        const right = `${prefix}_Right`;
+
+        const zonaCompleta = (trip.zonaItems || []).map(z => z.text).join(' | ');
+        const auxStr = trip.auxiliares?.length > 0 ? trip.auxiliares.join(', ') : '-';
+        const volNum = Number(trip.totalM3) || 0;
+
+        xml += `    <Row ss:Height="22">
+      <Cell ss:StyleID="${center}"><Data ss:Type="String">${escapeXml(trip.fecha)}</Data></Cell>
+      <Cell ss:StyleID="${left}"><Data ss:Type="String">${escapeXml(trip.operacionStr)}</Data></Cell>
+      <Cell ss:StyleID="${center}"><Data ss:Type="String">${escapeXml(trip.rutasStr)}</Data></Cell>
+      <Cell ss:StyleID="${left}"><Data ss:Type="String">${escapeXml(trip.camion)}</Data></Cell>
+      <Cell ss:StyleID="${center}"><Data ss:Type="String">${escapeXml(trip.displayVuelta)}</Data></Cell>
+      <Cell ss:StyleID="${left}"><Data ss:Type="String">${escapeXml(trip.conductor_name)}</Data></Cell>
+      <Cell ss:StyleID="${left}"><Data ss:Type="String">${escapeXml(auxStr)}</Data></Cell>
+      <Cell ss:StyleID="${left}"><Data ss:Type="String">${escapeXml(zonaCompleta)}</Data></Cell>
+      <Cell ss:StyleID="${right}"><Data ss:Type="Number">${volNum}</Data></Cell>
+      <Cell ss:StyleID="${center}"><Data ss:Type="String">${escapeXml(trip.turno || '')}</Data></Cell>
+      <Cell ss:StyleID="${center}"><Data ss:Type="String">${escapeXml(trip.hora_cita || '')}</Data></Cell>
+      <Cell ss:StyleID="${center}"><Data ss:Type="String">${escapeXml(trip.prioridad || 'Normal')}</Data></Cell>
+      <Cell ss:StyleID="${left}"><Data ss:Type="String">${escapeXml(trip.destino_prioritario || '')}</Data></Cell>
+    </Row>\n`;
       });
 
-      const ws = XLSX.utils.json_to_sheet(exportRows);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Matriz Ruteo');
-      const safeTitle = bannerClientTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
-      XLSX.writeFile(wb, `Asignacion_Rutas_${safeTitle}_${activeDate}.xlsx`);
+      xml += `  </Table>
+  <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">
+    <DisplayGridlines/>
+  </WorksheetOptions>
+</Worksheet>
+</Workbook>`;
 
-      toast.success(`Matriz Excel generada con éxito (${exportRows.length} viajes exportados).`);
+      const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const safeTitle = bannerClientTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+      link.download = `Asignacion_Rutas_${safeTitle}_${activeDate}.xls`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      toast.success(`Matriz Excel descargada con formato y colores (${tripsList.length} viajes exportados).`);
     } catch (err) {
       console.error(err);
       toast.error('Error al generar archivo Excel.');
@@ -1367,16 +1687,23 @@ export default function RuteoView() {
             <tbody className="divide-y divide-slate-200">
               {tripsList.map((trip, idx) => {
                 const isSelected = selectedTripKeys.includes(trip.key);
-                const isUrgente = trip.prioridad === 'Urgente' || trip.prioridad === 'Prioridad urgente';
+                const isPrioUrgente = trip.prioridad === 'Prioridad urgente';
+                const isUrgente = trip.prioridad === 'Urgente';
                 const isRedespacho = trip.prioridad === 'Redespacho';
+                const hasPriorityBg = isPrioUrgente || isUrgente || isRedespacho;
                 const isExpanded = !!expandedKeys[trip.key];
 
-                // Fondo dinámico: Amarillo si es Urgente (como foto adjunta), Naranja si es Redespacho
+                // Fondo dinámico según Prioridad con Colores Pastel Solicitados:
+                // 1. Rojo Pastel para 'Prioridad urgente' (#ffd6d6)
+                // 2. Naranjo Pastel para 'Urgente' (#ffedd5)
+                // 3. Amarillo Pastel para 'Redespacho' (#fef9c3)
                 let rowBgClass = 'bg-white hover:bg-blue-50/50 text-slate-800';
-                if (isUrgente) {
-                  rowBgClass = 'bg-[#ffcc00] hover:bg-[#f2c200] text-slate-950 font-bold border-b border-amber-400';
+                if (isPrioUrgente) {
+                  rowBgClass = 'bg-[#ffd6d6] hover:bg-[#fecaca] text-[#7f1d1d] font-bold border-b border-[#fca5a5]';
+                } else if (isUrgente) {
+                  rowBgClass = 'bg-[#ffedd5] hover:bg-[#fed7aa] text-[#7c2d12] font-bold border-b border-[#fdba74]';
                 } else if (isRedespacho) {
-                  rowBgClass = 'bg-orange-100 hover:bg-orange-200/80 text-orange-950 font-semibold border-b border-orange-300';
+                  rowBgClass = 'bg-[#fef9c3] hover:bg-[#fef08a] text-[#713f12] font-semibold border-b border-[#fde047]';
                 } else if (idx % 2 === 1) {
                   rowBgClass = 'bg-slate-50/60 hover:bg-blue-50/50 text-slate-800';
                 }
@@ -1409,8 +1736,16 @@ export default function RuteoView() {
                       </td>
 
                       {/* 4. Ruta (ej. 1401+4305+4701) */}
-                      <td className="px-3 py-2.5 border-r border-slate-200/80 text-center font-mono font-black text-blue-900 tracking-wider">
-                        <span className={`px-2 py-0.5 rounded text-[11px] ${isUrgente ? 'bg-black/10' : 'bg-blue-100/80 text-blue-900'}`}>
+                      <td className="px-3 py-2.5 border-r border-slate-200/80 text-center font-mono font-black tracking-wider">
+                        <span className={`px-2 py-0.5 rounded text-[11px] ${
+                          isPrioUrgente
+                            ? 'bg-[#fca5a5]/80 text-[#7f1d1d] font-black'
+                            : isUrgente
+                            ? 'bg-[#fdba74]/80 text-[#7c2d12] font-black'
+                            : isRedespacho
+                            ? 'bg-[#fde047]/80 text-[#713f12] font-black'
+                            : 'bg-blue-100/80 text-blue-900 font-black'
+                        }`}>
                           {trip.rutasStr}
                         </span>
                       </td>
@@ -1464,7 +1799,7 @@ export default function RuteoView() {
                             </div>
                           ))}
 
-                          {/* DESTINO PRIORITARIO DESTACADO EN ROJO / LLAMATIVO */}
+                          {/* DESTINO PRIORITARIO DESTACADO */}
                           {trip.destino_prioritario && (
                             <div className="pt-0.5 flex items-center gap-1.5">
                               <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 border border-red-300 font-black text-[11px] px-2 py-0.5 rounded shadow-2xs">
@@ -1508,8 +1843,8 @@ export default function RuteoView() {
                           value={trip.turno}
                           onChange={e => handleUpdateTripField(trip.key, 'turno', e.target.value)}
                           className={`w-28 text-xs font-bold py-1 px-1.5 rounded-lg border focus:outline-none cursor-pointer transition-all ${
-                            isUrgente
-                              ? 'bg-white/90 border-slate-400 text-slate-900 shadow-xs'
+                            hasPriorityBg
+                              ? 'bg-white/95 border-black/20 text-slate-900 shadow-xs'
                               : trip.turno
                               ? 'bg-blue-50 border-blue-300 text-blue-900 shadow-2xs'
                               : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
@@ -1529,8 +1864,8 @@ export default function RuteoView() {
                           onChange={e => handleUpdateTripField(trip.key, 'hora_cita', e.target.value)}
                           placeholder="--:--"
                           className={`w-24 text-center text-xs font-mono font-bold py-1 px-1.5 rounded-lg border focus:outline-none transition-all ${
-                            isUrgente
-                              ? 'bg-white/90 border-slate-400 text-slate-900 focus:bg-white'
+                            hasPriorityBg
+                              ? 'bg-white/95 border-black/20 text-slate-900 focus:bg-white'
                               : trip.hora_cita
                               ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-black'
                               : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 focus:bg-white focus:border-blue-500'
@@ -1538,16 +1873,18 @@ export default function RuteoView() {
                         />
                       </td>
 
-                      {/* 13. Prioridad (Dropdown: Normal, Prioridad urgente, Urgente, Redespacho) */}
+                      {/* 13. Prioridad (Dropdown: Normal, Prioridad urgente, Urgente, Redespacho con colores Pastel) */}
                       <td className="px-2 py-2 border-r border-slate-200/80 text-center">
                         <select
                           value={trip.prioridad}
                           onChange={e => handleUpdateTripField(trip.key, 'prioridad', e.target.value)}
-                          className={`w-32 text-xs font-black py-1 px-2 rounded-lg border focus:outline-none cursor-pointer transition-all ${
-                            isUrgente
-                              ? 'bg-red-600 text-white border-red-700 shadow-xs'
+                          className={`w-36 text-xs font-black py-1 px-2 rounded-lg border focus:outline-none cursor-pointer transition-all ${
+                            isPrioUrgente
+                              ? 'bg-[#ffd6d6] text-[#7f1d1d] border-[#fca5a5] shadow-xs'
+                              : isUrgente
+                              ? 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74] shadow-xs'
                               : isRedespacho
-                              ? 'bg-orange-600 text-white border-orange-700 shadow-xs'
+                              ? 'bg-[#fef9c3] text-[#713f12] border-[#fde047] shadow-xs'
                               : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
                           }`}
                         >

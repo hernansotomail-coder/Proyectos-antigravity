@@ -66,12 +66,20 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha) => {
   const locales = row.locales || (uniqueParadas.length > 0 ? uniqueParadas.length : 1);
   const m3 = (parseFloat(row.m3) || 0).toFixed(3);
   const camion = row.camion?.trim() || '';
+  const horaCita = row.hora_cita?.trim();
+  const turno = row.turno?.trim();
+  const prioridad = row.prioridad?.trim();
+  const destinoPrioritario = row.destino_prioritario?.trim();
 
   let msg = `🚛 *ASIGNACIÓN DE RUTA* - ${fecha}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `🛣️ *N° Ruta:* ${ruta}\n`;
   msg += `🔄 *N° Vuelta:* ${vuelta}\n`;
   msg += `🏢 *Cliente:* ${cliente}\n`;
+  if (turno) msg += `🕐 *Turno:* ${turno}\n`;
+  if (horaCita) msg += `⏰ *Hora Cita / Llegada:* ${horaCita}\n`;
+  if (prioridad && prioridad !== 'Normal') msg += `🚨 *Prioridad:* ${prioridad.toUpperCase()}\n`;
+  if (destinoPrioritario) msg += `⭐ *Destino Prioritario:* ${destinoPrioritario}\n`;
   msg += `\n`;
   msg += `👥 *Tripulación Asignada:*\n`;
   msg += `• *Conductor:* ${conductor}\n`;
@@ -89,7 +97,8 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha) => {
       const sec = idx + 1;
       const dest = p.destino || 'Destino';
       const com = p.comuna ? ` (${p.comuna})` : '';
-      msg += `  ${sec}. ${dest}${com}\n`;
+      const isDestPrio = destinoPrioritario && dest.toLowerCase().includes(destinoPrioritario.toLowerCase());
+      msg += `  ${sec}. ${dest}${com}${isDestPrio ? ' ⭐ [PRIORITARIO]' : ''}\n`;
     });
     if (uniqueParadas.length > 15) {
       msg += `  ... y ${uniqueParadas.length - 15} paradas más\n`;
@@ -123,12 +132,20 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     const cliente = r.cliente || 'Centralizado';
     const loc = r.locales || (r.paradas && getUniqueParadas(r.paradas).length) || 1;
     const m3Val = parseFloat(r.m3) || 0;
+    const turno = r.turno?.trim();
+    const horaCita = r.hora_cita?.trim();
+    const prioridad = r.prioridad?.trim();
+    const destinoPrioritario = r.destino_prioritario?.trim();
 
     totalLocales += Number(loc);
     totalM3 += m3Val;
 
     msg += `🔹 *${idx + 1}. Vuelta ${vuelta} - Ruta ${ruta}*\n`;
     msg += `   • Cliente: ${cliente}\n`;
+    if (turno) msg += `   • 🕐 Turno: ${turno}\n`;
+    if (horaCita) msg += `   • ⏰ Hora Cita / Llegada: ${horaCita}\n`;
+    if (prioridad && prioridad !== 'Normal') msg += `   • 🚨 Prioridad: ${prioridad.toUpperCase()}\n`;
+    if (destinoPrioritario) msg += `   • ⭐ Destino Prioritario: ${destinoPrioritario}\n`;
     msg += `   • Locales: ${loc} | Volumen: ${m3Val.toFixed(3)} m³\n`;
     if (r.rampla) msg += `   • Rampla: ${r.rampla}\n`;
     msg += `\n`;
@@ -162,10 +179,15 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha) => {
     const vuelta = r.n_vuelta ? `(V.${r.n_vuelta})` : '';
     const m3 = (parseFloat(r.m3) || 0).toFixed(2);
     const loc = r.locales || (getUniqueParadas(r.paradas).length || 1);
+    const prioTag = r.prioridad && r.prioridad !== 'Normal' ? ` [${r.prioridad.toUpperCase()}]` : '';
+    const citaTag = r.hora_cita ? ` | ⏰ Cita: ${r.hora_cita}` : '';
+    const turnoTag = r.turno ? ` | 🕐 T.${r.turno}` : '';
+    const prioDest = r.destino_prioritario ? `\n   ⭐ Destino Prioritario: ${r.destino_prioritario}` : '';
 
-    msg += `${idx + 1}️⃣ *Ruta ${r.ruta}* ${vuelta} - ${r.cliente}\n`;
-    msg += `   👤 Cond: *${cond}*\n`;
-    msg += `   👥 Aux: *${aux}*\n`;
+    msg += `${idx + 1}️⃣ *Ruta ${r.ruta}* ${vuelta} - ${r.cliente}${prioTag}\n`;
+    msg += `   👤 Cond: *${cond}* | 👥 Aux: *${aux}*\n`;
+    if (citaTag || turnoTag) msg += `  ${citaTag}${turnoTag}\n`;
+    if (prioDest) msg += `${prioDest}\n`;
     msg += `   📍 Locales: ${loc} | 📦 ${m3} m³\n\n`;
   });
 
@@ -175,7 +197,7 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha) => {
 };
 
 export default function RouteDispatch() {
-  const { savedHistoryList, savedRuteoByDate, transmittedAssignments } = usePlanningStore();
+  const { savedHistoryList, savedRuteoByDate, transmittedAssignments, ruteoOverrides } = usePlanningStore();
   const { staffList, fetchStaff, updateStaffPhone } = useStaffStore();
 
   useEffect(() => {
@@ -326,16 +348,34 @@ export default function RouteDispatch() {
     return (savedHistoryList || []).find(h => h.fecha === selectedDate);
   }, [savedHistoryList, selectedDate]);
 
-  // Obtener las filas de datos con información que fue guardada al presionar "Guardar Disponibilización"
+  // Obtener las filas de datos con información que fue guardada al presionar "Guardar Disponibilización", enriquecida con metadatos de Ruteo
   const rawRows = useMemo(() => {
+    let rows = [];
     if (currentHistoryEntry && currentHistoryEntry.rows && currentHistoryEntry.rows.length > 0) {
-      return currentHistoryEntry.rows;
+      rows = currentHistoryEntry.rows;
+    } else if (savedRuteoByDate && savedRuteoByDate[selectedDate] && savedRuteoByDate[selectedDate].length > 0) {
+      rows = savedRuteoByDate[selectedDate];
+    } else {
+      rows = transmittedAssignments[selectedDate] || [];
     }
-    if (savedRuteoByDate && savedRuteoByDate[selectedDate] && savedRuteoByDate[selectedDate].length > 0) {
-      return savedRuteoByDate[selectedDate];
-    }
-    return transmittedAssignments[selectedDate] || [];
-  }, [currentHistoryEntry, savedRuteoByDate, transmittedAssignments, selectedDate]);
+
+    const dateOverrides = ruteoOverrides?.[selectedDate] || {};
+    return rows.map(r => {
+      const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const hasAssignment = !!(r.camion && r.conductor_name);
+      const tripKey = hasAssignment
+        ? `${r.camion.trim()}:::${r.conductor_name.trim()}:::${vueltaKey}`
+        : `single:::${r.ruta}:::${r.id}`;
+      const ov = dateOverrides[tripKey] || {};
+      return {
+        ...r,
+        turno: ov.turno !== undefined ? ov.turno : (r.turno || ''),
+        hora_cita: ov.hora_cita !== undefined ? ov.hora_cita : (r.hora_cita || ''),
+        prioridad: ov.prioridad !== undefined ? ov.prioridad : (r.prioridad || 'Normal'),
+        destino_prioritario: ov.destino_prioritario !== undefined ? ov.destino_prioritario : (r.destino_prioritario || '')
+      };
+    });
+  }, [currentHistoryEntry, savedRuteoByDate, transmittedAssignments, selectedDate, ruteoOverrides]);
 
   // Filtrado de filas
   const filteredRows = useMemo(() => {
@@ -768,6 +808,9 @@ export default function RouteDispatch() {
                 <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-center text-slate-700">N° Vuelta</th>
                 <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-center text-slate-700">N° Ruta</th>
                 <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-slate-700">Cliente</th>
+                <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-center text-slate-700">Turno</th>
+                <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-center text-slate-700">Hora Cita</th>
+                <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-center text-slate-700">Prioridad</th>
                 <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-center text-slate-700">Locales</th>
                 <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-right text-slate-700">m³</th>
                 <th className="py-2.5 px-3 font-bold uppercase text-[10px] tracking-wider text-center text-slate-700">Acción WhatsApp</th>
@@ -776,7 +819,7 @@ export default function RouteDispatch() {
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="py-12 text-center text-slate-400">
+                  <td colSpan="12" className="py-12 text-center text-slate-400">
                     <Truck size={32} className="mx-auto text-slate-300 mb-2" />
                     <p className="font-medium text-sm">No hay rutas registradas para esta fecha y filtros.</p>
                     <p className="text-xs text-slate-400 mt-0.5">Verifica si la disponibilización fue guardada o selecciona otra fecha.</p>
@@ -792,10 +835,23 @@ export default function RouteDispatch() {
                   const msgText = buildSingleRouteWhatsAppMessage(row, selectedDate);
                   const isCopied = copiedId === row.id;
 
+                  const isPrioUrgente = row.prioridad === 'Prioridad urgente';
+                  const isUrgente = row.prioridad === 'Urgente';
+                  const isRedespacho = row.prioridad === 'Redespacho';
+
+                  let rowBgClass = 'hover:bg-slate-50/80';
+                  if (isPrioUrgente) {
+                    rowBgClass = 'bg-[#ffd6d6]/70 hover:bg-[#fecaca] text-[#7f1d1d] font-semibold border-l-4 border-l-[#fca5a5]';
+                  } else if (isUrgente) {
+                    rowBgClass = 'bg-[#ffedd5]/70 hover:bg-[#fed7aa] text-[#7c2d12] font-semibold border-l-4 border-l-[#fdba74]';
+                  } else if (isRedespacho) {
+                    rowBgClass = 'bg-[#fef9c3]/70 hover:bg-[#fef08a] text-[#713f12] font-semibold border-l-4 border-l-[#fde047]';
+                  }
+
                   return (
                     <tr 
                       key={row.id || index}
-                      className={`hover:bg-slate-50/80 transition-colors ${isSelected ? 'bg-blue-50/40' : ''}`}
+                      className={`transition-colors ${rowBgClass} ${isSelected ? 'bg-blue-50/60 ring-1 ring-blue-400' : ''}`}
                     >
                       {/* Checkbox */}
                       <td className="py-2.5 px-3 text-center">
@@ -893,29 +949,77 @@ export default function RouteDispatch() {
                       </td>
 
                       {/* 5. Cliente */}
-                      <td className="py-2.5 px-3 max-w-[200px] truncate" title={row.cliente}>
-                        <span className="font-semibold text-slate-800">{row.cliente || 'Centralizado'}</span>
-                        {row.camion && (
-                          <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                            <Truck size={10} />
-                            <span>{row.camion}</span>
-                          </div>
+                      <td className="py-2.5 px-3 max-w-[200px]" title={row.cliente}>
+                        <div className="flex flex-col">
+                          <span className="font-semibold text-slate-800">{row.cliente || 'Centralizado'}</span>
+                          {row.camion && (
+                            <div className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                              <Truck size={10} />
+                              <span>{row.camion}</span>
+                            </div>
+                          )}
+                          {row.destino_prioritario && (
+                            <div className="mt-1">
+                              <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 border border-red-300 font-bold text-[10px] px-1.5 py-0.2 rounded shadow-2xs">
+                                ⭐ {row.destino_prioritario}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* 6. Turno */}
+                      <td className="py-2.5 px-3 text-center">
+                        {row.turno ? (
+                          <span className="inline-block px-2 py-0.5 rounded text-xs font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                            {row.turno}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">—</span>
                         )}
                       </td>
 
-                      {/* 6. Locales */}
+                      {/* 7. Hora Cita */}
+                      <td className="py-2.5 px-3 text-center">
+                        {row.hora_cita ? (
+                          <span className="inline-block px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                            {row.hora_cita}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">—</span>
+                        )}
+                      </td>
+
+                      {/* 8. Prioridad */}
+                      <td className="py-2.5 px-3 text-center">
+                        {row.prioridad && row.prioridad !== 'Normal' ? (
+                          <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-black border ${
+                            isPrioUrgente
+                              ? 'bg-[#ffd6d6] text-[#7f1d1d] border-[#fca5a5]'
+                              : isUrgente
+                              ? 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74]'
+                              : 'bg-[#fef9c3] text-[#713f12] border-[#fde047]'
+                          }`}>
+                            {row.prioridad}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">Normal</span>
+                        )}
+                      </td>
+
+                      {/* 9. Locales */}
                       <td className="py-2.5 px-3 text-center font-bold text-slate-800">
                         <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full text-[11px]">
                           {row.locales || (row.paradas && getUniqueParadas(row.paradas).length) || 1}
                         </span>
                       </td>
 
-                      {/* 7. m³ */}
+                      {/* 10. m³ */}
                       <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
                         {(parseFloat(row.m3) || 0).toFixed(3)}
                       </td>
 
-                      {/* 8. Acción WhatsApp */}
+                      {/* 11. Acción WhatsApp */}
                       <td className="py-2.5 px-3 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           {/* Botón WhatsApp Directo */}
