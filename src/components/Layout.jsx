@@ -6,7 +6,7 @@ import {
   FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles
 } from 'lucide-react';
 import { Toaster } from 'sonner';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, canUserViewMenu } from '../store/authStore';
 
 export default function Layout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -27,45 +27,43 @@ export default function Layout() {
   };
 
   // 1. Menú Planificación
-  const planificacionItems = [
-    { name: 'Asignación diaria', path: '/daily-planning', icon: Layers },
-    { name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
-    { name: 'Histórico de cambios', path: '/change-history', icon: History },
-    { name: 'Briefing', path: '/briefing', icon: FileText },
+  const allPlanificacionItems = [
+    { key: 'daily-planning', name: 'Asignación diaria', path: '/daily-planning', icon: Layers },
+    { key: 'ruteo', name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
+    { key: 'change-history', name: 'Histórico de cambios', path: '/change-history', icon: History },
+    { key: 'briefing', name: 'Briefing', path: '/briefing', icon: FileText },
   ];
 
   // 2. Menú Transporte (Operacional)
-  const transporteItems = [
-    { name: 'Disponibilización', path: '/assignment', icon: Truck },
-    { name: 'Histórico disponibilización', path: '/historical-assignment', icon: History },
-    { name: 'Envío de rutas', path: '/route-dispatch', icon: Send },
+  const allTransporteItems = [
+    { key: 'assignment', name: 'Disponibilización', path: '/assignment', icon: Truck },
+    { key: 'historical-assignment', name: 'Histórico disponibilización', path: '/historical-assignment', icon: History },
+    { key: 'route-dispatch', name: 'Envío de rutas', path: '/route-dispatch', icon: Send },
   ];
 
   // 3. Menú Gestión de Flota
-  let adminFlotaItems = [
-    { name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
-    { name: 'Dashboard de lavados', path: '/wash-dashboard', icon: Sparkles },
-    { name: 'Agregar Flota', path: '/fleet', icon: Truck },
-    { name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
-    { name: 'Lavados', path: '/fleet-washes', icon: Droplets },
+  const allAdminFlotaItems = [
+    { key: 'fleet-dashboard', name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
+    { key: 'wash-dashboard', name: 'Dashboard de lavados', path: '/wash-dashboard', icon: Sparkles },
+    { key: 'fleet', name: 'Agregar Flota', path: '/fleet', icon: Truck },
+    { key: 'manage-fleet', name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
+    { key: 'fleet-washes', name: 'Lavados', path: '/fleet-washes', icon: Droplets },
   ];
 
-  // 4. Menú Administración dotación (Antes "Administración" - Requisito 5)
-  let adminDotacionItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-    { name: 'Agregar Dotación', path: '/add-staff', icon: Users },
-    { name: 'Gestión Dotación', path: '/manage-staff', icon: UserCog },
-    { name: 'Asistencia', path: '/attendance', icon: CalendarClock },
+  // 4. Menú Administración dotación
+  const allAdminDotacionItems = [
+    { key: 'dashboard', name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    { key: 'add-staff', name: 'Agregar Dotación', path: '/add-staff', icon: Users },
+    { key: 'manage-staff', name: 'Gestión Dotación', path: '/manage-staff', icon: UserCog },
+    { key: 'attendance', name: 'Asistencia', path: '/attendance', icon: CalendarClock },
+    { key: 'users', name: 'Usuarios', path: '/users', icon: Key },
   ];
 
-  // Reglas de acceso por Rol
-  if (user?.role === 'Administrador') {
-    adminDotacionItems.push({ name: 'Usuarios', path: '/users', icon: Key });
-  } else if (user?.role === 'Visualizador') {
-    // El usuario Visualizador solo puede ver Dashboards
-    adminFlotaItems = adminFlotaItems.filter(i => i.name === 'Dashboard Flota' || i.name === 'Dashboard de lavados');
-    adminDotacionItems = adminDotacionItems.filter(i => i.name === 'Dashboard');
-  }
+  // Filtrar según permisos de usuario configurables (Requisito 4)
+  const planificacionItems = allPlanificacionItems.filter(i => canUserViewMenu(user, i.key));
+  const transporteItems = allTransporteItems.filter(i => canUserViewMenu(user, i.key));
+  const adminFlotaItems = allAdminFlotaItems.filter(i => canUserViewMenu(user, i.key));
+  const adminDotacionItems = allAdminDotacionItems.filter(i => canUserViewMenu(user, i.key));
 
   const isAnyPlanificacionActive = planificacionItems.some(
     item => location.pathname === item.path || location.pathname === '/planning'
@@ -128,7 +126,7 @@ export default function Layout() {
           {!isSidebarCollapsed ? (
             <>
               {/* 1. Menú Planificación */}
-              {user?.role !== 'Visualizador' && (
+              {planificacionItems.length > 0 && (
                 <div className="pt-1">
                   <button
                     onClick={() => setIsPlanificacionOpen(!isPlanificacionOpen)}
@@ -169,7 +167,7 @@ export default function Layout() {
               )}
 
               {/* 2. Menú Transporte */}
-              {user?.role !== 'Visualizador' && (
+              {transporteItems.length > 0 && (
                 <div className="pt-1">
                   <button
                     onClick={() => setIsTransporteOpen(!isTransporteOpen)}

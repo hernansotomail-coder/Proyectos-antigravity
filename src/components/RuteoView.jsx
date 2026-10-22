@@ -412,9 +412,14 @@ export default function RuteoView() {
     recordChangeAudit,
     ruteoOverrides,
     updateRuteoTripField,
-    batchUpdateRuteoTripField
+    batchUpdateRuteoTripField,
+    initPlanningFromDb
   } = usePlanningStore();
   const { user } = useAuthStore();
+
+  useEffect(() => {
+    initPlanningFromDb?.();
+  }, [initPlanningFromDb]);
 
   // Modal de Auditoría de Cambios al Guardar desde Ruteo
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);

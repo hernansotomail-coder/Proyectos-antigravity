@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import AddStaff from './components/AddStaff';
@@ -20,8 +20,15 @@ import DailyPlanning from './components/DailyPlanning';
 import RuteoView from './components/RuteoView';
 import Briefing from './components/Briefing';
 import ChangeHistory from './components/ChangeHistory';
+import { usePlanningStore } from './store/planningStore';
 
 function App() {
+  const { initPlanningFromDb } = usePlanningStore();
+
+  useEffect(() => {
+    initPlanningFromDb?.();
+  }, [initPlanningFromDb]);
+
   return (
     <BrowserRouter>
       <Routes>

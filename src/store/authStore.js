@@ -20,6 +20,69 @@ export const canUserDeleteHistory = (user) => {
   return false;
 };
 
+// Verificar si el usuario tiene permiso para VER un menú
+export const canUserViewMenu = (user, menuKey) => {
+  if (!user) return false;
+  const username = String(user.username || '').trim().toLowerCase();
+  if (username === 'superadmin' || user.role === 'Administrador') return true;
+
+  // Si tiene permisos explícitos configurados
+  const userMenus = user.permissions?.menus;
+  if (userMenus && userMenus[menuKey] !== undefined) {
+    return !!userMenus[menuKey].view;
+  }
+
+  try {
+    const saved = localStorage.getItem('keylogistics_user_permissions');
+    if (saved) {
+      const perms = JSON.parse(saved);
+      const userPerm = perms[username] || (user.id && perms[user.id]);
+      if (userPerm?.menus && userPerm.menus[menuKey] !== undefined) {
+        return !!userPerm.menus[menuKey].view;
+      }
+    }
+  } catch (e) {}
+
+  // Fallbacks predeterminados por Rol
+  if (user.role === 'Visualizador') {
+    // Por defecto el visualizador puede ver reportes/dashboards
+    return ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment'].includes(menuKey);
+  }
+
+  // Administrativo por defecto ve todos excepto mantenedor de usuarios
+  if (menuKey === 'users') return false;
+  return true;
+};
+
+// Verificar si el usuario tiene permiso para EDITAR un menú
+export const canUserEditMenu = (user, menuKey) => {
+  if (!user) return false;
+  const username = String(user.username || '').trim().toLowerCase();
+  if (username === 'superadmin' || user.role === 'Administrador') return true;
+
+  if (user.role === 'Visualizador') return false;
+
+  // Si tiene permisos explícitos configurados
+  const userMenus = user.permissions?.menus;
+  if (userMenus && userMenus[menuKey] !== undefined) {
+    return !!userMenus[menuKey].edit;
+  }
+
+  try {
+    const saved = localStorage.getItem('keylogistics_user_permissions');
+    if (saved) {
+      const perms = JSON.parse(saved);
+      const userPerm = perms[username] || (user.id && perms[user.id]);
+      if (userPerm?.menus && userPerm.menus[menuKey] !== undefined) {
+        return !!userPerm.menus[menuKey].edit;
+      }
+    }
+  } catch (e) {}
+
+  if (menuKey === 'users') return false;
+  return true;
+};
+
 const getStoredSession = () => {
   try {
     const saved = localStorage.getItem('keylogistics_auth_user');
@@ -35,45 +98,88 @@ const initialSession = getStoredSession();
 
 export const useAuthStore = create((set, get) => ({
   isAuthenticated: initialSession.isAuthenticated,
-  user: initialSession.user, // { username, role, can_delete_history }
+  user: initialSession.user,
   login: async (username, password) => {
     try {
-      const { data, error } = await supabase
-        .from('app_users')
-        .select('*')
-        .eq('username', username)
-        .eq('password', password)
-        .single();
-        
-      if (error) throw error;
-        
-      if (data) {
-        localStorage.setItem('keylogistics_auth_user', JSON.stringify(data));
-        set({ isAuthenticated: true, user: data });
+      const cleanUser = String(username || '').trim();
+      const cleanPass = String(password || '').trim();
+
+      // 1. Intentar consultar usuario en Supabase DB
+      let foundUser = null;
+      try {
+        const { data, error } = await supabase
+          .from('app_users')
+          .select('*')
+          .ilike('username', cleanUser)
+          .eq('password', cleanPass)
+          .single();
+          
+        if (!error && data) {
+          foundUser = data;
+        }
+      } catch (dbErr) {
+        console.warn('Error al consultar app_users en Supabase:', dbErr);
+      }
+
+      // 2. Si no lo encontró en BD, buscar en usuarios locales de userStore
+      if (!foundUser) {
+        try {
+          const localUsers = JSON.parse(localStorage.getItem('keylogistics_app_users') || '[]');
+          foundUser = localUsers.find(u => 
+            String(u.username || '').trim().toLowerCase() === cleanUser.toLowerCase() && 
+            String(u.password || '').trim() === cleanPass
+          );
+        } catch (e) {}
+      }
+
+      // 3. Fallbacks de emergencia para superadmin
+      if (!foundUser && cleanUser.toLowerCase() === 'superadmin' && cleanPass === 'superadmin97') {
+        foundUser = { username: 'superadmin', role: 'Administrador', can_delete_history: true };
+      }
+
+      if (foundUser) {
+        // Cargar permisos desde Supabase DB (__user_permissions__)
+        let permissions = null;
+        try {
+          const { data: permData } = await supabase
+            .from('planning_assignments')
+            .select('*')
+            .eq('fecha', '__user_permissions__')
+            .maybeSingle();
+
+          if (permData && permData.assignments) {
+            permissions = permData.assignments[foundUser.username] || 
+                          (foundUser.id && permData.assignments[foundUser.id]) || null;
+            // Sincronizar en localStorage
+            localStorage.setItem('keylogistics_user_permissions', JSON.stringify(permData.assignments));
+          }
+        } catch (e) {
+          console.warn('No se pudieron leer permisos remotos de Supabase:', e);
+        }
+
+        // Si no había remoto, buscar en localStorage
+        if (!permissions) {
+          try {
+            const localPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
+            permissions = localPerms[foundUser.username] || (foundUser.id && localPerms[foundUser.id]) || null;
+          } catch (e) {}
+        }
+
+        const isSuperOrAdmin = foundUser.role === 'Administrador' || foundUser.username === 'superadmin';
+        const enrichedUser = {
+          ...foundUser,
+          permissions: permissions || { menus: {} },
+          can_delete_history: isSuperOrAdmin ? true : (permissions?.can_delete_history === true || foundUser.can_delete_history === true)
+        };
+
+        localStorage.setItem('keylogistics_auth_user', JSON.stringify(enrichedUser));
+        set({ isAuthenticated: true, user: enrichedUser });
         return true;
       }
+
       return false;
     } catch(err) {
-      console.log("Error de BD (probablemente falta la tabla o hay RLS), usando datos por defecto:", err);
-      // Fallback
-      if (username === 'superadmin' && password === 'superadmin97') {
-         const usr = { username: 'superadmin', role: 'Administrador', can_delete_history: true };
-         localStorage.setItem('keylogistics_auth_user', JSON.stringify(usr));
-         set({ isAuthenticated: true, user: usr });
-         return true;
-      }
-      if (username === 'adminkey' && password === 'adminkey2026') {
-         const usr = { username: 'adminkey', role: 'Administrativo', can_delete_history: false };
-         localStorage.setItem('keylogistics_auth_user', JSON.stringify(usr));
-         set({ isAuthenticated: true, user: usr });
-         return true;
-      }
-      if (username === 'visualkey' && password === 'visualkey2026') {
-         const usr = { username: 'visualkey', role: 'Visualizador', can_delete_history: false };
-         localStorage.setItem('keylogistics_auth_user', JSON.stringify(usr));
-         set({ isAuthenticated: true, user: usr });
-         return true;
-      }
+      console.error("Error en proceso de login:", err);
       return false;
     }
   },

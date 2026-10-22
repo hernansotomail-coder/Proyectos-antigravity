@@ -248,33 +248,88 @@ export const persistAssignmentsToDb = async (fecha, assignments) => {
         updated_at: new Date().toISOString()
       }, { onConflict: 'fecha' });
   } catch (e) {
-    // Si la tabla no existe aún en Supabase, falla silenciosamente y mantiene localStorage
+    console.warn('Error guardando asignaciones en Supabase:', e);
   }
 };
 
-export const fetchAssignmentsFromDb = async () => {
+export const persistRuteoOverridesToDb = async (overrides) => {
+  try {
+    if (!overrides) return;
+    await supabase
+      .from('planning_assignments')
+      .upsert({
+        fecha: '__ruteo_overrides__',
+        assignments: overrides,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'fecha' });
+  } catch (e) {
+    console.warn('Error guardando overrides de ruteo en Supabase:', e);
+  }
+};
+
+export const persistHistoryToDb = async (historyList) => {
+  try {
+    if (!historyList) return;
+    await supabase
+      .from('planning_assignments')
+      .upsert({
+        fecha: '__saved_history__',
+        assignments: historyList,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'fecha' });
+  } catch (e) {
+    console.warn('Error guardando histórico en Supabase:', e);
+  }
+};
+
+export const fetchPlanningStateFromDb = async () => {
   try {
     const { data, error } = await supabase
       .from('planning_assignments')
       .select('*');
-    if (error) return null;
+    if (error) {
+      console.warn('Error leyendo planning_assignments:', error);
+      return null;
+    }
     if (data && data.length > 0) {
-      const map = {};
+      const assignmentsMap = {};
+      let ruteoOverridesFromDb = null;
+      let historyListFromDb = null;
+
       data.forEach(item => {
-        if (item.fecha && item.assignments) {
-          map[item.fecha] = item.assignments.map(r => ({
+        if (!item.fecha || !item.assignments) return;
+
+        if (item.fecha === '__ruteo_overrides__') {
+          ruteoOverridesFromDb = item.assignments;
+        } else if (item.fecha === '__saved_history__') {
+          historyListFromDb = item.assignments;
+        } else if (item.fecha.startsWith('__')) {
+          // Claves internas (ej: __user_permissions__)
+        } else if (Array.isArray(item.assignments)) {
+          assignmentsMap[item.fecha] = item.assignments.map(r => ({
             ...r,
             transportista: ensureRowTransportista(r),
             paradas: healParadasWithPreloaded(r.ruta, r.paradas)
           }));
         }
       });
-      return map;
+
+      return {
+        assignmentsMap,
+        ruteoOverridesFromDb,
+        historyListFromDb
+      };
     }
   } catch (e) {
+    console.warn('Error obteniendo estado de planning desde Supabase:', e);
     return null;
   }
   return null;
+};
+
+export const fetchAssignmentsFromDb = async () => {
+  const state = await fetchPlanningStateFromDb();
+  return state?.assignmentsMap || null;
 };
 
 const loadPersistedAssignments = () => {
@@ -367,6 +422,7 @@ const persistSavedBaseline = (data) => {
 const persistHistory = (data) => {
   try {
     localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(data));
+    persistHistoryToDb(data);
   } catch (e) {
     console.error('Error saving history to localStorage:', e);
   }
@@ -507,6 +563,7 @@ export const loadPersistedRuteoOverrides = () => {
 export const persistRuteoOverrides = (data) => {
   try {
     localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(data));
+    persistRuteoOverridesToDb(data);
   } catch (e) {
     console.error('Error saving ruteo overrides to localStorage:', e);
   }
@@ -1064,17 +1121,38 @@ export const usePlanningStore = create((set, get) => ({
     return true;
   },
 
-  // Inicializar y sincronizar asignaciones desde Supabase
+  // Inicializar y sincronizar asignaciones, ruteo overrides e histórico desde Supabase
   initPlanningFromDb: async () => {
     try {
-      const dbMap = await fetchAssignmentsFromDb();
-      if (dbMap && Object.keys(dbMap).length > 0) {
+      const dbState = await fetchPlanningStateFromDb();
+      if (dbState) {
+        const { assignmentsMap, ruteoOverridesFromDb, historyListFromDb } = dbState;
         set(state => {
-          const merged = { ...state.transmittedAssignments, ...dbMap };
-          const mergedSaved = { ...state.savedRuteoByDate, ...dbMap };
+          const mergedAssignments = { ...state.transmittedAssignments, ...assignmentsMap };
+          const mergedSaved = { ...state.savedRuteoByDate, ...assignmentsMap };
+          const mergedOverrides = ruteoOverridesFromDb 
+            ? { ...state.ruteoOverrides, ...ruteoOverridesFromDb } 
+            : state.ruteoOverrides;
+          const mergedHistory = historyListFromDb && historyListFromDb.length > 0 
+            ? historyListFromDb 
+            : state.savedHistoryList;
+
+          try {
+            localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(mergedAssignments));
+            localStorage.setItem('keylogistics_saved_ruteo', JSON.stringify(mergedSaved));
+            if (ruteoOverridesFromDb) {
+              localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(mergedOverrides));
+            }
+            if (historyListFromDb) {
+              localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(mergedHistory));
+            }
+          } catch (e) {}
+
           return {
-            transmittedAssignments: merged,
-            savedRuteoByDate: mergedSaved
+            transmittedAssignments: mergedAssignments,
+            savedRuteoByDate: mergedSaved,
+            ruteoOverrides: mergedOverrides,
+            savedHistoryList: mergedHistory
           };
         });
       } else {
@@ -1086,6 +1164,14 @@ export const usePlanningStore = create((set, get) => ({
               persistAssignmentsToDb(f, rows);
             }
           });
+        }
+        const overrides = get().ruteoOverrides;
+        if (overrides && Object.keys(overrides).length > 0) {
+          persistRuteoOverridesToDb(overrides);
+        }
+        const history = get().savedHistoryList;
+        if (history && history.length > 0) {
+          persistHistoryToDb(history);
         }
       }
     } catch (e) {
@@ -1376,6 +1462,13 @@ export const usePlanningStore = create((set, get) => ({
       [fecha]: enrichedRows
     };
     persistAssignments(updatedAssignments);
+
+    // Sincronizar inmediatamente con Supabase DB para todos los notebooks
+    persistAssignmentsToDb(fecha, enrichedRows);
+    persistRuteoOverridesToDb(ruteoOverrides);
+    if (synced?.savedHistoryList) {
+      persistHistoryToDb(synced.savedHistoryList);
+    }
 
     set({
       transmittedAssignments: updatedAssignments,
