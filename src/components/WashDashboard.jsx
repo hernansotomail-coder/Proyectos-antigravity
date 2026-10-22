@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { useFleetStore } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { 
   Download, ChevronDown, Search, Droplets, ShieldCheck, 
@@ -236,6 +236,7 @@ export default function WashDashboard() {
   const [regionFilter, setRegionFilter] = useState('Todas');
   const [statusFilter, setStatusFilter] = useState('Todos');
   const [selectedTrucks, setSelectedTrucks] = useState([]); // Multi-selección de camiones (Requisito 2)
+  const [fleetTypeFilter, setFleetTypeFilter] = useState('Todas'); // Filtro Flota Propia vs Externa
   const [activeCard, setActiveCard] = useState('todos');
 
   useEffect(() => {
@@ -251,6 +252,12 @@ export default function WashDashboard() {
   // Opciones únicas de camiones para el multi-select (Requisito 2)
   const truckOptions = useMemo(() => {
     return fleetList
+      .filter(f => {
+        const isExt = isVehicleExternal(f);
+        if (fleetTypeFilter === 'Flota Propia' && isExt) return false;
+        if (fleetTypeFilter === 'Flota Externa' && !isExt) return false;
+        return true;
+      })
       .map(f => {
         const internal = (f.internal_number || '').trim();
         const plate = (f.plate || '').trim();
@@ -265,7 +272,7 @@ export default function WashDashboard() {
       })
       .filter(opt => opt.value)
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-  }, [fleetList]);
+  }, [fleetList, fleetTypeFilter]);
 
   // Enriquecer flota con categorías y estado de semáforo de certificación (1 mes de vigencia)
   const enrichedFleet = useMemo(() => {
@@ -290,9 +297,14 @@ export default function WashDashboard() {
     });
   }, [fleetList]);
 
-  // Flota con filtros base aplicados (Tipo, Región, Camiones, Búsqueda) para que los KPIs respondan
+  // Flota con filtros base aplicados (Tipo, Región, Camiones, Búsqueda, Flota Propia/Externa) para que los KPIs respondan
   const baseFilteredFleet = useMemo(() => {
     return enrichedFleet.filter(f => {
+      // Filtro por Tipo de Flota (Propia vs Externa)
+      const isExt = isVehicleExternal(f);
+      if (fleetTypeFilter === 'Flota Propia' && isExt) return false;
+      if (fleetTypeFilter === 'Flota Externa' && !isExt) return false;
+
       // Filtro multi-selección de camiones (Requisito 2)
       if (selectedTrucks.length > 0) {
         const matchesTruck = selectedTrucks.some(val => 
@@ -323,7 +335,7 @@ export default function WashDashboard() {
 
       return true;
     });
-  }, [enrichedFleet, typeFilter, regionFilter, searchFilter, selectedTrucks]);
+  }, [enrichedFleet, fleetTypeFilter, typeFilter, regionFilter, searchFilter, selectedTrucks]);
 
   // Estadísticas para las 5 tarjetas superiores (Requisito 2: Se quitó tarjeta <7d)
   const stats = useMemo(() => {
@@ -362,6 +374,8 @@ export default function WashDashboard() {
   // Exportar a Excel
   const exportToExcel = () => {
     const dataToExport = filteredVehicles.map(f => ({
+      'Tipo de Flota': isVehicleExternal(f) ? 'Externa' : 'Propia',
+      'Empresa Externa': f.empresa_externa || '',
       'N° Interno': f.internal_number || 'N/A',
       'Patente': f.plate || 'N/A',
       'Tipo': f.type || 'N/A',
@@ -521,6 +535,17 @@ export default function WashDashboard() {
           ))}
         </select>
 
+        {/* Filtro por Tipo de Flota (Propia vs Externa) */}
+        <select
+          value={fleetTypeFilter}
+          onChange={(e) => setFleetTypeFilter(e.target.value)}
+          className="text-xs font-semibold border border-slate-200 rounded-xl px-3 py-1.5 h-9 bg-slate-50 text-slate-700 outline-none w-full sm:w-auto focus:ring-2 focus:ring-blue-500 focus:bg-white cursor-pointer"
+        >
+          <option value="Todas">Toda la Flota</option>
+          <option value="Flota Propia">Flota Propia</option>
+          <option value="Flota Externa">Flota Externa</option>
+        </select>
+
         {/* Filtro por Tipo */}
         <select
           value={typeFilter}
@@ -546,7 +571,7 @@ export default function WashDashboard() {
           <option value="none">Sin Certificación</option>
         </select>
 
-        {(searchFilter || regionFilter !== 'Todas' || typeFilter !== 'Todos' || statusFilter !== 'Todos' || selectedTrucks.length > 0 || activeCard !== 'todos') && (
+        {(searchFilter || regionFilter !== 'Todas' || typeFilter !== 'Todos' || statusFilter !== 'Todos' || fleetTypeFilter !== 'Todas' || selectedTrucks.length > 0 || activeCard !== 'todos') && (
           <button
             type="button"
             onClick={() => {
@@ -554,6 +579,7 @@ export default function WashDashboard() {
               setRegionFilter('Todas');
               setTypeFilter('Todos');
               setStatusFilter('Todos');
+              setFleetTypeFilter('Todas');
               setSelectedTrucks([]);
               setActiveCard('todos');
             }}
@@ -615,7 +641,19 @@ export default function WashDashboard() {
 
                     {/* 2. Patente */}
                     <td className="px-4 py-3 font-bold font-mono text-slate-900">
-                      {truck.plate}
+                      <div className="flex items-center gap-1.5">
+                        <span>{truck.plate}</span>
+                        {isVehicleExternal(truck) && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-sans font-bold bg-amber-100 text-amber-800 border border-amber-200" title={truck.empresa_externa ? `Flota Externa: ${truck.empresa_externa}` : 'Flota Externa'}>
+                            Ext
+                          </span>
+                        )}
+                      </div>
+                      {isVehicleExternal(truck) && truck.empresa_externa && (
+                        <div className="text-[10px] text-slate-400 font-sans font-normal truncate max-w-[140px]">
+                          {truck.empresa_externa}
+                        </div>
+                      )}
                     </td>
 
                     {/* 3. Tipo */}

@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useFleetStore } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { Select } from './ui/Select';
 import { Button } from './ui/Button';
-import { Download, ChevronDown } from 'lucide-react';
+import { Download, ChevronDown, Truck, Building2, Layers } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
 const getDaysDiff = (dateStr) => {
@@ -70,6 +70,7 @@ export default function FleetDashboard() {
   const [regionFilter, setRegionFilter] = useState([]);
   const [frioFilter, setFrioFilter] = useState([]);
   const [searchFilter, setSearchFilter] = useState('');
+  const [fleetTypeFilter, setFleetTypeFilter] = useState('Todas'); // 'Todas' | 'Flota Propia' | 'Flota Externa' (Requisito 3)
   
   const [activeCard, setActiveCard] = useState('todos');
   const [colorFilters, setColorFilters] = useState({
@@ -111,6 +112,11 @@ export default function FleetDashboard() {
 
   const baseFilteredVehicles = useMemo(() => {
     return categorized.filter(f => {
+      // Filtro Tipo de Flota (Propia vs Externa) (Requisito 3)
+      const isExt = isVehicleExternal(f);
+      if (fleetTypeFilter === 'Flota Propia' && isExt) return false;
+      if (fleetTypeFilter === 'Flota Externa' && !isExt) return false;
+
       if (typeFilter.length > 0 && !typeFilter.includes(f.dashboardCategory)) return false;
       if (regionFilter.length > 0 && !regionFilter.includes(f.region)) return false;
       if (frioFilter.length > 0 && !frioFilter.includes(f.type2 || 'N/A')) return false;
@@ -122,7 +128,7 @@ export default function FleetDashboard() {
       }
       return true;
     });
-  }, [categorized, typeFilter, regionFilter, searchFilter, frioFilter]);
+  }, [categorized, fleetTypeFilter, typeFilter, regionFilter, searchFilter, frioFilter]);
 
   const stats = useMemo(() => {
     let vehiculos = 0, semiremolques = 0;
@@ -173,6 +179,8 @@ export default function FleetDashboard() {
 
   const exportToExcel = () => {
     const dataToExport = finalVehicles.map(f => ({
+      'Tipo de Flota': isVehicleExternal(f) ? 'Externa' : 'Propia',
+      'Empresa Externa': f.empresa_externa || '',
       'Tipo': f.type || 'N/A', 'Patente': f.plate, 'N° Interno': f.internal_number || 'N/A',
       'Marca': f.brand || 'N/A', 'Sistema de frio': f.type2 || 'N/A', 'Modelo': f.model || 'N/A', 'Año': f.year || 'N/A',
       'Región': f.region || 'N/A', 'RT': f.rt_date || 'N/A', 'Gases': f.gases_date || 'N/A',
@@ -269,6 +277,17 @@ export default function FleetDashboard() {
             onChange={setFrioFilter} 
             placeholder="Sistema de frio" 
           />
+          <div className="relative min-w-[140px]">
+            <select
+              value={fleetTypeFilter}
+              onChange={(e) => setFleetTypeFilter(e.target.value)}
+              className="flex h-10 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all shadow-2xs cursor-pointer"
+            >
+              <option value="Todas">Toda la Flota</option>
+              <option value="Flota Propia">Flota Propia</option>
+              <option value="Flota Externa">Flota Externa</option>
+            </select>
+          </div>
         </div>
       </div>
 

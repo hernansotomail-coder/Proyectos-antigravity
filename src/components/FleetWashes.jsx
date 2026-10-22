@@ -3,12 +3,12 @@ import {
   Droplets, UploadCloud, Search, Calendar, FileSpreadsheet, 
   CheckCircle2, AlertCircle, Edit2, Trash2, X, Download, 
   Check, Filter, ArrowRight, ShieldCheck, Sparkles, RefreshCw,
-  Truck, ChevronDown
+  Truck, ChevronDown, Building2, Layers, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { useDropzone } from 'react-dropzone';
-import { useFleetStore } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
 import { downloadFleetWashesCertTemplate, downloadFleetWashesRecordsTemplate } from '../lib/excelTemplates';
@@ -247,6 +247,27 @@ export default function FleetWashes() {
   const [regionFilter, setRegionFilter] = useState('Todas');
   const [certFilter, setCertFilter] = useState('Todos');
   const [selectedTrucks, setSelectedTrucks] = useState([]); // Multi-selección de camiones (Requisito 2)
+  const [fleetTab, setFleetTab] = useState('propia'); // 'propia' | 'externa' | 'todas' (Requisito 2)
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' }); // Ordenamiento de columnas (Requisito 1)
+
+  const handleSort = (key) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        if (prev.direction === 'asc') return { key, direction: 'desc' };
+        return { key: null, direction: 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  // Conteo de flota propia y externa
+  const propiaCount = useMemo(() => {
+    return fleetList.filter(f => !isVehicleExternal(f)).length;
+  }, [fleetList]);
+
+  const externaCount = useMemo(() => {
+    return fleetList.filter(f => isVehicleExternal(f)).length;
+  }, [fleetList]);
 
   // Regiones únicas de flota (Requisito 3)
   const regions = useMemo(() => {
@@ -257,6 +278,11 @@ export default function FleetWashes() {
   // Opciones únicas de camiones para el multi-select (Requisito 2)
   const truckOptions = useMemo(() => {
     return fleetList
+      .filter(f => {
+        if (fleetTab === 'propia' && isVehicleExternal(f)) return false;
+        if (fleetTab === 'externa' && !isVehicleExternal(f)) return false;
+        return true;
+      })
       .map(f => {
         const internal = (f.internal_number || '').trim();
         const plate = (f.plate || '').trim();
@@ -271,7 +297,7 @@ export default function FleetWashes() {
       })
       .filter(opt => opt.value)
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-  }, [fleetList]);
+  }, [fleetList, fleetTab]);
 
   // ------------------------------------------------------------------
   // 1. ESTADO: CARGA EXCEL 1 - CERTIFICACIONES (con selector de hoja)
@@ -426,6 +452,11 @@ export default function FleetWashes() {
   // Filtrado de la tabla principal de Lavados
   const filteredFleet = useMemo(() => {
     return fleetList.filter(f => {
+      // 1. Filtrado por Pestaña de Flota (Propia vs Externa vs Todas) (Requisito 2)
+      const isExternal = isVehicleExternal(f);
+      if (fleetTab === 'propia' && isExternal) return false;
+      if (fleetTab === 'externa' && !isExternal) return false;
+
       // Filtro multi-selección de camiones (Requisito 2)
       if (selectedTrucks.length > 0) {
         const matchesTruck = selectedTrucks.some(val => 
@@ -459,12 +490,48 @@ export default function FleetWashes() {
         const mPlate = f.plate?.toLowerCase().includes(lower);
         const mBrand = f.brand?.toLowerCase().includes(lower);
         const mRegion = f.region?.toLowerCase().includes(lower);
-        if (!mInternal && !mPlate && !mBrand && !mRegion) return false;
+        const mEmpresa = f.empresa_externa?.toLowerCase().includes(lower);
+        if (!mInternal && !mPlate && !mBrand && !mRegion && !mEmpresa) return false;
       }
 
       return true;
     });
-  }, [fleetList, typeFilter, regionFilter, certFilter, searchTerm, selectedTrucks]);
+  }, [fleetList, fleetTab, typeFilter, regionFilter, certFilter, searchTerm, selectedTrucks]);
+
+  // Ordenamiento de columnas (Requisito 1)
+  const sortedFleet = useMemo(() => {
+    if (!sortConfig.key) return filteredFleet;
+    const { key, direction } = sortConfig;
+    const factor = direction === 'asc' ? 1 : -1;
+
+    return [...filteredFleet].sort((a, b) => {
+      let valA = a[key];
+      let valB = b[key];
+
+      const emptyA = valA === null || valA === undefined || String(valA).trim() === '';
+      const emptyB = valB === null || valB === undefined || String(valB).trim() === '';
+      if (emptyA && emptyB) return 0;
+      if (emptyA) return 1;
+      if (emptyB) return -1;
+
+      // Si es una fecha (como ultima_certificacion o fecha_ultimo_lavado)
+      if (key === 'ultima_certificacion' || key === 'fecha_ultimo_lavado') {
+        const timeA = parseDateStrToTime(valA) || 0;
+        const timeB = parseDateStrToTime(valB) || 0;
+        return (timeA - timeB) * factor;
+      }
+
+      // Numérico
+      const numA = Number(valA);
+      const numB = Number(valB);
+      if (!isNaN(numA) && !isNaN(numB) && typeof valA !== 'boolean' && typeof valB !== 'boolean') {
+        return (numA - numB) * factor;
+      }
+
+      // Alfanumérico natural (ej: N° Interno)
+      return String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' }) * factor;
+    });
+  }, [filteredFleet, sortConfig]);
 
   // ------------------------------------------------------------------
   // MANEJADORES: CARGA 1 - CERTIFICACIONES
@@ -836,7 +903,9 @@ export default function FleetWashes() {
 
   // Exportar a Excel
   const handleExportExcel = () => {
-    const dataToExport = filteredFleet.map(f => ({
+    const dataToExport = sortedFleet.map(f => ({
+      'Tipo de Flota': isVehicleExternal(f) ? 'Externa' : 'Propia',
+      ...(isVehicleExternal(f) ? { 'Empresa Externa': f.empresa_externa || '' } : {}),
       'N° Interno': f.internal_number || '',
       'Patente': f.plate || '',
       'Tipo': f.type || '',
@@ -920,6 +989,78 @@ export default function FleetWashes() {
         </div>
       </div>
 
+      {/* Selector de Pestañas: Flota Propia vs Flota Externa vs Toda la Flota (Requisito 2) */}
+      <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200/80 w-fit shrink-0">
+        <button
+          type="button"
+          onClick={() => setFleetTab('propia')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            fleetTab === 'propia'
+              ? 'bg-blue-600 text-white shadow-sm ring-2 ring-blue-600/20'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+          }`}
+        >
+          <Truck size={15} />
+          <span>Flota Propia</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            fleetTab === 'propia' ? 'bg-blue-700/60 text-white' : 'bg-slate-200 text-slate-700'
+          }`}>
+            {propiaCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFleetTab('externa')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            fleetTab === 'externa'
+              ? 'bg-purple-600 text-white shadow-sm ring-2 ring-purple-600/20'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+          }`}
+        >
+          <Building2 size={15} />
+          <span>Flota Externa</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            fleetTab === 'externa' ? 'bg-purple-700/60 text-white' : 'bg-purple-100 text-purple-700'
+          }`}>
+            {externaCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setFleetTab('todas')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+            fleetTab === 'todas'
+              ? 'bg-slate-800 text-white shadow-sm ring-2 ring-slate-800/20'
+              : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+          }`}
+        >
+          <Layers size={15} />
+          <span>Toda la Flota</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+            fleetTab === 'todas' ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'
+          }`}>
+            {fleetList.length}
+          </span>
+        </button>
+      </div>
+
+      {/* Banner Informativo al estar en la Pestaña de Flota Externa */}
+      {fleetTab === 'externa' && (
+        <div className="bg-purple-50/90 border border-purple-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-purple-900 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Building2 size={16} className="text-purple-600 shrink-0" />
+            <span>
+              Pestaña <strong>Flota Externa</strong>: mostrando lavados y certificaciones de vehículos tercerizados ({externaCount} registrados).
+            </span>
+          </div>
+          <span className="text-[11px] text-purple-700 font-medium">
+            Los registros de lavado y certificación se vinculan automáticamente por <strong>N° Interno</strong> o <strong>Patente</strong>.
+          </span>
+        </div>
+      )}
+
       {/* 2. Barra de Filtros */}
       <div className="flex flex-col sm:flex-row items-center gap-2.5 flex-wrap">
         <div className="relative flex-1 min-w-[200px] w-full">
@@ -996,32 +1137,60 @@ export default function FleetWashes() {
         )}
       </div>
 
-      {/* 3. Tabla Principal de Lavados */}
+      {/* 3. Tabla Principal de Lavados (con ordenamiento ascendente / descendente - Requisito 1) */}
       <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-slate-50 shadow-2xs">
         <table className="w-full text-xs text-left">
-          <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+          <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider select-none">
             <tr>
-              <th className="px-3.5 py-2.5">N° Interno</th>
-              <th className="px-3.5 py-2.5">Patente</th>
-              <th className="px-3.5 py-2.5">Tipo</th>
-              <th className="px-3.5 py-2.5">Marca</th>
-              <th className="px-3.5 py-2.5">Región</th>
-              <th className="px-3.5 py-2.5 text-blue-900 bg-blue-50/50">Ultima certificación</th>
-              <th className="px-3.5 py-2.5 text-emerald-900 bg-emerald-50/50">Fecha Último Lavado</th>
+              {[
+                { key: 'internal_number', label: 'N° Interno' },
+                { key: 'plate', label: 'Patente' },
+                { key: 'type', label: 'Tipo' },
+                { key: 'brand', label: 'Marca' },
+                { key: 'region', label: 'Región' },
+                ...(fleetTab === 'externa' ? [{ key: 'empresa_externa', label: 'Empresa Externa' }] : []),
+                { key: 'ultima_certificacion', label: 'Ultima certificación', className: 'text-blue-900 bg-blue-50/50' },
+                { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado', className: 'text-emerald-900 bg-emerald-50/50' }
+              ].map(col => {
+                const isSorted = sortConfig.key === col.key;
+                return (
+                  <th
+                    key={col.key}
+                    onClick={() => handleSort(col.key)}
+                    className={`px-3.5 py-2.5 cursor-pointer select-none transition-colors hover:bg-slate-200/80 group ${col.className || ''} ${
+                      isSorted ? 'bg-blue-100/70 text-blue-950 font-black' : ''
+                    }`}
+                    title={`Ordenar por ${col.label} (${isSorted ? (sortConfig.direction === 'asc' ? 'Ascendente (clic para Descendente)' : 'Descendente (clic para quitar orden)') : 'Clic para ordenar'})`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>{col.label}</span>
+                      <span className={`transition-all ${isSorted ? 'text-blue-700' : 'text-slate-400 opacity-0 group-hover:opacity-100'}`}>
+                        {isSorted ? (
+                          sortConfig.direction === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />
+                        ) : (
+                          <ArrowUpDown size={12} />
+                        )}
+                      </span>
+                    </div>
+                  </th>
+                );
+              })}
               <th className="px-3.5 py-2.5 text-center">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-            {filteredFleet.length === 0 ? (
+            {sortedFleet.length === 0 ? (
               <tr>
-                <td colSpan="8" className="py-12 text-center text-slate-400">
+                <td colSpan={fleetTab === 'externa' ? 9 : 8} className="py-12 text-center text-slate-400">
                   <Droplets size={32} className="mx-auto text-slate-300 mb-2" />
-                  <p className="font-semibold text-sm">No se encontraron vehículos.</p>
+                  <p className="font-semibold text-sm">
+                    {fleetTab === 'externa' ? 'No se encontraron vehículos de Flota Externa.' : 'No se encontraron vehículos.'}
+                  </p>
                   <p className="text-xs text-slate-400 mt-0.5">Prueba cambiando los filtros o cargando un archivo Excel.</p>
                 </td>
               </tr>
             ) : (
-              filteredFleet.map((truck) => (
+              sortedFleet.map((truck) => (
                 <tr key={truck.id} className="hover:bg-slate-50/80 transition-colors">
                   {/* N° Interno */}
                   <td className="px-3.5 py-2.5 font-bold font-mono text-slate-900 text-xs">
@@ -1053,6 +1222,13 @@ export default function FleetWashes() {
                   <td className="px-3.5 py-2.5 text-slate-700 font-medium">
                     {truck.region || <span className="text-slate-400 italic text-[11px]">—</span>}
                   </td>
+
+                  {/* Empresa Externa si aplica */}
+                  {fleetTab === 'externa' && (
+                    <td className="px-3.5 py-2.5 font-semibold text-purple-900">
+                      {truck.empresa_externa || <span className="text-slate-300 italic text-[11px]">—</span>}
+                    </td>
+                  )}
 
                   {/* Ultima certificación */}
                   <td className="px-3.5 py-2.5 font-medium bg-blue-50/20">
@@ -1096,7 +1272,7 @@ export default function FleetWashes() {
       </div>
 
       <div className="text-xs text-slate-400 flex items-center justify-between">
-        <span>Mostrando <strong>{filteredFleet.length}</strong> de <strong>{fleetList.length}</strong> vehículos</span>
+        <span>Mostrando <strong>{sortedFleet.length}</strong> de <strong>{fleetList.length}</strong> vehículos</span>
       </div>
 
       {/* ------------------------------------------------------------------ */}

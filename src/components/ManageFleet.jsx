@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo } from 'react';
 import { 
   Edit2, Trash2, Search, X, Check, Truck, UploadCloud, 
   FileSpreadsheet, ArrowRight, CheckCircle2, AlertCircle, RefreshCw, Layers,
-  Eye, EyeOff, Table, Download, Building2
+  Eye, EyeOff, Table, Download, Building2, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -146,6 +146,17 @@ export default function ManageFleet() {
   const [fleetTab, setFleetTab] = useState('propia'); // 'propia' | 'externa' | 'todas'
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+
+  const handleSort = (key) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        if (prev.direction === 'asc') return { key, direction: 'desc' };
+        return { key: null, direction: 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
 
   // Conteo de flota propia y externa
   const propiaCount = useMemo(() => {
@@ -206,6 +217,42 @@ export default function ManageFleet() {
     }
     return true;
   });
+
+  // Ordenamiento de columnas (Requisito 1)
+  const sortedFleet = useMemo(() => {
+    if (!sortConfig.key) return filteredFleet;
+    const { key, direction } = sortConfig;
+    const factor = direction === 'asc' ? 1 : -1;
+
+    return [...filteredFleet].sort((a, b) => {
+      let valA = a[key];
+      let valB = b[key];
+
+      // Valores nulos o vacíos se envían al final
+      const emptyA = valA === null || valA === undefined || String(valA).trim() === '';
+      const emptyB = valB === null || valB === undefined || String(valB).trim() === '';
+      if (emptyA && emptyB) return 0;
+      if (emptyA) return 1;
+      if (emptyB) return -1;
+
+      // Numérico
+      const numA = Number(valA);
+      const numB = Number(valB);
+      if (!isNaN(numA) && !isNaN(numB) && typeof valA !== 'boolean' && typeof valB !== 'boolean') {
+        return (numA - numB) * factor;
+      }
+
+      // Fecha
+      const dateA = Date.parse(valA);
+      const dateB = Date.parse(valB);
+      if (!isNaN(dateA) && !isNaN(dateB) && (String(valA).includes('-') || String(valA).includes('/'))) {
+        return (dateA - dateB) * factor;
+      }
+
+      // Alfanumérico natural
+      return String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' }) * factor;
+    });
+  }, [filteredFleet, sortConfig]);
 
   const startEdit = (truck) => {
     setEditingId(truck.id);
@@ -627,24 +674,93 @@ export default function ManageFleet() {
           <thead className="bg-slate-100 text-slate-600 border-b border-slate-200 sticky top-0 z-10 shadow-sm">
             {fleetTab === 'externa' ? (
               <tr>
-                {EXTERNAL_FLEET_COLUMNS.map(col => (
-                  <th key={col.key} className="px-3 py-2 font-semibold">{col.label}</th>
-                ))}
+                {EXTERNAL_FLEET_COLUMNS.map(col => {
+                  const isSorted = sortConfig.key === col.key;
+                  return (
+                    <th 
+                      key={col.key} 
+                      onClick={() => handleSort(col.key)}
+                      className={`px-3 py-2 font-semibold cursor-pointer select-none transition-colors hover:bg-slate-200/80 group ${
+                        isSorted ? 'text-purple-900 bg-purple-50/80 font-bold' : ''
+                      }`}
+                      title={`Ordenar por ${col.label} (${isSorted ? (sortConfig.direction === 'asc' ? 'Ascendente (clic para Descendente)' : 'Descendente (clic para quitar orden)') : 'Clic para ordenar'})`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>{col.label}</span>
+                        <span className={`transition-all ${isSorted ? 'text-purple-600' : 'text-slate-400 opacity-0 group-hover:opacity-100'}`}>
+                          {isSorted ? (
+                            sortConfig.direction === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />
+                          ) : (
+                            <ArrowUpDown size={12} />
+                          )}
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
                 <th className="px-3 py-2 font-semibold text-center sticky right-0 bg-slate-100 shadow-[-4px_0_10px_rgba(0,0,0,0.05)]">Acciones</th>
               </tr>
             ) : (
               <tr>
-                <th className="px-3 py-2 font-semibold">Estado</th>
-                <th className="px-3 py-2 font-semibold">Patente</th>
-                <th className="px-3 py-2 font-semibold">N° Interno</th>
-                <th className="px-3 py-2 font-semibold">Tipo</th>
+                {[
+                  { key: 'status', label: 'Estado' },
+                  { key: 'plate', label: 'Patente' },
+                  { key: 'internal_number', label: 'N° Interno' },
+                  { key: 'type', label: 'Tipo' }
+                ].map(col => {
+                  const isSorted = sortConfig.key === col.key;
+                  return (
+                    <th 
+                      key={col.key} 
+                      onClick={() => handleSort(col.key)}
+                      className={`px-3 py-2 font-semibold cursor-pointer select-none transition-colors hover:bg-slate-200/80 group ${
+                        isSorted ? 'text-blue-900 bg-blue-50/80 font-bold' : ''
+                      }`}
+                      title={`Ordenar por ${col.label} (${isSorted ? (sortConfig.direction === 'asc' ? 'Ascendente (clic para Descendente)' : 'Descendente (clic para quitar orden)') : 'Clic para ordenar'})`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>{col.label}</span>
+                        <span className={`transition-all ${isSorted ? 'text-blue-600' : 'text-slate-400 opacity-0 group-hover:opacity-100'}`}>
+                          {isSorted ? (
+                            sortConfig.direction === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />
+                          ) : (
+                            <ArrowUpDown size={12} />
+                          )}
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
                 <th className="px-3 py-2 font-semibold text-center sticky right-0 bg-slate-100 shadow-[-4px_0_10px_rgba(0,0,0,0.05)]">Acciones</th>
-                {TABLE_COLUMNS.map(col => <th key={col.key} className="px-3 py-2 font-semibold">{col.label}</th>)}
+                {TABLE_COLUMNS.map(col => {
+                  const isSorted = sortConfig.key === col.key;
+                  return (
+                    <th 
+                      key={col.key} 
+                      onClick={() => handleSort(col.key)}
+                      className={`px-3 py-2 font-semibold cursor-pointer select-none transition-colors hover:bg-slate-200/80 group ${
+                        isSorted ? 'text-blue-900 bg-blue-50/80 font-bold' : ''
+                      }`}
+                      title={`Ordenar por ${col.label} (${isSorted ? (sortConfig.direction === 'asc' ? 'Ascendente (clic para Descendente)' : 'Descendente (clic para quitar orden)') : 'Clic para ordenar'})`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span>{col.label}</span>
+                        <span className={`transition-all ${isSorted ? 'text-blue-600' : 'text-slate-400 opacity-0 group-hover:opacity-100'}`}>
+                          {isSorted ? (
+                            sortConfig.direction === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />
+                          ) : (
+                            <ArrowUpDown size={12} />
+                          )}
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             )}
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
-            {filteredFleet.length === 0 ? (
+            {sortedFleet.length === 0 ? (
               <tr>
                 <td colSpan={fleetTab === 'externa' ? EXTERNAL_FLEET_COLUMNS.length + 1 : 5 + TABLE_COLUMNS.length} className="px-4 py-8 text-center text-slate-500">
                   {fleetTab === 'externa' ? (
@@ -663,7 +779,7 @@ export default function ManageFleet() {
                 </td>
               </tr>
             ) : (
-              filteredFleet.map((truck) => (
+              sortedFleet.map((truck) => (
                 <tr key={truck.id} className="hover:bg-slate-50 transition-colors">
                   {fleetTab === 'externa' ? (
                     editingId === truck.id ? (
