@@ -1,37 +1,647 @@
-import React from 'react';
-import { Sparkles, Compass } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { 
+  Calendar, Download, Search, Filter, Layers, Truck, 
+  Package, Scale, Snowflake, Thermometer, Wind, 
+  MapPin, AlertCircle, FileSpreadsheet, Building2
+} from 'lucide-react';
+import * as XLSX from 'xlsx';
+import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { Button } from './ui/Button';
+
+// Normalizador de Operación / Cliente para agrupar exactamente como en el Briefing oficial
+export const normalizeClientForBriefing = (rawName) => {
+  if (!rawName) return 'OTROS';
+  const upper = String(rawName).toUpperCase().trim();
+  if (upper.includes('CANTABRIA')) return 'CANTABRIA';
+  if (upper.includes('CARLS') || upper.includes('CARL S')) return 'CARLS';
+  if (upper.includes('CENTRALIZADO')) return 'CENTRALIZADOS';
+  if (upper.includes('GOLFO')) return 'EL GOLFO';
+  if (upper.includes('JUAN VALDEZ') || upper.includes('SISA')) return 'JUAN VALDEZ';
+  if (upper.includes('KEYFOOD')) return 'KEYFOODS';
+  if (upper.includes('NEWREST') || upper.includes('BYI')) return 'NEWREST';
+  if (upper.includes('OXXO')) return 'OXXO';
+  if (upper.includes('PETROLERA') || upper.includes('FAST FOOD') || upper.includes('COPEC') || upper.includes('ENEX') || upper.includes('ESMAX')) return 'PETROLERA';
+  if (upper.includes('SBARRO')) return 'SBARRO';
+  if (upper.includes('SPID')) return 'SPID';
+  if (upper.includes('STREAT') || upper.includes('BURGUER') || upper.includes('BURGER')) return 'STREAT BURGUER';
+  if (upper.includes('SUBWAY')) return 'SUBWAY';
+
+  return upper.replace(/^RUTA\s+/i, '').replace(/\s+\d+$/i, '').trim() || 'OTROS';
+};
+
+// Formateadores numéricos de estilo chileno
+const formatInt = (num) => {
+  if (num === null || num === undefined || isNaN(num) || num === 0) return '';
+  return Math.round(num).toLocaleString('de-DE');
+};
+
+const formatIntAlways = (num) => {
+  if (num === null || num === undefined || isNaN(num)) return '0';
+  return Math.round(num).toLocaleString('de-DE');
+};
+
+const formatDecimal = (num) => {
+  if (num === null || num === undefined || isNaN(num) || Math.abs(num) < 0.0001) return '';
+  return Number(num).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
+const formatDecimalAlways = (num) => {
+  if (num === null || num === undefined || isNaN(num)) return '0,00';
+  return Number(num).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
 export default function Briefing() {
+  const { 
+    transmittedAssignments, 
+    savedRuteoByDate, 
+    selectedDisponibilizarDate, 
+    transformedRoutes,
+    rawRows
+  } = usePlanningStore();
+  
+  const { fleetList } = useFleetStore();
+
+  // Fechas disponibles
+  const availableDates = useMemo(() => {
+    const dSet = new Set();
+    if (transmittedAssignments) Object.keys(transmittedAssignments).forEach(d => dSet.add(d));
+    if (savedRuteoByDate) Object.keys(savedRuteoByDate).forEach(d => dSet.add(d));
+    if (transformedRoutes) transformedRoutes.forEach(r => r.fecha && dSet.add(r.fecha));
+    if (selectedDisponibilizarDate) dSet.add(selectedDisponibilizarDate);
+    const arr = Array.from(dSet).filter(Boolean);
+    return arr.length > 0 ? arr : ['22-10-2026'];
+  }, [transmittedAssignments, savedRuteoByDate, transformedRoutes, selectedDisponibilizarDate]);
+
+  const [activeDate, setActiveDate] = useState(() => {
+    return availableDates.includes('22-10-2026') ? '22-10-2026' : (availableDates[0] || '14-10-2026');
+  });
+
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Filas del día seleccionado (Disponibilización / Ruteo)
+  const currentAssignedRows = useMemo(() => {
+    if (savedRuteoByDate?.[activeDate] && savedRuteoByDate[activeDate].length > 0) {
+      return savedRuteoByDate[activeDate];
+    }
+    if (transmittedAssignments?.[activeDate] && transmittedAssignments[activeDate].length > 0) {
+      return transmittedAssignments[activeDate];
+    }
+    // Fallback a transformedRoutes filtradas por fecha o todas si coincide
+    const matchedTrans = (transformedRoutes || []).filter(r => r.fecha === activeDate);
+    if (matchedTrans.length > 0) {
+      return matchedTrans;
+    }
+    return transformedRoutes || [];
+  }, [savedRuteoByDate, transmittedAssignments, transformedRoutes, activeDate]);
+
+  // Construcción de la Matriz de Briefing agrupada por Operación (Cliente)
+  const briefingData = useMemo(() => {
+    // 1. Agrupar rutas por Cliente normalizado
+    const clientsMap = new Map();
+
+    currentAssignedRows.forEach((r, idx) => {
+      const clientName = normalizeClientForBriefing(r.cliente || r.nombreRuta || r.Operacion);
+      if (!clientsMap.has(clientName)) {
+        clientsMap.set(clientName, {
+          operacion: clientName,
+          routes: []
+        });
+      }
+      clientsMap.get(clientName).routes.push(r);
+    });
+
+    // 2. Mapeo preliminar de camiones por cliente para resolver el desempate de camiones compartidos
+    // "#Rutas: Cuenta la cantidad de camiones por clientes sin repetirlos, considera que si hay dos clientes con el mismo camión, visualizalo al que tiene menos camiones"
+    const truckToClientsMap = new Map();
+    clientsMap.forEach((cData, cName) => {
+      cData.routes.forEach(r => {
+        const camion = (r.camion || '').trim();
+        if (camion && camion.toLowerCase() !== 'sin camión' && camion.toLowerCase() !== 'sin camion') {
+          if (!truckToClientsMap.has(camion)) {
+            truckToClientsMap.set(camion, new Set());
+          }
+          truckToClientsMap.get(camion).add(cName);
+        }
+      });
+    });
+
+    // Cantidad bruta de camiones por cliente (para desempatar)
+    const clientTruckCounts = new Map();
+    clientsMap.forEach((cData, cName) => {
+      const distinctTrucks = new Set(
+        cData.routes.map(r => (r.camion || '').trim()).filter(c => c && !c.toLowerCase().includes('sin cami'))
+      );
+      clientTruckCounts.set(cName, distinctTrucks.size);
+    });
+
+    // Asignar cada camión a UN SOLO cliente (el que tenga menor cantidad de camiones brutos)
+    const truckOwnerMap = new Map();
+    truckToClientsMap.forEach((clientsSet, camion) => {
+      const clientArr = Array.from(clientsSet);
+      if (clientArr.length === 1) {
+        truckOwnerMap.set(camion, clientArr[0]);
+      } else {
+        // Encontrar cliente con menos camiones
+        clientArr.sort((a, b) => {
+          const countA = clientTruckCounts.get(a) || 0;
+          const countB = clientTruckCounts.get(b) || 0;
+          if (countA !== countB) return countA - countB;
+          return a.localeCompare(b);
+        });
+        truckOwnerMap.set(camion, clientArr[0]);
+      }
+    });
+
+    // 3. Procesar métricas por cliente
+    const rows = Array.from(clientsMap.values()).map(cData => {
+      const { operacion, routes } = cData;
+
+      const trucks1vPropia = new Set();
+      const trucks1vExterna = new Set();
+      const trucks2vPropia = new Set();
+      const trucks2vExterna = new Set();
+      let sinCoberturaCount = 0;
+
+      let totalCajas = 0;
+      let totalKilos = 0;
+      let totalCongeladoM3 = 0;
+      let totalRefrigeradoM3 = 0;
+      let totalSecoM3 = 0;
+      let totalVolumenM3 = 0;
+      const destinosSet = new Set();
+
+      routes.forEach(r => {
+        const camion = (r.camion || '').trim();
+        const conductor = (r.conductor_name || '').trim();
+        const aux = (r.aux1_name || '').trim();
+
+        // Sin cobertura: Rutas que no tienen Conductor, ni auxiliar ni Camión
+        const isSinCobertura = !camion || camion.toLowerCase().includes('sin cami') || (!conductor && !aux);
+        if (isSinCobertura) {
+          sinCoberturaCount++;
+        }
+
+        // Vuelta
+        const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
+        const matchVuelta = rawVuelta.match(/\d+/);
+        const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
+
+        // Tipo de Flota (Propia vs Externa)
+        let isExt = false;
+        if (camion && !camion.toLowerCase().includes('sin cami')) {
+          const foundTruck = fleetList.find(f => 
+            (f.internal_number || '').trim().toLowerCase() === camion.toLowerCase() ||
+            (f.plate || '').trim().toLowerCase() === camion.toLowerCase()
+          );
+          if (foundTruck) {
+            isExt = isVehicleExternal(foundTruck);
+          } else {
+            isExt = isVehicleExternal({
+              internal_number: camion,
+              plate: r.patente,
+              transportista: r.transportista,
+              tipo_flota: r.tipo_flota,
+              empresa_externa: r.empresa_externa
+            });
+          }
+
+          if (vueltaNum === 1) {
+            if (isExt) trucks1vExterna.add(camion);
+            else trucks1vPropia.add(camion);
+          } else {
+            if (isExt) trucks2vExterna.add(camion);
+            else trucks2vPropia.add(camion);
+          }
+        }
+
+        // Cajas, Kilos, Ambientes (Congelado, Refrigerado, Seco), Volumen y Destinos
+        const paradas = r.paradas || [];
+        if (paradas.length > 0) {
+          paradas.forEach(p => {
+            if (p.destino) destinosSet.add(String(p.destino).trim());
+
+            const cj = parseFloat(String(p.cantCJ || p.cajas || 0).replace(',', '.')) || 0;
+            const kg = parseFloat(String(p.peso || p.kilos || 0).replace(',', '.')) || 0;
+            const vol = parseFloat(String(p.volumen || p.m3 || 0).replace(',', '.')) || 0;
+
+            totalCajas += cj;
+            totalKilos += kg;
+            totalVolumenM3 += vol;
+
+            const amb = String(p.ambiente || 'S').trim().toUpperCase();
+            if (amb === 'C') totalCongeladoM3 += vol;
+            else if (amb === 'R') totalRefrigeradoM3 += vol;
+            else totalSecoM3 += vol;
+          });
+        } else {
+          // Si no tiene desglose de paradas, tomar totales de la fila
+          const cj = parseFloat(String(r.cantCJ || r.cajas || 0).replace(',', '.')) || 0;
+          const kg = parseFloat(String(r.peso || r.kilos || 0).replace(',', '.')) || 0;
+          const vol = parseFloat(String(r.volumen || r.m3 || 0).replace(',', '.')) || 0;
+
+          totalCajas += cj;
+          totalKilos += kg;
+          totalVolumenM3 += vol;
+
+          // Si tiene destino asignado
+          if (r.destino) destinosSet.add(String(r.destino).trim());
+          if (r.recuentoDestino) {
+            for (let i = 0; i < r.recuentoDestino; i++) {
+              destinosSet.add(`dest-${r.ruta}-${i}`);
+            }
+          }
+
+          const amb = String(r.ambiente || 'S').trim().toUpperCase();
+          if (amb === 'C') totalCongeladoM3 += vol;
+          else if (amb === 'R') totalRefrigeradoM3 += vol;
+          else totalSecoM3 += vol;
+        }
+      });
+
+      // Contar #Rutas deduplicadas asignadas exclusivamente a este cliente
+      let rutasDeduplicadas = 0;
+      truckOwnerMap.forEach((ownerClient, camion) => {
+        if (ownerClient === operacion) {
+          rutasDeduplicadas++;
+        }
+      });
+      // Si hay rutas sin camión asignado, se suman
+      rutasDeduplicadas += sinCoberturaCount;
+
+      // Si por alguna razón la suma de vueltas es mayor o no hubo camiones registrados, asegurar coherencia
+      const sumaVueltas = trucks1vPropia.size + trucks1vExterna.size + trucks2vPropia.size + trucks2vExterna.size + sinCoberturaCount;
+      const numRutasFinal = rutasDeduplicadas > 0 ? rutasDeduplicadas : sumaVueltas;
+
+      return {
+        operacion,
+        numRutas: numRutasFinal,
+        propia1v: trucks1vPropia.size,
+        externa1v: trucks1vExterna.size,
+        propia2v: trucks2vPropia.size,
+        externa2v: trucks2vExterna.size,
+        sinCobertura: sinCoberturaCount,
+        cajas: Math.round(totalCajas),
+        kilos: Number(totalKilos.toFixed(2)),
+        congeladoM3: Number(totalCongeladoM3.toFixed(2)),
+        refrigeradoM3: Number(totalRefrigeradoM3.toFixed(2)),
+        secoM3: Number(totalSecoM3.toFixed(2)),
+        volumenM3: Number(totalVolumenM3.toFixed(2)),
+        numDestinos: destinosSet.size || routes.length
+      };
+    });
+
+    // Ordenar alfabéticamente por cliente
+    rows.sort((a, b) => a.operacion.localeCompare(b.operacion));
+
+    // Totales Generales
+    const totals = {
+      operacion: 'Total general',
+      numRutas: rows.reduce((acc, r) => acc + r.numRutas, 0),
+      propia1v: rows.reduce((acc, r) => acc + r.propia1v, 0),
+      externa1v: rows.reduce((acc, r) => acc + r.externa1v, 0),
+      propia2v: rows.reduce((acc, r) => acc + r.propia2v, 0),
+      externa2v: rows.reduce((acc, r) => acc + r.externa2v, 0),
+      sinCobertura: rows.reduce((acc, r) => acc + r.sinCobertura, 0),
+      cajas: rows.reduce((acc, r) => acc + r.cajas, 0),
+      kilos: Number(rows.reduce((acc, r) => acc + r.kilos, 0).toFixed(2)),
+      congeladoM3: Number(rows.reduce((acc, r) => acc + r.congeladoM3, 0).toFixed(2)),
+      refrigeradoM3: Number(rows.reduce((acc, r) => acc + r.refrigeradoM3, 0).toFixed(2)),
+      secoM3: Number(rows.reduce((acc, r) => acc + r.secoM3, 0).toFixed(2)),
+      volumenM3: Number(rows.reduce((acc, r) => acc + r.volumenM3, 0).toFixed(2)),
+      numDestinos: rows.reduce((acc, r) => acc + r.numDestinos, 0)
+    };
+
+    return { rows, totals };
+  }, [currentAssignedRows, fleetList]);
+
+  // Filtro de búsqueda sobre la tabla
+  const displayedRows = useMemo(() => {
+    if (!searchTerm.trim()) return briefingData.rows;
+    const lower = searchTerm.toLowerCase();
+    return briefingData.rows.filter(r => r.operacion.toLowerCase().includes(lower));
+  }, [briefingData.rows, searchTerm]);
+
+  // Exportar a Excel exactamente con las columnas solicitadas
+  const handleExportExcel = () => {
+    const exportData = briefingData.rows.map(r => ({
+      'Operación': r.operacion,
+      '# Rutas': r.numRutas || 0,
+      'Real Key 1era V': r.propia1v || 0,
+      'Real Terceros 1era V': r.externa1v || 0,
+      '2da V (Cubiertas Key)': r.propia2v || 0,
+      '2da V (Terceros)': r.externa2v || 0,
+      'Sin cobertura': r.sinCobertura || 0,
+      'Cajas': r.cajas || 0,
+      'Kilos': `${r.kilos.toFixed(2)} Kg`,
+      'Congelado m3': r.congeladoM3 || 0,
+      'Refrigerado m3': r.refrigeradoM3 || 0,
+      'Seco m3': r.secoM3 || 0,
+      'Volumen': `${r.volumenM3.toFixed(2)} m3`,
+      'N° Destinos': r.numDestinos || 0
+    }));
+
+    // Fila Total General
+    exportData.push({
+      'Operación': 'Total general',
+      '# Rutas': briefingData.totals.numRutas,
+      'Real Key 1era V': briefingData.totals.propia1v,
+      'Real Terceros 1era V': briefingData.totals.externa1v,
+      '2da V (Cubiertas Key)': briefingData.totals.propia2v,
+      '2da V (Terceros)': briefingData.totals.externa2v,
+      'Sin cobertura': briefingData.totals.sinCobertura,
+      'Cajas': briefingData.totals.cajas,
+      'Kilos': `${briefingData.totals.kilos.toFixed(2)} Kg`,
+      'Congelado m3': briefingData.totals.congeladoM3,
+      'Refrigerado m3': briefingData.totals.refrigeradoM3,
+      'Seco m3': briefingData.totals.secoM3,
+      'Volumen': `${briefingData.totals.volumenM3.toFixed(2)} m3`,
+      'N° Destinos': briefingData.totals.numDestinos
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Briefing");
+    XLSX.writeFile(workbook, `Resumen_Briefing_${activeDate}.xlsx`);
+  };
+
   return (
-    <div className="flex flex-col h-full bg-slate-50 p-6 overflow-y-auto">
-      {/* Header */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 mb-6">
-        <div className="flex items-center gap-2">
-          <span className="bg-indigo-100 text-indigo-700 font-bold px-2.5 py-0.5 rounded-full text-xs">
-            Operaciones
-          </span>
-          <h1 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <Compass className="text-indigo-600" size={22} />
-            Briefing
-          </h1>
+    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-6 gap-4 overflow-y-auto">
+      
+      {/* 1. Header Ejecutivo idéntico a la plantilla oficial */}
+      <div className="bg-[#0B2545] text-white rounded-2xl shadow-md p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 pr-4 border-r border-blue-400/30">
+            <span className="text-2xl font-black tracking-tight text-white flex items-center">
+              <span className="text-blue-400 mr-0.5">K</span>Key
+            </span>
+            <span className="text-[10px] font-mono tracking-widest text-slate-300 uppercase mt-1">
+              logistics
+            </span>
+          </div>
+          <div>
+            <h1 className="text-sm sm:text-base font-black tracking-wide uppercase text-white">
+              RESUMEN DE ASIGNACIÓN · BRIEFING
+            </h1>
+            <p className="text-[11px] text-blue-200">
+              Control operacional y balance de flota, cajas, kilos y ambientes por cliente.
+            </p>
+          </div>
         </div>
-        <p className="text-xs text-slate-500 mt-1">
-          Espacio reservado para el próximo desarrollo del módulo de Briefing.
-        </p>
+
+        <div className="flex items-center gap-3">
+          {/* Selector de Fecha */}
+          <div className="flex items-center gap-2 bg-[#133863] border border-blue-400/30 px-3 py-1.5 rounded-xl">
+            <Calendar size={16} className="text-blue-300" />
+            <div className="flex flex-col">
+              <span className="text-[9px] font-bold text-blue-200 uppercase tracking-wider">
+                Despacho
+              </span>
+              <select
+                value={activeDate}
+                onChange={(e) => setActiveDate(e.target.value)}
+                className="text-xs font-bold text-white bg-transparent outline-none cursor-pointer"
+              >
+                {availableDates.map(d => (
+                  <option key={d} value={d} className="bg-slate-900 text-white">{d}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <Button
+            onClick={handleExportExcel}
+            className="flex items-center gap-1.5 text-xs font-bold h-9 bg-blue-600 hover:bg-blue-500 text-white shadow-sm border border-blue-400/30"
+          >
+            <Download size={14} />
+            <span className="hidden sm:inline">Exportar Excel</span>
+          </Button>
+        </div>
       </div>
 
-      {/* Área vacía para desarrollo futuro */}
-      <div className="flex-1 bg-white rounded-2xl shadow-sm border border-dashed border-slate-300 flex flex-col items-center justify-center p-12 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
-          <Sparkles size={28} />
+      {/* 2. Tarjetas KPI de Resumen Rápido */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total # Rutas</span>
+          <p className="text-2xl font-black text-slate-800 mt-1">{briefingData.totals.numRutas}</p>
+          <span className="text-[10px] text-slate-500 mt-0.5">Camiones deduplicados</span>
         </div>
-        <h2 className="text-base font-bold text-slate-700 mb-1">
-          Módulo de Briefing disponible
-        </h2>
-        <p className="text-xs text-slate-400 max-w-sm">
-          Este sub-menú se encuentra en blanco y listo para implementar las funcionalidades que requieras más adelante.
-        </p>
+
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Flota Propia 1V</span>
+          <p className="text-2xl font-black text-blue-600 mt-1">{briefingData.totals.propia1v}</p>
+          <span className="text-[10px] text-slate-500 mt-0.5">Real Key 1era Vuelta</span>
+        </div>
+
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Flota Externa 1V</span>
+          <p className="text-2xl font-black text-amber-600 mt-1">{briefingData.totals.externa1v}</p>
+          <span className="text-[10px] text-slate-500 mt-0.5">Real Terceros 1era Vuelta</span>
+        </div>
+
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Segundas Vueltas</span>
+          <p className="text-2xl font-black text-indigo-600 mt-1">{briefingData.totals.propia2v + briefingData.totals.externa2v}</p>
+          <span className="text-[10px] text-slate-500 mt-0.5">{briefingData.totals.propia2v} Key • {briefingData.totals.externa2v} Terceros</span>
+        </div>
+
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total Kilos</span>
+          <p className="text-xl font-black text-slate-800 mt-1">{formatDecimalAlways(briefingData.totals.kilos)} <span className="text-xs font-bold text-slate-500">Kg</span></p>
+          <span className="text-[10px] text-slate-500 mt-0.5">{formatIntAlways(briefingData.totals.cajas)} Cajas totales</span>
+        </div>
+
+        <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Volumen Total</span>
+          <p className="text-xl font-black text-emerald-600 mt-1">{formatDecimalAlways(briefingData.totals.volumenM3)} <span className="text-xs font-bold text-slate-500">m³</span></p>
+          <span className="text-[10px] text-slate-500 mt-0.5">{briefingData.totals.numDestinos} Destinos únicos</span>
+        </div>
       </div>
+
+      {/* 3. Filtro de búsqueda */}
+      <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 p-3 flex items-center justify-between gap-3 shrink-0">
+        <div className="relative w-full max-w-xs">
+          <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
+          <input
+            type="text"
+            placeholder="Filtrar operación o cliente..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-1.5 h-9 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+          />
+        </div>
+
+        <span className="text-xs text-slate-500 font-semibold">
+          {displayedRows.length} de {briefingData.rows.length} operaciones
+        </span>
+      </div>
+
+      {/* 4. Matriz Principal de Briefing */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col shrink-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left border-collapse whitespace-nowrap">
+            {/* Encabezados Azules Oficiales */}
+            <thead className="bg-[#0e2a47] text-white font-bold text-[11px] uppercase tracking-wider sticky top-0 shadow-sm">
+              <tr>
+                <th className="px-3.5 py-3.5 border-r border-blue-900/40 text-left min-w-[150px]">Operación</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-center min-w-[70px]"># Rutas</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-center min-w-[100px]">Real Key 1era V</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-center min-w-[110px]">Real Terceros 1era V</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-center min-w-[120px]">2da V (Cubiertas Key)</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-center min-w-[110px]">2da V (Terceros)</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-center min-w-[90px]">Sin cobertura</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-right min-w-[75px]">Cajas</th>
+                <th className="px-3.5 py-3.5 border-r border-blue-900/40 text-right min-w-[110px]">Kilos</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-right min-w-[85px]">Congelado m3</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-right min-w-[90px]">Refrigerado m3</th>
+                <th className="px-3 py-3.5 border-r border-blue-900/40 text-right min-w-[85px]">Seco m3</th>
+                <th className="px-3.5 py-3.5 border-r border-blue-900/40 text-right min-w-[95px]">Volumen</th>
+                <th className="px-3 py-3.5 text-center min-w-[85px]">N° Destinos</th>
+              </tr>
+            </thead>
+
+            {/* Cuerpo con Zebra Striping */}
+            <tbody className="divide-y divide-slate-100 text-slate-800">
+              {displayedRows.length === 0 ? (
+                <tr>
+                  <td colSpan="14" className="py-12 text-center text-slate-400">
+                    <FileSpreadsheet size={36} className="mx-auto text-slate-300 mb-2" />
+                    <p className="font-semibold text-sm">No hay servicios registrados para la fecha {activeDate}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Carga o transmite rutas desde Asignación Diaria / Disponibilización.</p>
+                  </td>
+                </tr>
+              ) : (
+                displayedRows.map((r, idx) => {
+                  const isZebra = idx % 2 === 1;
+                  const rowBg = isZebra ? 'bg-[#f4f7fb]/70' : 'bg-white';
+                  return (
+                    <tr key={r.operacion} className={`${rowBg} hover:bg-blue-50/60 transition-colors`}>
+                      {/* Operación */}
+                      <td className="px-3.5 py-2.5 font-black uppercase text-slate-900 border-r border-slate-200/80 tracking-wide">
+                        {r.operacion}
+                      </td>
+
+                      {/* # Rutas */}
+                      <td className="px-3 py-2.5 text-center font-black font-mono border-r border-slate-200/80 text-slate-900 bg-blue-50/30">
+                        {r.numRutas || ''}
+                      </td>
+
+                      {/* Real Key 1era V */}
+                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-blue-900">
+                        {formatInt(r.propia1v)}
+                      </td>
+
+                      {/* Real Terceros 1era V */}
+                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-amber-900">
+                        {formatInt(r.externa1v)}
+                      </td>
+
+                      {/* 2da V (Cubiertas Key) */}
+                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-indigo-900">
+                        {formatInt(r.propia2v)}
+                      </td>
+
+                      {/* 2da V (Terceros) */}
+                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-amber-950">
+                        {formatInt(r.externa2v)}
+                      </td>
+
+                      {/* Sin cobertura */}
+                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-red-600">
+                        {formatInt(r.sinCobertura)}
+                      </td>
+
+                      {/* Cajas */}
+                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80">
+                        {formatInt(r.cajas)}
+                      </td>
+
+                      {/* Kilos */}
+                      <td className="px-3.5 py-2.5 text-right font-mono font-medium border-r border-slate-200/80">
+                        {r.kilos > 0 ? `${formatDecimalAlways(r.kilos)} Kg` : '0,00 Kg'}
+                      </td>
+
+                      {/* Congelado m3 */}
+                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-blue-700">
+                        {formatDecimal(r.congeladoM3)}
+                      </td>
+
+                      {/* Refrigerado m3 */}
+                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-cyan-700">
+                        {formatDecimal(r.refrigeradoM3)}
+                      </td>
+
+                      {/* Seco m3 */}
+                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-amber-700">
+                        {formatDecimal(r.secoM3)}
+                      </td>
+
+                      {/* Volumen */}
+                      <td className="px-3.5 py-2.5 text-right font-mono font-bold text-slate-900 border-r border-slate-200/80">
+                        {formatDecimalAlways(r.volumenM3)} m3
+                      </td>
+
+                      {/* N° Destinos */}
+                      <td className="px-3 py-2.5 text-center font-mono font-semibold text-slate-700">
+                        {r.numDestinos}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+
+            {/* Fila Total General (Idéntica a la imagen con fondo azul oscuro y números blancos en negrita) */}
+            <tfoot className="bg-[#0e2a47] text-white font-black text-xs border-t-2 border-blue-900 tracking-wide">
+              <tr>
+                <td className="px-3.5 py-3 uppercase border-r border-blue-900/40">
+                  Total general
+                </td>
+                <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40">
+                  {briefingData.totals.numRutas}
+                </td>
+                <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-blue-200">
+                  {briefingData.totals.propia1v}
+                </td>
+                <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-amber-200">
+                  {briefingData.totals.externa1v}
+                </td>
+                <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-indigo-200">
+                  {briefingData.totals.propia2v}
+                </td>
+                <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-amber-300">
+                  {briefingData.totals.externa2v}
+                </td>
+                <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-red-300">
+                  {briefingData.totals.sinCobertura || ''}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40">
+                  {formatIntAlways(briefingData.totals.cajas)}
+                </td>
+                <td className="px-3.5 py-3 text-right font-mono border-r border-blue-900/40">
+                  {formatDecimalAlways(briefingData.totals.kilos)} Kg
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40 text-blue-200">
+                  {formatDecimalAlways(briefingData.totals.congeladoM3)}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40 text-cyan-200">
+                  {formatDecimalAlways(briefingData.totals.refrigeradoM3)}
+                </td>
+                <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40 text-amber-200">
+                  {formatDecimalAlways(briefingData.totals.secoM3)}
+                </td>
+                <td className="px-3.5 py-3 text-right font-mono border-r border-blue-900/40 text-emerald-300">
+                  {formatDecimalAlways(briefingData.totals.volumenM3)} m3
+                </td>
+                <td className="px-3 py-3 text-center font-mono">
+                  {briefingData.totals.numDestinos}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
     </div>
   );
 }

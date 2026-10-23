@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { usePlanningStore } from '../store/planningStore';
 import { useStaffStore } from '../store/staffStore';
+import { useFleetStore } from '../store/fleetStore';
+import { findFarthestComunaForRoute, getComunaDistance } from './RuteoView';
 import { Button } from './ui/Button';
 
 // Persistencia local para teléfonos de conductores (para compatibilidad de envíos por WhatsApp Personal)
@@ -300,6 +302,7 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha) => {
 };
 
 export default function RouteDispatch() {
+  const { fleetList } = useFleetStore();
   const { savedHistoryList, savedRuteoByDate, transmittedAssignments, ruteoOverrides, initPlanningFromDb } = usePlanningStore();
   const { staffList, fetchStaff, updateStaffPhone } = useStaffStore();
 
@@ -635,7 +638,7 @@ export default function RouteDispatch() {
   // Previsualizar mensaje por conductor
   const handlePreviewConductorGroup = (group) => {
     const phone = resolveStaffPhone(group.conductor, group.rut);
-    const msg = buildConductorGroupWhatsAppMessage(group.conductor, group.auxiliar, group.rows, selectedDate);
+    const msg = buildConductorGroupWhatsAppMessage(group.conductor, group.auxiliar, group.rows, selectedDate, fleetList);
     setPreviewModal({
       isOpen: true,
       title: `Tripulación: ${group.conductor}`,
@@ -997,7 +1000,8 @@ export default function RouteDispatch() {
               group.conductor,
               group.auxiliar,
               group.rows,
-              selectedDate
+              selectedDate,
+              fleetList
             );
             const isGroupCopied = copiedId === `grp-${group.conductor}`;
             const isCollapsed = isConductorCollapsed(group.conductor);
@@ -1551,7 +1555,8 @@ export default function RouteDispatch() {
                     group.conductor, 
                     group.auxiliar, 
                     group.rows, 
-                    selectedDate
+                    selectedDate,
+                    fleetList
                   );
                   const isCopied = copiedId === `grp-${group.conductor}`;
 

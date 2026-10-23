@@ -7,6 +7,8 @@ import {
   Save, AlertTriangle, History, Clock, Star, Edit3, Trash2, CheckSquare, Square
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTiendasCriticasStore } from '../store/tiendasCriticasStore';
+import MantenedorTiendasCriticasModal from './MantenedorTiendasCriticasModal';
 import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
@@ -423,6 +425,8 @@ export default function RuteoView() {
 
   // Modal de Auditoría de Cambios al Guardar desde Ruteo
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+  const [isTiendasCriticasOpen, setIsTiendasCriticasOpen] = useState(false);
+  const { tiendas: tiendasCriticasList, findTiendaCritica } = useTiendasCriticasStore();
   const [auditData, setAuditData] = useState({
     changes: [],
     incompleteList: [],
@@ -779,7 +783,30 @@ export default function RuteoView() {
       const turno = overrides.turno !== undefined ? overrides.turno : (firstRuta.ruteo_turno || '');
       const hora_cita = overrides.hora_cita !== undefined ? overrides.hora_cita : (firstRuta.ruteo_hora_cita || '');
       const prioridad = overrides.prioridad !== undefined ? overrides.prioridad : (firstRuta.ruteo_prioridad || 'Normal');
-      const destino_prioritario = overrides.destino_prioritario !== undefined ? overrides.destino_prioritario : (firstRuta.ruteo_destino_prioritario || '');
+      
+      // Cruce automático con Tiendas Críticas (Requisito 1):
+      // Si no hay override manual, buscar paradas del viaje que coincidan con la base de tiendas críticas
+      let autoDestinoPrioritario = '';
+      if (!overrides.destino_prioritario && !firstRuta.ruteo_destino_prioritario) {
+        const matchingCriticas = [];
+        trip.rutas.forEach(r => {
+          (r.paradas || []).forEach(p => {
+            if (p.destino) {
+              const matchedCritica = findTiendaCritica(p.destino);
+              if (matchedCritica && !matchingCriticas.some(m => m.destino === matchedCritica.destino)) {
+                matchingCriticas.push(matchedCritica);
+              }
+            }
+          });
+        });
+        if (matchingCriticas.length > 0) {
+          autoDestinoPrioritario = matchingCriticas.map(m => m.destino).join(' / ');
+        }
+      }
+
+      const destino_prioritario = overrides.destino_prioritario !== undefined 
+        ? overrides.destino_prioritario 
+        : (firstRuta.ruteo_destino_prioritario || autoDestinoPrioritario || '');
 
       // Texto de la vuelta según Disponibilización
       const displayVuelta = trip.n_vuelta
@@ -800,7 +827,7 @@ export default function RuteoView() {
         displayVuelta
       };
     });
-  }, [filteredRoutes, activeDate, ruteoOverrides]);
+  }, [filteredRoutes, activeDate, ruteoOverrides, tiendasCriticasList, findTiendaCritica]);
 
   // Selección individual o total de filas para acciones masivas
   const isAllSelected = tripsList.length > 0 && selectedTripKeys.length === tripsList.length;
@@ -1024,46 +1051,32 @@ export default function RuteoView() {
     <NumberFormat ss:Format="#,##0.000"/>
   </Style>
 
-  <!-- Urgente (Naranjo Pastel: #FFEDD5, Texto: #7C2D12, Borde: #FDBA74) -->
+  <!-- Urgente (Amarillo Pastel: #FEF9C3, Texto: #713F12, Borde: #FDE047) -->
   <Style ss:ID="Row_Urgente_Left">
     <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
     <Borders>
-      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
     </Borders>
-    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7C2D12" ss:Bold="1"/>
-    <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
+    <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
   </Style>
   <Style ss:ID="Row_Urgente_Center">
     <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
     <Borders>
-      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
     </Borders>
-    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7C2D12" ss:Bold="1"/>
-    <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
+    <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
   </Style>
   <Style ss:ID="Row_Urgente_Right">
     <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
     <Borders>
-      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDBA74"/>
-    </Borders>
-    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#7C2D12" ss:Bold="1"/>
-    <Interior ss:Color="#FFEDD5" ss:Pattern="Solid"/>
-    <NumberFormat ss:Format="#,##0.000"/>
-  </Style>
-
-  <!-- Redespacho (Amarillo Pastel: #FEF9C3, Texto: #713F12, Borde: #FDE047) -->
-  <Style ss:ID="Row_Redespacho_Left">
-    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
-    <Borders>
       <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
       <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
       <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
@@ -1071,28 +1084,42 @@ export default function RuteoView() {
     </Borders>
     <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
     <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
+    <NumberFormat ss:Format="#,##0.000"/>
+  </Style>
+
+  <!-- Redespacho (Negro Pastel: #334155, Texto: #FFFFFF, Borde: #1E293B) -->
+  <Style ss:ID="Row_Redespacho_Left">
+    <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FFFFFF" ss:Bold="1"/>
+    <Interior ss:Color="#334155" ss:Pattern="Solid"/>
   </Style>
   <Style ss:ID="Row_Redespacho_Center">
     <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
     <Borders>
-      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
-      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
-      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
-      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
     </Borders>
-    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
-    <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FFFFFF" ss:Bold="1"/>
+    <Interior ss:Color="#334155" ss:Pattern="Solid"/>
   </Style>
   <Style ss:ID="Row_Redespacho_Right">
     <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
     <Borders>
-      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
-      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
-      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
-      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#FDE047"/>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1E293B"/>
     </Borders>
-    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
-    <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FFFFFF" ss:Bold="1"/>
+    <Interior ss:Color="#334155" ss:Pattern="Solid"/>
     <NumberFormat ss:Format="#,##0.000"/>
   </Style>
 
@@ -1366,6 +1393,20 @@ export default function RuteoView() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Botón Mantenedor de Tiendas Críticas (Requisitos 1 y 2) */}
+          <Button 
+            onClick={() => setIsTiendasCriticasOpen(true)}
+            variant="outline"
+            className="flex items-center gap-2 text-red-700 bg-red-50/80 hover:bg-red-100 hover:text-red-800 text-xs font-bold px-3.5 py-2 rounded-xl border-red-200 shadow-2xs transition-all"
+            title="Administrar tiendas críticas y cruzar automáticamente con ruteo"
+          >
+            <Store size={15} className="text-red-600" />
+            <span>Tiendas Críticas</span>
+            <span className="bg-red-200/80 text-red-800 text-[10px] font-black px-1.5 py-0.2 rounded-full">
+              {tiendasCriticasList.length}
+            </span>
+          </Button>
+
           <Button 
             onClick={handlePreSaveFromRuteo}
             className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-sm transition-all"
@@ -1700,15 +1741,15 @@ export default function RuteoView() {
 
                 // Fondo dinámico según Prioridad con Colores Pastel Solicitados:
                 // 1. Rojo Pastel para 'Prioridad urgente' (#ffd6d6)
-                // 2. Naranjo Pastel para 'Urgente' (#ffedd5)
-                // 3. Amarillo Pastel para 'Redespacho' (#fef9c3)
+                // 2. Amarillo Pastel para 'Urgente' (#fef9c3)
+                // 3. Negro Pastel para 'Redespacho' (#334155 / texto blanco)
                 let rowBgClass = 'bg-white hover:bg-blue-50/50 text-slate-800';
                 if (isPrioUrgente) {
                   rowBgClass = 'bg-[#ffd6d6] hover:bg-[#fecaca] text-[#7f1d1d] font-bold border-b border-[#fca5a5]';
                 } else if (isUrgente) {
-                  rowBgClass = 'bg-[#ffedd5] hover:bg-[#fed7aa] text-[#7c2d12] font-bold border-b border-[#fdba74]';
+                  rowBgClass = 'bg-[#fef9c3] hover:bg-[#fef08a] text-[#713f12] font-bold border-b border-[#fde047]';
                 } else if (isRedespacho) {
-                  rowBgClass = 'bg-[#fef9c3] hover:bg-[#fef08a] text-[#713f12] font-semibold border-b border-[#fde047]';
+                  rowBgClass = 'bg-[#334155] hover:bg-[#1e293b] text-[#f8fafc] font-bold border-b border-[#1e293b]';
                 } else if (idx % 2 === 1) {
                   rowBgClass = 'bg-slate-50/60 hover:bg-blue-50/50 text-slate-800';
                 }
@@ -1746,9 +1787,9 @@ export default function RuteoView() {
                           isPrioUrgente
                             ? 'bg-[#fca5a5]/80 text-[#7f1d1d] font-black'
                             : isUrgente
-                            ? 'bg-[#fdba74]/80 text-[#7c2d12] font-black'
-                            : isRedespacho
                             ? 'bg-[#fde047]/80 text-[#713f12] font-black'
+                            : isRedespacho
+                            ? 'bg-[#0f172a] text-white font-black border border-slate-600'
                             : 'bg-blue-100/80 text-blue-900 font-black'
                         }`}>
                           {trip.rutasStr}
@@ -2073,7 +2114,9 @@ export default function RuteoView() {
                 O selecciona de los locales de este viaje:
               </span>
               <div className="max-h-48 overflow-y-auto space-y-1 border border-slate-200 rounded-xl p-2 bg-slate-50/50">
-                {priorityModalTrip.rutas.flatMap(r => r.paradas || []).map((p, idx) => (
+                {priorityModalTrip.rutas.flatMap(r => r.paradas || []).map((p, idx) => {
+                  const isCritica = !!findTiendaCritica(p.destino);
+                  return (
                   <button
                     key={idx}
                     type="button"
@@ -2084,14 +2127,22 @@ export default function RuteoView() {
                     className="w-full text-left p-2 rounded-lg bg-white border border-slate-200/80 hover:bg-red-50 hover:border-red-300 text-xs transition-colors flex items-center justify-between group"
                   >
                     <div>
-                      <p className="font-bold text-slate-800 group-hover:text-red-700">{p.destino}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-800 group-hover:text-red-700">{p.destino}</p>
+                        {isCritica && (
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-black bg-red-100 text-red-700 border border-red-300">
+                            ⭐ Crítica
+                          </span>
+                        )}
+                      </div>
                       <p className="text-[10px] text-slate-400">{p.comuna} • {p.direccion}</p>
                     </div>
                     <span className="text-[10px] text-blue-600 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
                       Elegir ➔
                     </span>
                   </button>
-                ))}
+                  );
+                })}
 
                 {priorityModalTrip.rutas.flatMap(r => r.paradas || []).length === 0 && (
                   <p className="text-xs text-slate-400 italic text-center py-4">
@@ -2121,6 +2172,12 @@ export default function RuteoView() {
           </div>
         </div>
       )}
+
+      {/* Mantenedor de Tiendas Críticas (Requisitos 1 y 2) */}
+      <MantenedorTiendasCriticasModal 
+        isOpen={isTiendasCriticasOpen} 
+        onClose={() => setIsTiendasCriticasOpen(false)} 
+      />
 
       {/* 7. POP-UP MODAL DE AUDITORÍA AL GUARDAR DISPONIBILIZACIÓN */}
       {isAuditModalOpen && (
