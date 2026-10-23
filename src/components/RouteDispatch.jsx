@@ -11,6 +11,7 @@ import { usePlanningStore } from '../store/planningStore';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore } from '../store/fleetStore';
 import { findFarthestComunaForRoute, getComunaDistance } from './RuteoView';
+import { matchVehicleByCode } from '../lib/vehicleMatcher';
 import { Button } from './ui/Button';
 
 // Persistencia local para teléfonos de conductores (para compatibilidad de envíos por WhatsApp Personal)
@@ -56,77 +57,119 @@ export const getUniqueParadas = (paradas) => {
   return unique;
 };
 
-// Formateador de mensaje individual para WhatsApp
-export const buildSingleRouteWhatsAppMessage = (row, fecha) => {
-  const conductor = row.conductor_name?.trim() || 'Sin Conductor asignado';
-  const auxiliar = row.aux1_name?.trim() || 'Sin Auxiliar';
-  const aux2 = row.aux2_name?.trim();
-  const vuelta = row.n_vuelta ? (String(row.n_vuelta).toLowerCase().includes('vuelta') ? row.n_vuelta : `Vuelta ${row.n_vuelta}`) : 'Vuelta 1';
-  const ruta = row.ruta || 'S/N';
-  const cliente = row.cliente || 'Centralizado';
-  const uniqueParadas = getUniqueParadas(row.paradas);
-  const locales = row.locales || (uniqueParadas.length > 0 ? uniqueParadas.length : 1);
-  const m3 = (parseFloat(row.m3) || 0).toFixed(3);
-  const camion = row.camion?.trim() || '';
-  const horaCita = row.hora_cita?.trim();
-  const turno = row.turno?.trim();
-  const prioridad = row.prioridad?.trim();
-  const destinoPrioritario = row.destino_prioritario?.trim();
+// Helper para formatear código de camión junto a su patente (Ej: "C281 (WBGK44)")
+export const formatCamionWithPlate = (rawCamion, fleetList = []) => {
+  if (!rawCamion) return '';
+  const str = String(rawCamion).trim();
+  if (!str) return '';
+  if (/\([A-Z0-9-]+\)/i.test(str)) {
+    return str;
+  }
+  if (!fleetList || !Array.isArray(fleetList) || fleetList.length === 0) {
+    return str;
+  }
+  const match = matchVehicleByCode(str, '', fleetList);
+  if (match && match.plate) {
+    const internal = match.internal_number || str;
+    return `${internal} (${match.plate.toUpperCase()})`;
+  }
+  return str;
+};
 
-  let msg = `🚛 *ASIGNACIÓN DE RUTA* - ${fecha}\n`;
-  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `🛣️ *N° Ruta:* ${ruta}\n`;
-  msg += `🔄 *N° Vuelta:* ${vuelta}\n`;
-  if (camion) msg += `🚚 *Camión:* ${camion}\n`;
-  msg += `🏢 *Cliente:* ${cliente}\n`;
-  if (turno) msg += `🕐 *Turno:* ${turno}\n`;
-  if (horaCita) msg += `⏰ *Hora Cita / Llegada:* ${horaCita}\n`;
-  if (prioridad && prioridad !== 'Normal') msg += `🚨 *Prioridad:* ${prioridad.toUpperCase()}\n`;
-  if (destinoPrioritario) msg += `⭐ *Destino Prioritario:* ${destinoPrioritario}\n`;
-  msg += `\n`;
-  msg += `👥 *Tripulación Asignada:*\n`;
-  msg += `• *Conductor:* ${conductor}\n`;
-  msg += `• *Auxiliar:* ${auxiliar}\n`;
-  if (aux2) msg += `• *Auxiliar 2:* ${aux2}\n`;
-  msg += `\n`;
-  msg += `📍 *Locales / Paradas:* ${locales}\n`;
-  msg += `📦 *Carga:* ${m3} m³\n`;
+// Helper para encontrar la comuna más lejana de un viaje considerando Lago Riñihue 02319, San Bernardo
+export const findFarthestComunaForTrip = (viajeRows = []) => {
+  let maxDist = -1;
+  let farthest = '';
 
-  // Detalle de paradas si existen (deduplicadas para no repetir destinos por multi-ambiente)
-  if (uniqueParadas && uniqueParadas.length > 0) {
-    msg += `\n📋 *Detalle de Paradas (${uniqueParadas.length}):*\n`;
-    uniqueParadas.slice(0, 15).forEach((p, idx) => {
-      const sec = idx + 1;
-      const dest = p.destino || 'Destino';
-      const com = p.comuna ? ` (${p.comuna})` : '';
-      const isDestPrio = destinoPrioritario && dest.toLowerCase().includes(destinoPrioritario.toLowerCase());
-      msg += `  ${sec}. ${dest}${com}${isDestPrio ? ' ⭐ [PRIORITARIO]' : ''}\n`;
+  (viajeRows || []).forEach(r => {
+    const paradas = r.paradas || [];
+    paradas.forEach(p => {
+      const com = (p.comuna || '').trim();
+      if (com) {
+        const d = getComunaDistance(com);
+        if (d > maxDist) {
+          maxDist = d;
+          farthest = com.toUpperCase();
+        }
+      }
     });
-    if (uniqueParadas.length > 15) {
-      msg += `  ... y ${uniqueParadas.length - 15} paradas más\n`;
+    if (!farthest && r.comuna) {
+      const d = getComunaDistance(r.comuna);
+      if (d > maxDist) {
+        maxDist = d;
+        farthest = String(r.comuna).trim().toUpperCase();
+      }
     }
+  });
+
+  return farthest || 'SANTIAGO';
+};
+
+// Formateador de mensaje individual para WhatsApp
+export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = []) => {
+  let formattedDate = fecha;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    const [y, m, d] = fecha.split('-');
+    formattedDate = `${d}-${m}-${y}`;
   }
 
+  const conductor = row.conductor_name?.trim() || 'Sin Conductor asignado';
+  const auxiliar = row.aux1_name?.trim() || 'Sin Auxiliar';
+  const rawVuelta = String(row.n_vuelta || '1').trim();
+  const matchV = rawVuelta.match(/\d+/);
+  const vueltaNum = matchV ? parseInt(matchV[0], 10) : 1;
+  const ruta = row.ruta || 'S/N';
+  const cliente = (row.cliente || 'Centralizado').trim();
+  const uniqueParadas = getUniqueParadas(row.paradas);
+  const locales = parseInt(row.locales, 10) || (uniqueParadas.length > 0 ? uniqueParadas.length : 1);
+  const localesWord = locales === 1 ? 'local' : 'locales';
+  const m3Val = (parseFloat(row.m3) || 0).toFixed(3);
+  const camionText = formatCamionWithPlate(row.camion, fleetList) || 'Sin camión';
+  const farthestComuna = findFarthestComunaForTrip([row]);
+
+  const tripIcon = vueltaNum === 1 ? '   📦' : '🔄';
+
+  let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `_Favor confirmar recepción del servicio._`;
-  return msg;
+  msg += `👤 *Conductor:* ${conductor}\n`;
+  msg += `👥 *Auxiliar:* ${auxiliar}\n`;
+  msg += `🚚 *Camión:* ${camionText}\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `${tripIcon} *VIAJE ${vueltaNum} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
+  msg += `   ▫️ *Ruta ${ruta}* (${cliente}): ${locales} ${localesWord} | ${m3Val} m³`;
+  if (row.hora_cita) msg += ` | ⏰ Cita: ${row.hora_cita}`;
+  if (row.prioridad && row.prioridad !== 'Normal') msg += ` | 🚨 ${row.prioridad.toUpperCase()}`;
+  msg += `\n`;
+  if (row.destino_prioritario) {
+    msg += `      ⭐ *Prioritario:* ${row.destino_prioritario}\n`;
+  }
+  msg += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `_Favor confirmar recepción del itinerario._`;
+
+  return msg.trim();
 };
 
 // Formateador de mensaje consolidado para un Conductor / Dupla (agrupado por N° Vuelta / Viaje)
-export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows, fecha) => {
-  let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${fecha}\n`;
-  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `👤 *Conductor:* ${conductorName}\n`;
-  msg += `👥 *Auxiliar:* ${auxName || 'Sin Auxiliar'}\n`;
-  
-  const camiones = Array.from(new Set(rows.map(r => r.camion?.trim()).filter(Boolean)));
-  if (camiones.length > 0) {
-    msg += `🚚 *Camión:* ${camiones.join(', ')}\n`;
+export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows, fecha, fleetList = []) => {
+  let formattedDate = fecha;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    const [y, m, d] = fecha.split('-');
+    formattedDate = `${d}-${m}-${y}`;
   }
-  
+
+  // Camión con patente según flota
+  const rawCamiones = Array.from(new Set(rows.map(r => r.camion?.trim()).filter(Boolean)));
+  const camionesFormatted = rawCamiones.map(c => formatCamionWithPlate(c, fleetList)).filter(Boolean);
+  const camionText = camionesFormatted.join(', ') || 'Sin camión';
+
+  let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `👤 *Conductor:* ${conductorName || 'Sin Conductor'}\n`;
+  msg += `👥 *Auxiliar:* ${auxName || 'Sin Auxiliar'}\n`;
+  msg += `🚚 *Camión:* ${camionText}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
 
-  // Agrupar filas por N° Vuelta (Requisito 2: cada N° Vuelta representa UN SOLO VIAJE)
+  // Agrupar filas por N° Vuelta (cada N° Vuelta representa UN SOLO VIAJE)
   const vueltasMap = new Map();
   rows.forEach(r => {
     const rawVuelta = String(r.n_vuelta || '1').trim();
@@ -137,7 +180,6 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     if (!vueltasMap.has(key)) {
       vueltasMap.set(key, {
         vueltaNum: num,
-        label: `Vuelta ${num}`,
         rows: []
       });
     }
@@ -147,123 +189,41 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
   // Ordenar viajes por número de vuelta ascendente (1, 2, 3...)
   const sortedViajes = Array.from(vueltasMap.values()).sort((a, b) => a.vueltaNum - b.vueltaNum);
 
-  msg += `📋 *Itinerario de Viajes (${sortedViajes.length} ${sortedViajes.length === 1 ? 'Viaje' : 'Viajes'} | ${rows.length} ${rows.length === 1 ? 'Ruta' : 'Rutas'}):*\n\n`;
-
-  let grandTotalLocales = 0;
-  let grandTotalM3 = 0;
-
   sortedViajes.forEach((viaje, idx) => {
+    const viajeIndex = idx + 1;
     const viajeRows = viaje.rows;
-    const isMultiRuta = viajeRows.length > 1;
+    const farthestComuna = findFarthestComunaForTrip(viajeRows);
 
-    // Rutas involucradas en este viaje
-    const rutasArr = viajeRows.map(r => r.ruta || 'S/N');
-    const rutasStr = rutasArr.join(' + ');
+    // Icono según vuelta: 📦 para Viaje 1, 🔄 para Viaje 2 en adelante
+    const tripIcon = viajeIndex === 1 ? '   📦' : '🔄';
 
-    // Clientes
-    const clientesArr = Array.from(new Set(viajeRows.map(r => r.cliente?.trim()).filter(Boolean)));
-    const clientesStr = clientesArr.join(' / ') || 'Centralizado';
+    msg += `${tripIcon} *VIAJE ${viajeIndex} (VUELTA ${viaje.vueltaNum})* [${farthestComuna}]\n`;
 
-    // Camiones en este viaje
-    const viajeCamiones = Array.from(new Set(viajeRows.map(r => r.camion?.trim()).filter(Boolean)));
-    const camionStr = viajeCamiones.join(', ');
-
-    // Turno y Hora Cita
-    const turnosArr = Array.from(new Set(viajeRows.map(r => r.turno?.trim()).filter(Boolean)));
-    const citasArr = Array.from(new Set(viajeRows.map(r => r.hora_cita?.trim()).filter(Boolean)));
-    const turnoStr = turnosArr.join(' / ');
-    const citaStr = citasArr.join(' / ');
-
-    // Prioridad
-    const prioArr = Array.from(new Set(viajeRows.map(r => r.prioridad?.trim()).filter(p => p && p !== 'Normal')));
-    const destPrioArr = Array.from(new Set(viajeRows.map(r => r.destino_prioritario?.trim()).filter(Boolean)));
-
-    // Totales del viaje
-    let viajeLocales = 0;
-    let viajeM3 = 0;
+    // Desglose de cada ruta incluida en este viaje
     viajeRows.forEach(r => {
       const uParadas = getUniqueParadas(r.paradas);
-      const loc = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
-      viajeLocales += loc;
-      viajeM3 += parseFloat(r.m3) || 0;
-    });
+      const locales = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
+      const localesWord = locales === 1 ? 'local' : 'locales';
+      const m3Val = (parseFloat(r.m3) || 0).toFixed(3);
+      const clienteName = (r.cliente || 'Centralizado').trim();
+      const rutaNum = r.ruta || 'S/N';
 
-    grandTotalLocales += viajeLocales;
-    grandTotalM3 += viajeM3;
-
-    // Título de este viaje (considerando rutas agrupadas como un solo viaje)
-    if (isMultiRuta) {
-      msg += `🔄 *VIAJE ${idx + 1} (VUELTA ${viaje.vueltaNum}) - COMBINADO (Rutas: ${rutasStr})*\n`;
-    } else {
-      msg += `🔄 *VIAJE ${idx + 1} (VUELTA ${viaje.vueltaNum}) - RUTA ${rutasStr}*\n`;
-    }
-
-    if (camionStr) msg += `   • 🚚 Camión: *${camionStr}*\n`;
-    msg += `   • 🏢 Cliente: ${clientesStr}\n`;
-    if (turnoStr) msg += `   • 🕐 Turno: ${turnoStr}\n`;
-    if (citaStr) msg += `   • ⏰ Hora Cita / Llegada: ${citaStr}\n`;
-    if (prioArr.length > 0) msg += `   • 🚨 Prioridad: ${prioArr.map(p => p.toUpperCase()).join(' / ')}\n`;
-    if (destPrioArr.length > 0) msg += `   • ⭐ Destino Prioritario: ${destPrioArr.join(', ')}\n`;
-    msg += `   • 📍 Locales Viaje: ${viajeLocales} | 📦 Volumen Viaje: ${viajeM3.toFixed(3)} m³\n`;
-
-    // Si tiene múltiples rutas en la misma vuelta, desglosar sub-cargas y paradas organizadas
-    if (isMultiRuta) {
-      msg += `\n   📦 *Detalle de Carga por Ruta:*\n`;
-      viajeRows.forEach(r => {
-        const uParadas = getUniqueParadas(r.paradas);
-        const loc = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
-        const m3Val = (parseFloat(r.m3) || 0).toFixed(3);
-        msg += `   ▫️ *Ruta ${r.ruta || 'S/N'}* (${r.cliente || 'Centralizado'}): ${loc} locales | ${m3Val} m³\n`;
-      });
-
-      msg += `\n   📋 *Itinerario de Paradas Combinadas:*\n`;
-      let stopCounter = 1;
-      viajeRows.forEach(r => {
-        const uParadas = getUniqueParadas(r.paradas);
-        if (uParadas.length > 0) {
-          msg += `   🔸 *Ruta ${r.ruta || 'S/N'}:*\n`;
-          uParadas.slice(0, 10).forEach(p => {
-            const dest = p.destino || 'Destino';
-            const com = p.comuna ? ` (${p.comuna})` : '';
-            const isDestPrio = destPrioArr.some(dp => dest.toLowerCase().includes(dp.toLowerCase()));
-            msg += `     ${stopCounter}. ${dest}${com}${isDestPrio ? ' ⭐ [PRIORITARIO]' : ''}\n`;
-            stopCounter++;
-          });
-          if (uParadas.length > 10) {
-            msg += `     ... y ${uParadas.length - 10} paradas más en ruta ${r.ruta}\n`;
-          }
-        }
-      });
-    } else {
-      // Ruta única
-      const singleRow = viajeRows[0];
-      const uParadas = getUniqueParadas(singleRow.paradas);
-      if (uParadas.length > 0) {
-        msg += `   📋 *Paradas (${uParadas.length}):*\n`;
-        uParadas.slice(0, 12).forEach((p, pIdx) => {
-          const dest = p.destino || 'Destino';
-          const com = p.comuna ? ` (${p.comuna})` : '';
-          const isDestPrio = destPrioArr.some(dp => dest.toLowerCase().includes(dp.toLowerCase()));
-          msg += `     ${pIdx + 1}. ${dest}${com}${isDestPrio ? ' ⭐ [PRIORITARIO]' : ''}\n`;
-        });
-        if (uParadas.length > 12) {
-          msg += `     ... y ${uParadas.length - 12} paradas más\n`;
-        }
+      msg += `   ▫️ *Ruta ${rutaNum}* (${clienteName}): ${locales} ${localesWord} | ${m3Val} m³`;
+      if (r.hora_cita) msg += ` | ⏰ Cita: ${r.hora_cita}`;
+      if (r.prioridad && r.prioridad !== 'Normal') msg += ` | 🚨 ${r.prioridad.toUpperCase()}`;
+      msg += `\n`;
+      if (r.destino_prioritario) {
+        msg += `      ⭐ *Prioritario:* ${r.destino_prioritario}\n`;
       }
-    }
+    });
 
     msg += `\n`;
   });
 
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `📊 *Totales del Conductor:*\n`;
-  msg += `• Total Viajes: *${sortedViajes.length} ${sortedViajes.length === 1 ? 'viaje' : 'viajes'} (${rows.length} ${rows.length === 1 ? 'ruta' : 'rutas'})*\n`;
-  msg += `• Total Locales: *${grandTotalLocales}*\n`;
-  msg += `• Total Volumen: *${grandTotalM3.toFixed(3)} m³*\n`;
-  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `_Favor confirmar recepción del itinerario._`;
 
-  return msg;
+  return msg.trim();
 };
 
 // Formateador de resumen completo para grupo de operaciones
@@ -623,7 +583,7 @@ export default function RouteDispatch() {
   const handlePreviewSingle = (row) => {
     const conductor = row.conductor_name?.trim() || '';
     const phone = resolveStaffPhone(conductor, row.conductor_rut);
-    const msg = buildSingleRouteWhatsAppMessage(row, selectedDate);
+    const msg = buildSingleRouteWhatsAppMessage(row, selectedDate, fleetList);
     setPreviewModal({
       isOpen: true,
       title: `Ruta ${row.ruta} - ${conductor || 'Sin Asignar'}`,
@@ -1233,7 +1193,7 @@ export default function RouteDispatch() {
                           const isUrgente = row.prioridad === 'Urgente';
                           const isRedespacho = row.prioridad === 'Redespacho';
                           const uniqueParadas = getUniqueParadas(row.paradas);
-                          const singleMsg = buildSingleRouteWhatsAppMessage(row, selectedDate);
+                          const singleMsg = buildSingleRouteWhatsAppMessage(row, selectedDate, fleetList);
                           const isSingleCopied = copiedId === row.id;
                           const rowKey = row.id || `${row.ruta}-${rIdx}`;
                           const isParadasExpanded = !!expandedParadasRowId[rowKey];
@@ -1242,9 +1202,9 @@ export default function RouteDispatch() {
                           if (isPrioUrgente) {
                             rowBgClass = 'bg-[#ffd6d6]/70 hover:bg-[#fecaca] text-[#7f1d1d] font-semibold border-l-4 border-l-[#fca5a5]';
                           } else if (isUrgente) {
-                            rowBgClass = 'bg-[#ffedd5]/70 hover:bg-[#fed7aa] text-[#7c2d12] font-semibold border-l-4 border-l-[#fdba74]';
+                            rowBgClass = 'bg-[#fef9c3]/80 hover:bg-[#fef08a] text-[#713f12] font-semibold border-l-4 border-l-[#fde047]';
                           } else if (isRedespacho) {
-                            rowBgClass = 'bg-[#fef9c3]/70 hover:bg-[#fef08a] text-[#713f12] font-semibold border-l-4 border-l-[#fde047]';
+                            rowBgClass = 'bg-[#334155] hover:bg-[#1e293b] text-[#f8fafc] font-semibold border-l-4 border-l-[#0f172a]';
                           }
 
                           return (
@@ -1312,8 +1272,10 @@ export default function RouteDispatch() {
                                     isPrioUrgente
                                       ? 'bg-[#ffd6d6] text-[#7f1d1d] border-[#fca5a5]'
                                       : isUrgente
-                                      ? 'bg-[#ffedd5] text-[#7c2d12] border-[#fdba74]'
-                                      : 'bg-[#fef9c3] text-[#713f12] border-[#fde047]'
+                                      ? 'bg-[#fef9c3] text-[#713f12] border-[#fde047]'
+                                      : isRedespacho
+                                      ? 'bg-[#334155] text-white border-slate-600'
+                                      : 'bg-slate-100 text-slate-700 border-slate-300'
                                   }`}>
                                     {row.prioridad}
                                   </span>

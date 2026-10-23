@@ -4,7 +4,8 @@ import {
   Download, Calendar, Search, Filter, Layers, 
   MapPin, User, Truck, Package, Weight, CheckCircle2,
   ChevronDown, ChevronRight, ArrowUpDown, FileSpreadsheet, RefreshCw, X, Check,
-  Save, AlertTriangle, History, Clock, Star, Edit3, Trash2, CheckSquare, Square
+  Save, AlertTriangle, History, Clock, Star, Edit3, Trash2, CheckSquare, Square,
+  Store
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTiendasCriticasStore } from '../store/tiendasCriticasStore';
