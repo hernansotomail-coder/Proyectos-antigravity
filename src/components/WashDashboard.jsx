@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { 
-  Download, ChevronDown, Search, Droplets, ShieldCheck, 
+  Download, ChevronDown, ChevronUp, ArrowUpDown, Search, Droplets, ShieldCheck, 
   AlertTriangle, CheckCircle2, Clock, Truck, Layers, Filter, MapPin 
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -371,9 +371,43 @@ export default function WashDashboard() {
     });
   }, [baseFilteredFleet, activeCard, statusFilter]);
 
+  // Estado de Ordenamiento A a Z por columna (Requisito 2)
+  const [sortConfig, setSortConfig] = useState({ key: 'internal_number', direction: 'asc' });
+
+  const handleSort = (key) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  const sortedVehicles = useMemo(() => {
+    if (!sortConfig.key) return filteredVehicles;
+
+    return [...filteredVehicles].sort((a, b) => {
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
+
+      if (sortConfig.key === 'colorStatus') {
+        const order = { red: 1, yellow: 2, green: 3, none: 4 };
+        valA = order[a.colorStatus] || 5;
+        valB = order[b.colorStatus] || 5;
+        return (valA - valB) * (sortConfig.direction === 'asc' ? 1 : -1);
+      }
+
+      if (valA === null || valA === undefined) valA = '';
+      if (valB === null || valB === undefined) valB = '';
+
+      const factor = sortConfig.direction === 'asc' ? 1 : -1;
+      return String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' }) * factor;
+    });
+  }, [filteredVehicles, sortConfig]);
+
   // Exportar a Excel
   const exportToExcel = () => {
-    const dataToExport = filteredVehicles.map(f => ({
+    const dataToExport = sortedVehicles.map(f => ({
       'Tipo de Flota': isVehicleExternal(f) ? 'Externa' : 'Propia',
       'Empresa Externa': f.empresa_externa || '',
       'N° Interno': f.internal_number || 'N/A',
@@ -594,20 +628,45 @@ export default function WashDashboard() {
       {/* 4. Tabla de Dashboard de Lavados (Requisito 3 & 5) */}
       <div className="flex-1 overflow-auto rounded-xl border border-slate-200 bg-slate-50 shadow-2xs">
         <table className="w-full text-xs text-left">
-          <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+          <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider select-none">
             <tr>
-              <th className="px-4 py-3">N° Interno</th>
-              <th className="px-4 py-3">Patente</th>
-              <th className="px-4 py-3">Tipo</th>
-              <th className="px-4 py-3">Marca</th>
-              <th className="px-4 py-3">Región</th>
-              <th className="px-4 py-3">Última Certificación (+1 mes)</th>
-              <th className="px-4 py-3">Fecha Último Lavado</th>
-              <th className="px-4 py-3 text-center">Estado Semáforo</th>
+              {[
+                { key: 'internal_number', label: 'N° Interno' },
+                { key: 'plate', label: 'Patente' },
+                { key: 'type', label: 'Tipo' },
+                { key: 'brand', label: 'Marca' },
+                { key: 'region', label: 'Región' },
+                { key: 'ultima_certificacion', label: 'Última Certificación (+1 mes)' },
+                { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado' },
+                { key: 'colorStatus', label: 'Estado Semáforo', center: true },
+              ].map(col => {
+                const isSorted = sortConfig.key === col.key;
+                return (
+                  <th 
+                    key={col.key} 
+                    className={`px-4 py-3 cursor-pointer hover:bg-slate-200/70 transition-colors ${col.center ? 'text-center' : ''}`}
+                    onClick={() => handleSort(col.key)}
+                    title="Ordenar de la A a la Z / Z a la A"
+                  >
+                    <div className={`flex items-center gap-1.5 ${col.center ? 'justify-center' : ''}`}>
+                      <span>{col.label}</span>
+                      {isSorted ? (
+                        sortConfig.direction === 'asc' ? (
+                          <ChevronUp size={12} className="text-blue-600 shrink-0" />
+                        ) : (
+                          <ChevronDown size={12} className="text-blue-600 shrink-0" />
+                        )
+                      ) : (
+                        <ArrowUpDown size={11} className="text-slate-400 shrink-0 opacity-60" />
+                      )}
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-            {filteredVehicles.length === 0 ? (
+            {sortedVehicles.length === 0 ? (
               <tr>
                 <td colSpan="8" className="py-12 text-center text-slate-400">
                   <Droplets size={32} className="mx-auto text-slate-300 mb-2" />
@@ -616,7 +675,7 @@ export default function WashDashboard() {
                 </td>
               </tr>
             ) : (
-              filteredVehicles.map((truck) => {
+              sortedVehicles.map((truck) => {
                 // COLOR DEL N° INTERNO SEGÚN REGLA DEL USUARIO (Requisito 3 & 5: Contando 1 mes completo):
                 // - Igual o días pasados (diffDays <= 0): ROJO
                 // - Faltan 1 a 3 días: AMARILLO

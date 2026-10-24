@@ -3,7 +3,7 @@ import {
   MessageSquare, Send, Copy, Check, Search, Calendar, 
   Users, Truck, Layers, Filter, Eye, Phone, 
   Sparkles, ExternalLink, CheckCircle2, AlertCircle, X, ChevronDown, ChevronRight, ChevronUp,
-  Download, Smartphone, Save, UserCheck, RefreshCw, PhoneCall
+  Download, Smartphone, Save, UserCheck, RefreshCw, PhoneCall, Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -105,8 +105,29 @@ export const findFarthestComunaForTrip = (viajeRows = []) => {
   return farthest || 'SANTIAGO';
 };
 
+// Helper para restar minutos a una hora en formato HH:MM (Requisito 6: Citar con anticipación)
+export const subtractMinutesFromTime = (timeStr, minutesToSubtract) => {
+  if (!timeStr || !minutesToSubtract) return timeStr || '';
+  const clean = String(timeStr).trim();
+  const match = clean.match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return clean;
+
+  let hours = parseInt(match[1], 10);
+  let minutes = parseInt(match[2], 10);
+
+  let totalMinutes = hours * 60 + minutes - minutesToSubtract;
+  if (totalMinutes < 0) {
+    totalMinutes += 24 * 60; // día anterior si cruza medianoche
+  }
+
+  const newHours = Math.floor(totalMinutes / 60) % 24;
+  const newMinutes = totalMinutes % 60;
+
+  return `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
+};
+
 // Formateador de mensaje individual para WhatsApp
-export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = []) => {
+export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anticipacionMinutos = 0) => {
   let formattedDate = fecha;
   if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
     const [y, m, d] = fecha.split('-');
@@ -127,6 +148,21 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = []) => {
   const camionText = formatCamionWithPlate(row.camion, fleetList) || 'Sin camión';
   const farthestComuna = findFarthestComunaForTrip([row]);
 
+  // Hora Cita en el apartado general (Requisito 5 & 6)
+  const rawCita = (row.hora_cita || '').trim();
+  let citaGeneralHeader = '';
+  let routeCitaTag = '';
+  if (rawCita) {
+    if (anticipacionMinutos > 0) {
+      const adj = subtractMinutesFromTime(rawCita, anticipacionMinutos);
+      citaGeneralHeader = `${adj} (${anticipacionMinutos} min antes • Cita base: ${rawCita})`;
+      routeCitaTag = ` | ⏰ Cita: ${adj} (Base: ${rawCita})`;
+    } else {
+      citaGeneralHeader = rawCita;
+      routeCitaTag = ` | ⏰ Cita: ${rawCita}`;
+    }
+  }
+
   const tripIcon = vueltaNum === 1 ? '   📦' : '🔄';
 
   let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
@@ -134,10 +170,12 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = []) => {
   msg += `👤 *Conductor:* ${conductor}\n`;
   msg += `👥 *Auxiliar:* ${auxiliar}\n`;
   msg += `🚚 *Camión:* ${camionText}\n`;
+  if (citaGeneralHeader) {
+    msg += `⏰ *Hora Cita / Presentación:* ${citaGeneralHeader}\n`;
+  }
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `${tripIcon} *VIAJE ${vueltaNum} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
-  msg += `   ▫️ *Ruta ${ruta}* (${cliente}): ${locales} ${localesWord} | ${m3Val} m³`;
-  if (row.hora_cita) msg += ` | ⏰ Cita: ${row.hora_cita}`;
+  msg += `   ▫️ *Ruta ${ruta}* (${cliente}): ${locales} ${localesWord} | ${m3Val} m³${routeCitaTag}`;
   if (row.prioridad && row.prioridad !== 'Normal') msg += ` | 🚨 ${row.prioridad.toUpperCase()}`;
   msg += `\n`;
   if (row.destino_prioritario) {
@@ -150,7 +188,7 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = []) => {
 };
 
 // Formateador de mensaje consolidado para un Conductor / Dupla (agrupado por N° Vuelta / Viaje)
-export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows, fecha, fleetList = []) => {
+export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows, fecha, fleetList = [], anticipacionMinutos = 0) => {
   let formattedDate = fecha;
   if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
     const [y, m, d] = fecha.split('-');
@@ -162,11 +200,27 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
   const camionesFormatted = rawCamiones.map(c => formatCamionWithPlate(c, fleetList)).filter(Boolean);
   const camionText = camionesFormatted.join(', ') || 'Sin camión';
 
+  // Hora Cita en el apartado general recopilada de las rutas (Requisito 5 & 6)
+  const rawHorasCita = rows.map(r => r.hora_cita?.trim()).filter(Boolean);
+  const distinctCitas = Array.from(new Set(rawHorasCita));
+  let citasGeneralText = '';
+  if (distinctCitas.length > 0) {
+    if (anticipacionMinutos > 0) {
+      const adjustedList = distinctCitas.map(c => subtractMinutesFromTime(c, anticipacionMinutos));
+      citasGeneralText = `${adjustedList.join(' / ')} (${anticipacionMinutos} min antes • Cita base: ${distinctCitas.join(' / ')})`;
+    } else {
+      citasGeneralText = distinctCitas.join(' / ');
+    }
+  }
+
   let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `👤 *Conductor:* ${conductorName || 'Sin Conductor'}\n`;
   msg += `👥 *Auxiliar:* ${auxName || 'Sin Auxiliar'}\n`;
   msg += `🚚 *Camión:* ${camionText}\n`;
+  if (citasGeneralText) {
+    msg += `⏰ *Hora Cita / Presentación:* ${citasGeneralText}\n`;
+  }
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
 
   // Agrupar filas por N° Vuelta (cada N° Vuelta representa UN SOLO VIAJE)
@@ -208,8 +262,17 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
       const clienteName = (r.cliente || 'Centralizado').trim();
       const rutaNum = r.ruta || 'S/N';
 
-      msg += `   ▫️ *Ruta ${rutaNum}* (${clienteName}): ${locales} ${localesWord} | ${m3Val} m³`;
-      if (r.hora_cita) msg += ` | ⏰ Cita: ${r.hora_cita}`;
+      let routeCitaTag = '';
+      if (r.hora_cita) {
+        const raw = r.hora_cita.trim();
+        if (anticipacionMinutos > 0) {
+          routeCitaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)} (Base: ${raw})`;
+        } else {
+          routeCitaTag = ` | ⏰ Cita: ${raw}`;
+        }
+      }
+
+      msg += `   ▫️ *Ruta ${rutaNum}* (${clienteName}): ${locales} ${localesWord} | ${m3Val} m³${routeCitaTag}`;
       if (r.prioridad && r.prioridad !== 'Normal') msg += ` | 🚨 ${r.prioridad.toUpperCase()}`;
       msg += `\n`;
       if (r.destino_prioritario) {
@@ -227,8 +290,11 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
 };
 
 // Formateador de resumen completo para grupo de operaciones
-export const buildDailySummaryWhatsAppMessage = (rows, fecha) => {
+export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinutos = 0) => {
   let msg = `🚛 *DISPONIBILIZACIÓN GENERAL* - ${fecha}\n`;
+  if (anticipacionMinutos > 0) {
+    msg += `⏱️ *Horario de Citación:* ${anticipacionMinutos} min antes de la cita programada\n`;
+  }
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   
   const totalRutas = rows.length;
@@ -245,7 +311,16 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha) => {
     const m3 = (parseFloat(r.m3) || 0).toFixed(2);
     const loc = r.locales || (getUniqueParadas(r.paradas).length || 1);
     const prioTag = r.prioridad && r.prioridad !== 'Normal' ? ` [${r.prioridad.toUpperCase()}]` : '';
-    const citaTag = r.hora_cita ? ` | ⏰ Cita: ${r.hora_cita}` : '';
+    
+    let citaTag = '';
+    if (r.hora_cita) {
+      const raw = r.hora_cita.trim();
+      if (anticipacionMinutos > 0) {
+        citaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)} (Base: ${raw})`;
+      } else {
+        citaTag = ` | ⏰ Cita: ${raw}`;
+      }
+    }
     const turnoTag = r.turno ? ` | 🕐 T.${r.turno}` : '';
     const prioDest = r.destino_prioritario ? `\n   ⭐ Destino Prioritario: ${r.destino_prioritario}` : '';
 
@@ -286,6 +361,30 @@ export default function RouteDispatch() {
   const [vueltaFilter, setVueltaFilter] = useState('Todas');
   const [selectedRowIds, setSelectedRowIds] = useState([]);
   const [copiedId, setCopiedId] = useState(null);
+
+  // Selector de Anticipación de Citación (Requisito 6: 0, 15, 30, 40 min, 1 hora)
+  const [anticipacionMinutos, setAnticipacionMinutos] = useState(() => {
+    try {
+      const saved = localStorage.getItem('keylogistics_anticipacion_minutos');
+      return saved !== null ? parseInt(saved, 10) : 0;
+    } catch (e) {
+      return 0;
+    }
+  });
+
+  const handleSetAnticipacion = (val) => {
+    setAnticipacionMinutos(val);
+    try {
+      localStorage.setItem('keylogistics_anticipacion_minutos', String(val));
+    } catch (e) {
+      console.error('Error saving anticipacion:', e);
+    }
+    if (val > 0) {
+      toast.info(`Citación configurada ${val} minutos antes para todas las rutas`);
+    } else {
+      toast.info('Citación restablecida al horario exacto de cita');
+    }
+  };
 
   // Teléfonos persistidos localmente
   const [phoneMap, setPhoneMap] = useState(loadPersistedPhones);
@@ -583,7 +682,7 @@ export default function RouteDispatch() {
   const handlePreviewSingle = (row) => {
     const conductor = row.conductor_name?.trim() || '';
     const phone = resolveStaffPhone(conductor, row.conductor_rut);
-    const msg = buildSingleRouteWhatsAppMessage(row, selectedDate, fleetList);
+    const msg = buildSingleRouteWhatsAppMessage(row, selectedDate, fleetList, anticipacionMinutos);
     setPreviewModal({
       isOpen: true,
       title: `Ruta ${row.ruta} - ${conductor || 'Sin Asignar'}`,
@@ -598,7 +697,7 @@ export default function RouteDispatch() {
   // Previsualizar mensaje por conductor
   const handlePreviewConductorGroup = (group) => {
     const phone = resolveStaffPhone(group.conductor, group.rut);
-    const msg = buildConductorGroupWhatsAppMessage(group.conductor, group.auxiliar, group.rows, selectedDate, fleetList);
+    const msg = buildConductorGroupWhatsAppMessage(group.conductor, group.auxiliar, group.rows, selectedDate, fleetList, anticipacionMinutos);
     setPreviewModal({
       isOpen: true,
       title: `Tripulación: ${group.conductor}`,
@@ -616,7 +715,7 @@ export default function RouteDispatch() {
       toast.warning('No hay rutas guardadas para generar el resumen.');
       return;
     }
-    const msg = buildDailySummaryWhatsAppMessage(rawRows, selectedDate);
+    const msg = buildDailySummaryWhatsAppMessage(rawRows, selectedDate, anticipacionMinutos);
     handleCopyText(msg);
   };
 
@@ -625,7 +724,7 @@ export default function RouteDispatch() {
       toast.warning('No hay rutas guardadas para enviar.');
       return;
     }
-    const msg = buildDailySummaryWhatsAppMessage(rawRows, selectedDate);
+    const msg = buildDailySummaryWhatsAppMessage(rawRows, selectedDate, anticipacionMinutos);
     handleOpenWhatsApp('', msg);
   };
 
@@ -650,7 +749,7 @@ export default function RouteDispatch() {
       toast.warning('Selecciona al menos una ruta para copiar.');
       return;
     }
-    const msg = buildDailySummaryWhatsAppMessage(selected, selectedDate);
+    const msg = buildDailySummaryWhatsAppMessage(selected, selectedDate, anticipacionMinutos);
     handleCopyText(msg);
   };
 
@@ -797,6 +896,60 @@ export default function RouteDispatch() {
             <MessageSquare size={14} />
             Enviar WhatsApp General
           </Button>
+        </div>
+      </div>
+
+      {/* Selector de Anticipación de Citación (Requisito 6: 15, 30, 40 min, 1 hora) */}
+      <div className="bg-white rounded-xl border border-slate-200 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-2xs shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl shrink-0">
+            <Clock size={16} />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black text-slate-800">Citar con Anticipación (Todas las Rutas):</span>
+              {anticipacionMinutos > 0 ? (
+                <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  <span>⏰ Citando {anticipacionMinutos === 60 ? '1 hora' : `${anticipacionMinutos} min`} antes de la Hora Cita base</span>
+                </span>
+              ) : (
+                <span className="bg-slate-100 text-slate-600 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                  Sin anticipación (Horario de cita oficial)
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Calcula y ajusta automáticamente la hora de presentación en el mensaje de WhatsApp y en la tabla para todas las rutas.
+            </p>
+          </div>
+        </div>
+
+        {/* Botones selectores de rango */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {[
+            { label: 'Hora Exacta (0m)', val: 0 },
+            { label: '15 min antes', val: 15 },
+            { label: '30 min antes', val: 30 },
+            { label: '40 min antes', val: 40 },
+            { label: '1 hora antes', val: 60 },
+          ].map(opt => {
+            const isSelected = anticipacionMinutos === opt.val;
+            return (
+              <button
+                key={opt.val}
+                type="button"
+                onClick={() => handleSetAnticipacion(opt.val)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                  isSelected
+                    ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
+                }`}
+                title={opt.val === 0 ? 'Citar a la hora exacta estipulada en Ruteo' : `Citar ${opt.label} respecto a la hora de cita de Ruteo`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -961,7 +1114,8 @@ export default function RouteDispatch() {
               group.auxiliar,
               group.rows,
               selectedDate,
-              fleetList
+              fleetList,
+              anticipacionMinutos
             );
             const isGroupCopied = copiedId === `grp-${group.conductor}`;
             const isCollapsed = isConductorCollapsed(group.conductor);
@@ -1179,7 +1333,14 @@ export default function RouteDispatch() {
                           <th className="py-2 px-3 w-32">Camión</th>
                           <th className="py-2 px-3 min-w-[150px]">Cliente</th>
                           <th className="py-2 px-3 text-center w-20">Turno</th>
-                          <th className="py-2 px-3 text-center w-24">Hora Cita</th>
+                          <th className="py-2 px-3 text-center w-28">
+                            <span>Hora Cita</span>
+                            {anticipacionMinutos > 0 && (
+                              <span className="block text-[9px] text-amber-700 font-extrabold normal-case">
+                                (-{anticipacionMinutos}m)
+                              </span>
+                            )}
+                          </th>
                           <th className="py-2 px-3 text-center w-32">Prioridad</th>
                           <th className="py-2 px-3 text-center w-16">Locales</th>
                           <th className="py-2 px-3 text-right w-20">m³</th>
@@ -1193,7 +1354,7 @@ export default function RouteDispatch() {
                           const isUrgente = row.prioridad === 'Urgente';
                           const isRedespacho = row.prioridad === 'Redespacho';
                           const uniqueParadas = getUniqueParadas(row.paradas);
-                          const singleMsg = buildSingleRouteWhatsAppMessage(row, selectedDate, fleetList);
+                          const singleMsg = buildSingleRouteWhatsAppMessage(row, selectedDate, fleetList, anticipacionMinutos);
                           const isSingleCopied = copiedId === row.id;
                           const rowKey = row.id || `${row.ruta}-${rIdx}`;
                           const isParadasExpanded = !!expandedParadasRowId[rowKey];
@@ -1257,9 +1418,22 @@ export default function RouteDispatch() {
                               {/* Hora Cita */}
                               <td className="py-2 px-3 text-center">
                                 {row.hora_cita ? (
-                                  <span className="inline-block px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
-                                    {row.hora_cita}
-                                  </span>
+                                  <div className="flex flex-col items-center">
+                                    {anticipacionMinutos > 0 ? (
+                                      <>
+                                        <span className="inline-block px-2 py-0.5 rounded text-xs font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                          {subtractMinutesFromTime(row.hora_cita, anticipacionMinutos)}
+                                        </span>
+                                        <span className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                          Base: {row.hora_cita} (-{anticipacionMinutos}m)
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="inline-block px-2 py-0.5 rounded text-xs font-mono font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                                        {row.hora_cita}
+                                      </span>
+                                    )}
+                                  </div>
                                 ) : (
                                   <span className="text-slate-400 text-[11px]">—</span>
                                 )}
@@ -1518,7 +1692,8 @@ export default function RouteDispatch() {
                     group.auxiliar, 
                     group.rows, 
                     selectedDate,
-                    fleetList
+                    fleetList,
+                    anticipacionMinutos
                   );
                   const isCopied = copiedId === `grp-${group.conductor}`;
 

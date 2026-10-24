@@ -1,13 +1,51 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
-import { Select } from './ui/Select';
 import { Button } from './ui/Button';
-import { Download, ChevronDown, Truck, Building2, Layers } from 'lucide-react';
+import { 
+  Download, ChevronDown, ChevronUp, ArrowUpDown, Truck, 
+  Building2, Layers, Search, Filter 
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
+
+// Helper para parsear fechas de resolución y documentos en formatos flexibles
+export const parseDocDate = (val) => {
+  if (!val) return null;
+  const str = String(val).trim();
+  if (!str || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'nan' || str.toLowerCase() === 'null') return null;
+
+  // Formato YYYY-MM-DD
+  const isoMatch = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${String(isoMatch[2]).padStart(2, '0')}-${String(isoMatch[3]).padStart(2, '0')}`;
+  }
+
+  // Formato DD-MM-YYYY o DD/MM/YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}-${String(dmyMatch[2]).padStart(2, '0')}-${String(dmyMatch[1]).padStart(2, '0')}`;
+  }
+
+  // Fecha embebida en texto
+  const innerIso = str.match(/(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (innerIso) {
+    return `${innerIso[1]}-${String(innerIso[2]).padStart(2, '0')}-${String(innerIso[3]).padStart(2, '0')}`;
+  }
+
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  return null;
+};
 
 const getDaysDiff = (dateStr) => {
   if (!dateStr) return null;
-  const targetDate = new Date(dateStr);
+  const cleanDate = parseDocDate(dateStr) || dateStr;
+  const targetDate = new Date(cleanDate);
+  if (isNaN(targetDate.getTime())) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   targetDate.setHours(0, 0, 0, 0);
@@ -24,7 +62,7 @@ const getDocumentStatus = (days) => {
 };
 
 const ColorBadge = ({ status, text }) => {
-  if (status === 'N/A') return <span className="text-slate-400 text-xs">N/A</span>;
+  if (status === 'N/A' || !text || text === 'N/A') return <span className="text-slate-400 text-xs font-mono">N/A</span>;
   const colors = {
     red: 'bg-red-100 text-red-700 border-red-200',
     orange: 'bg-orange-100 text-orange-700 border-orange-200',
@@ -32,15 +70,14 @@ const ColorBadge = ({ status, text }) => {
     green: 'bg-green-100 text-green-700 border-green-200'
   };
   return (
-    <div className={`px-2 py-1 rounded-md text-[10px] font-bold border ${colors[status]}`}>
+    <div className={`px-2 py-1 rounded-md text-[10px] font-bold border font-mono ${colors[status] || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
       {text}
     </div>
   );
 };
 
-
 const MultiSelectDropdown = ({ options, selectedValues, onChange, placeholder }) => {
-  const [isOpen, setIsOpen] = React.useState(false);
+  const [isOpen, setIsOpen] = useState(false);
   return (
     <div className="relative flex-1 min-w-[150px]">
       <div onClick={() => setIsOpen(!isOpen)} className="flex h-10 w-full items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 cursor-pointer">
@@ -70,12 +107,24 @@ export default function FleetDashboard() {
   const [regionFilter, setRegionFilter] = useState([]);
   const [frioFilter, setFrioFilter] = useState([]);
   const [searchFilter, setSearchFilter] = useState('');
-  const [fleetTypeFilter, setFleetTypeFilter] = useState('Todas'); // 'Todas' | 'Flota Propia' | 'Flota Externa' (Requisito 3)
+  const [fleetTypeFilter, setFleetTypeFilter] = useState('Todas'); // 'Todas' | 'Flota Propia' | 'Flota Externa'
   
   const [activeCard, setActiveCard] = useState('todos');
   const [colorFilters, setColorFilters] = useState({
-    rt: 'Todos', gases: 'Todos', pc: 'Todos', soap: 'Todos', carnes: 'Todos'
+    rt: 'Todos', gases: 'Todos', pc: 'Todos', soap: 'Todos', carnes: 'Todos', resolution: 'Todos'
   });
+
+  // Estado de Ordenamiento A-Z por columna (Requisito 2)
+  const [sortConfig, setSortConfig] = useState({ key: 'plate', direction: 'asc' });
+
+  const handleSort = (key) => {
+    setSortConfig(prev => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
 
   useEffect(() => {
     fetchFleet();
@@ -91,6 +140,7 @@ export default function FleetDashboard() {
     return ['Todas', ...Array.from(rSet).sort()];
   }, [fleetList]);
 
+  // Categorización y cálculo documental incluyendo "Resolución" en formato fecha (Requisito 1)
   const categorized = useMemo(() => {
     return fleetList.map(f => {
       let category = 'Camiones/Camionetas';
@@ -98,6 +148,8 @@ export default function FleetDashboard() {
       if (t.includes('tracto')) category = 'Tractos';
       else if (t.includes('rampla') || t.includes('semiremolque') || t.includes('semirremolque')) category = 'Semiremolques';
       
+      const parsedRes = parseDocDate(f.resolution);
+
       return { 
         ...f, 
         dashboardCategory: category,
@@ -106,13 +158,15 @@ export default function FleetDashboard() {
         pcStatus: getDocumentStatus(getDaysDiff(f.pc_date)),
         soapStatus: getDocumentStatus(getDaysDiff(f.soap_date)),
         carnesStatus: getDocumentStatus(getDaysDiff(f.carnes_date)),
+        resolutionDate: parsedRes,
+        resolutionStatus: getDocumentStatus(getDaysDiff(parsedRes || f.resolution)),
       };
     });
   }, [fleetList]);
 
   const baseFilteredVehicles = useMemo(() => {
     return categorized.filter(f => {
-      // Filtro Tipo de Flota (Propia vs Externa) (Requisito 3)
+      // Filtro Tipo de Flota (Propia vs Externa)
       const isExt = isVehicleExternal(f);
       if (fleetTypeFilter === 'Flota Propia' && isExt) return false;
       if (fleetTypeFilter === 'Flota Externa' && !isExt) return false;
@@ -130,10 +184,16 @@ export default function FleetDashboard() {
     });
   }, [categorized, fleetTypeFilter, typeFilter, regionFilter, searchFilter, frioFilter]);
 
+  // Estadísticas KPI superiores incluyendo "Alerta Resolución" (Requisito 1)
   const stats = useMemo(() => {
     let vehiculos = 0, semiremolques = 0;
     const createAlert = () => ({ count: 0, severity: 'green' });
-    let alertRt = createAlert(), alertGases = createAlert(), alertPc = createAlert(), alertSoap = createAlert(), alertCarnes = createAlert();
+    let alertRt = createAlert(), 
+        alertGases = createAlert(), 
+        alertPc = createAlert(), 
+        alertSoap = createAlert(), 
+        alertCarnes = createAlert(),
+        alertResolution = createAlert();
 
     const updateWorst = (alertObj, status) => {
       if (status === 'N/A' || status === 'green') return;
@@ -152,9 +212,10 @@ export default function FleetDashboard() {
       updateWorst(alertPc, f.pcStatus);
       updateWorst(alertSoap, f.soapStatus);
       updateWorst(alertCarnes, f.carnesStatus);
+      updateWorst(alertResolution, f.resolutionStatus);
     });
 
-    return { vehiculos, semiremolques, alertRt, alertGases, alertPc, alertSoap, alertCarnes };
+    return { vehiculos, semiremolques, alertRt, alertGases, alertPc, alertSoap, alertCarnes, alertResolution };
   }, [baseFilteredVehicles]);
 
   const finalVehicles = useMemo(() => {
@@ -166,26 +227,58 @@ export default function FleetDashboard() {
       if (activeCard === 'pc' && (f.pcStatus === 'green' || f.pcStatus === 'N/A')) return false;
       if (activeCard === 'soap' && (f.soapStatus === 'green' || f.soapStatus === 'N/A')) return false;
       if (activeCard === 'carnes' && (f.carnesStatus === 'green' || f.carnesStatus === 'N/A')) return false;
+      if (activeCard === 'resolution' && (f.resolutionStatus === 'green' || f.resolutionStatus === 'N/A')) return false;
 
       if (colorFilters.rt !== 'Todos' && f.rtStatus !== colorFilters.rt) return false;
       if (colorFilters.gases !== 'Todos' && f.gasesStatus !== colorFilters.gases) return false;
       if (colorFilters.pc !== 'Todos' && f.pcStatus !== colorFilters.pc) return false;
       if (colorFilters.soap !== 'Todos' && f.soapStatus !== colorFilters.soap) return false;
       if (colorFilters.carnes !== 'Todos' && f.carnesStatus !== colorFilters.carnes) return false;
+      if (colorFilters.resolution !== 'Todos' && f.resolutionStatus !== colorFilters.resolution) return false;
 
       return true;
     });
   }, [baseFilteredVehicles, activeCard, colorFilters]);
 
+  // Lista ordenada de la matriz según columna seleccionada A a la Z (Requisito 2)
+  const sortedVehicles = useMemo(() => {
+    if (!sortConfig.key) return finalVehicles;
+
+    return [...finalVehicles].sort((a, b) => {
+      let valA = a[sortConfig.key];
+      let valB = b[sortConfig.key];
+
+      if (sortConfig.key === 'resolution') {
+        valA = a.resolutionDate || a.resolution || '';
+        valB = b.resolutionDate || b.resolution || '';
+      }
+
+      if (valA === null || valA === undefined) valA = '';
+      if (valB === null || valB === undefined) valB = '';
+
+      const factor = sortConfig.direction === 'asc' ? 1 : -1;
+      return String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' }) * factor;
+    });
+  }, [finalVehicles, sortConfig]);
+
   const exportToExcel = () => {
-    const dataToExport = finalVehicles.map(f => ({
+    const dataToExport = sortedVehicles.map(f => ({
       'Tipo de Flota': isVehicleExternal(f) ? 'Externa' : 'Propia',
       'Empresa Externa': f.empresa_externa || '',
-      'Tipo': f.type || 'N/A', 'Patente': f.plate, 'N° Interno': f.internal_number || 'N/A',
-      'Marca': f.brand || 'N/A', 'Sistema de frio': f.type2 || 'N/A', 'Modelo': f.model || 'N/A', 'Año': f.year || 'N/A',
-      'Región': f.region || 'N/A', 'RT': f.rt_date || 'N/A', 'Gases': f.gases_date || 'N/A',
-      'PC': f.pc_date || 'N/A', 'SOAP': f.soap_date || 'N/A', 'Carnes': f.carnes_date || 'N/A',
-      'Resolución': f.resolution || 'N/A'
+      'Tipo': f.type || 'N/A', 
+      'Patente': f.plate, 
+      'N° Interno': f.internal_number || 'N/A',
+      'Marca': f.brand || 'N/A', 
+      'Sistema de frio': f.type2 || 'N/A', 
+      'Modelo': f.model || 'N/A', 
+      'Año': f.year || 'N/A',
+      'Región': f.region || 'N/A', 
+      'RT': f.rt_date || 'N/A', 
+      'Gases': f.gases_date || 'N/A',
+      'PC': f.pc_date || 'N/A', 
+      'SOAP': f.soap_date || 'N/A', 
+      'Carnes': f.carnes_date || 'N/A',
+      'Resolución': f.resolutionDate || f.resolution || 'N/A'
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
@@ -228,22 +321,61 @@ export default function FleetDashboard() {
     );
   };
 
-  const HeaderFilter = ({ label, field }) => (
-    <div className="flex flex-col items-center gap-1">
-      <span>{label}</span>
-      <select 
-        className="text-[10px] font-normal border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-600 w-full"
-        value={colorFilters[field]}
-        onChange={(e) => setColorFilters({...colorFilters, [field]: e.target.value})}
+  const HeaderFilter = ({ label, field, sortKey }) => {
+    const isSorted = sortConfig.key === sortKey;
+    return (
+      <div className="flex flex-col items-center gap-1">
+        <button
+          type="button"
+          onClick={() => handleSort(sortKey)}
+          className="flex items-center gap-1 hover:text-blue-600 transition-colors uppercase font-bold text-[10px]"
+          title="Ordenar de la A a la Z / Z a la A"
+        >
+          <span>{label}</span>
+          {isSorted ? (
+            sortConfig.direction === 'asc' ? <ChevronUp size={12} className="text-blue-600 shrink-0" /> : <ChevronDown size={12} className="text-blue-600 shrink-0" />
+          ) : (
+            <ArrowUpDown size={11} className="text-slate-400 shrink-0 opacity-60" />
+          )}
+        </button>
+        <select 
+          className="text-[10px] font-normal border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-600 w-full"
+          value={colorFilters[field]}
+          onChange={(e) => setColorFilters({...colorFilters, [field]: e.target.value})}
+        >
+          <option value="Todos">Todos</option>
+          <option value="red">Vencido</option>
+          <option value="orange">0 a 15 días</option>
+          <option value="yellow">15 a 30 días</option>
+          <option value="green">Operativo</option>
+        </select>
+      </div>
+    );
+  };
+
+  const SortableTh = ({ colKey, label, className = '' }) => {
+    const isSorted = sortConfig.key === colKey;
+    return (
+      <th 
+        className={`px-3 py-2 font-semibold border-b cursor-pointer select-none hover:bg-slate-200/70 transition-colors ${className}`}
+        onClick={() => handleSort(colKey)}
+        title="Ordenar de la A a la Z / Z a la A"
       >
-        <option value="Todos">Todos</option>
-        <option value="red">Vencido</option>
-        <option value="orange">0 a 15 días</option>
-        <option value="yellow">15 a 30 días</option>
-        <option value="green">Operativo</option>
-      </select>
-    </div>
-  );
+        <div className="flex items-center gap-1.5">
+          <span>{label}</span>
+          {isSorted ? (
+            sortConfig.direction === 'asc' ? (
+              <ChevronUp size={13} className="text-blue-600 shrink-0" />
+            ) : (
+              <ChevronDown size={13} className="text-blue-600 shrink-0" />
+            )
+          ) : (
+            <ArrowUpDown size={12} className="text-slate-400 shrink-0 opacity-60" />
+          )}
+        </div>
+      </th>
+    );
+  };
 
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
@@ -291,7 +423,8 @@ export default function FleetDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6 shrink-0">
+      {/* Tarjetas KPI Superiores incluyendo "Alerta Resolución" (Requisito 1) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 mb-6 shrink-0">
         <div onClick={() => setActiveCard(activeCard === 'vehiculos' ? 'todos' : 'vehiculos')} className={`p-3 rounded-xl border flex flex-col justify-between cursor-pointer transition-all transform hover:scale-105 ${activeCard === 'vehiculos' ? 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 text-blue-900' : 'bg-slate-50 border-slate-200 text-slate-800'}`}>
           <p className={`text-[10px] font-semibold uppercase ${activeCard === 'vehiculos' ? 'text-blue-800' : 'text-slate-500'}`}>Vehículos</p>
           <p className="text-2xl font-black">{stats.vehiculos}</p>
@@ -305,31 +438,33 @@ export default function FleetDashboard() {
         <DynamicCard id="pc" title="Alerta PC" data={stats.alertPc} />
         <DynamicCard id="soap" title="Alerta SOAP" data={stats.alertSoap} />
         <DynamicCard id="carnes" title="Alerta Carnes" data={stats.alertCarnes} />
+        <DynamicCard id="resolution" title="Alerta Resolución" data={stats.alertResolution} />
       </div>
 
+      {/* Matriz interactiva con ordenamiento A-Z en cada columna (Requisito 2) */}
       <div className="flex-1 overflow-auto border border-slate-200 rounded-xl bg-slate-50">
         <table className="w-full text-xs text-left whitespace-nowrap">
-          <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 shadow-sm">
+          <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 shadow-sm border-b border-slate-200">
             <tr>
-              <th className="px-3 py-2 font-semibold border-b">Tipo</th>
-              <th className="px-3 py-2 font-semibold border-b">Patente</th>
-              <th className="px-3 py-2 font-semibold border-b">N° Interno</th>
-              <th className="px-3 py-2 font-semibold border-b">Marca</th>
-              <th className="px-3 py-2 font-semibold border-b">Sistema de frio</th>
-              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="RT" field="rt" /></th>
-              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="Gases" field="gases" /></th>
-              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="PC" field="pc" /></th>
-              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="SOAP" field="soap" /></th>
-              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="Carnes" field="carnes" /></th>
-              <th className="px-3 py-2 font-semibold border-b">Resolución</th>
+              <SortableTh colKey="type" label="Tipo" />
+              <SortableTh colKey="plate" label="Patente" />
+              <SortableTh colKey="internal_number" label="N° Interno" />
+              <SortableTh colKey="brand" label="Marca" />
+              <SortableTh colKey="type2" label="Sistema de frio" />
+              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="RT" field="rt" sortKey="rt_date" /></th>
+              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="Gases" field="gases" sortKey="gases_date" /></th>
+              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="PC" field="pc" sortKey="pc_date" /></th>
+              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="SOAP" field="soap" sortKey="soap_date" /></th>
+              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="Carnes" field="carnes" sortKey="carnes_date" /></th>
+              <th className="px-2 py-1 font-semibold border-b text-center"><HeaderFilter label="Resolución" field="resolution" sortKey="resolution" /></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
-            {finalVehicles.map(f => (
-              <tr key={f.id} className="hover:bg-slate-50">
+            {sortedVehicles.map(f => (
+              <tr key={f.id} className="hover:bg-slate-50 transition-colors">
                 <td className="px-3 py-2 text-slate-600">{f.type || 'N/A'}</td>
-                <td className="px-3 py-2 font-bold text-slate-800">{f.plate}</td>
-                <td className="px-3 py-2 text-slate-600">{f.internal_number || 'N/A'}</td>
+                <td className="px-3 py-2 font-bold font-mono text-slate-800">{f.plate}</td>
+                <td className="px-3 py-2 text-slate-600 font-mono font-bold">{f.internal_number || 'N/A'}</td>
                 <td className="px-3 py-2 text-slate-600">{f.brand || 'N/A'}</td>
                 <td className="px-3 py-2 text-slate-600">{f.type2 || 'N/A'}</td>
                 <td className="px-3 py-2 text-center"><ColorBadge status={f.rtStatus} text={f.rt_date || 'N/A'} /></td>
@@ -337,10 +472,10 @@ export default function FleetDashboard() {
                 <td className="px-3 py-2 text-center"><ColorBadge status={f.pcStatus} text={f.pc_date || 'N/A'} /></td>
                 <td className="px-3 py-2 text-center"><ColorBadge status={f.soapStatus} text={f.soap_date || 'N/A'} /></td>
                 <td className="px-3 py-2 text-center"><ColorBadge status={f.carnesStatus} text={f.carnes_date || 'N/A'} /></td>
-                <td className="px-3 py-2 text-slate-600">{f.resolution || 'N/A'}</td>
+                <td className="px-3 py-2 text-center"><ColorBadge status={f.resolutionStatus} text={f.resolutionDate || f.resolution || 'N/A'} /></td>
               </tr>
             ))}
-            {finalVehicles.length === 0 && (
+            {sortedVehicles.length === 0 && (
               <tr><td colSpan="11" className="px-4 py-8 text-center text-slate-500">No se encontraron vehículos para estos filtros.</td></tr>
             )}
           </tbody>

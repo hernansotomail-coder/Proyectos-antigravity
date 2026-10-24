@@ -38,6 +38,22 @@ export function AmbienteBadge({ ambiente }) {
   );
 }
 
+// Helper para verificar si un vehículo está bloqueado en Disponibilización (Requisito 4)
+export const isTruckStatusBlocked = (truck) => {
+  if (!truck) return false;
+  const rawStatus = String(truck.status || '').trim();
+  if (!rawStatus) return false;
+  const stLower = rawStatus.toLowerCase();
+  // Si está en "Activo", está habilitado para uso
+  if (stLower === 'activo') return false;
+  // Flota externa operativa (ej: Externo_TRANSPORTES ABC)
+  if (stLower.startsWith('externo') && !stLower.includes('taller') && !stLower.includes('baja') && !stLower.includes('doc')) {
+    return false;
+  }
+  // Cualquier estado que no sea "Activo" (ej: Taller, Por documentación, Baja, etc.) queda bloqueado
+  return true;
+};
+
 // COMPONENTE MULTI-SELECT DROPDOWN COMPACTO (Requisito 2)
 function CompactMultiSelect({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -418,6 +434,24 @@ export default function AssignmentControl() {
   // Filas expandidas en el Resumen inferior (por clave Conductor:::Vuelta)
   const [expandedSummaryKeys, setExpandedSummaryKeys] = useState({});
 
+  // Pop-up modal de Vehículo Bloqueado en Disponibilización (Requisito 4)
+  const [blockedTruckModal, setBlockedTruckModal] = useState({
+    isOpen: false,
+    truck: null,
+    reason: ''
+  });
+
+  const handleShowBlockedModal = (truck) => {
+    if (!truck) return;
+    const reason = truck.status || 'No Activo';
+    setBlockedTruckModal({
+      isOpen: true,
+      truck,
+      reason
+    });
+    toast.error(`Vehículo bloqueado: ${truck.internal_number || truck.plate} se encuentra en estado "${reason}" y no puede ser utilizado.`);
+  };
+
   // Pop-up modal de advertencia al asignar dotación con novedad (Requisito 2)
   const [warningStaffModal, setWarningStaffModal] = useState({
     isOpen: false,
@@ -660,14 +694,11 @@ export default function AssignmentControl() {
     };
   }, [staffList, sortVueltasAsc, staffSearch, viajesPorPersona, attendanceMap, staffAttendanceFilter, staffTipoFilter]);
 
-  // Camiones clasificados en 3 categorías con evaluación de salud documental (Requisito 3)
+  // Camiones clasificados en 3 categorías con evaluación de salud documental y bloqueo por estado (Requisito 4)
   const { camionesList, tractosList, semirremolquesList } = useMemo(() => {
     const activeTrucks = (fleetList || [])
       .filter(t => {
         if (!t) return false;
-        const st = (t.status || '').toLowerCase().trim();
-        const isInactive = ['inactivo', 'baja', 'de baja', 'dado de baja', 'taller', 'en taller', 'desactivado'].includes(st);
-        if (isInactive) return false;
 
         // Filtro por tipo de flota (Propia / Externa / Todos)
         if (truckTipoFilter !== 'todos') {
@@ -692,11 +723,14 @@ export default function AssignmentControl() {
         const identifier = t.internal_number ? `${t.internal_number} (${t.plate})` : t.plate;
         const vCount = viajesPorCamion[identifier] || viajesPorCamion[t.plate] || viajesPorCamion[t.internal_number] || 0;
         const health = getTruckDocumentHealth(t);
+        const isBlocked = isTruckStatusBlocked(t);
         return {
           ...t,
           identifier,
           viajes: vCount,
-          health
+          health,
+          isBlocked,
+          blockReason: isBlocked ? (t.status || 'Bloqueado') : null
         };
       });
 
@@ -985,6 +1019,10 @@ export default function AssignmentControl() {
   // Helper para asignar Camión o Rampla
   const handleAssignTruck = (truck) => {
     if (!truck) return;
+    if (isTruckStatusBlocked(truck)) {
+      handleShowBlockedModal(truck);
+      return;
+    }
     const targetIds = selectedRowIds.length > 0 ? selectedRowIds : [];
     if (targetIds.length === 0) {
       toast.warning('Marca las casillas de una o más filas en la tabla para asignar el vehículo.');
@@ -995,6 +1033,10 @@ export default function AssignmentControl() {
 
   const handleAssignRampla = (truck) => {
     if (!truck) return;
+    if (isTruckStatusBlocked(truck)) {
+      handleShowBlockedModal(truck);
+      return;
+    }
     const targetIds = selectedRowIds.length > 0 ? selectedRowIds : [];
     if (targetIds.length === 0) {
       toast.warning('Marca las casillas de una o más filas en la tabla para asignar la rampla.');
@@ -1216,6 +1258,10 @@ export default function AssignmentControl() {
         }
         handleRequestAssignStaff(staff, targetSlot, targetIds);
       } else if (parsed.type === 'truck' || parsed.type === 'rampla') {
+        if (isTruckStatusBlocked(parsed.data)) {
+          handleShowBlockedModal(parsed.data);
+          return;
+        }
         let slot = slotPreference;
         if (slot === 'auto' || !slot) {
           const truckType = (parsed.data?.type || '').toLowerCase();
@@ -2381,15 +2427,18 @@ export default function AssignmentControl() {
             ).map(truck => {
               const isSelected = selectedTruckObject?.id === truck.id;
               const isSemirremolque = activeTabTrucks === 'semirremolques';
+              const isBlocked = !!truck.isBlocked;
               const isFocused = focusedEntity?.type === 'truck' && (
                 focusedEntity.identifier === truck.identifier ||
                 focusedEntity.identifier === truck.plate ||
                 (focusedEntity.plate && (focusedEntity.plate === truck.plate || truck.identifier.includes(focusedEntity.plate)))
               );
               
-              // Color de la tarjeta de acuerdo al estado documental (Requisito 1: colores solo en las etiquetas)
+              // Color de la tarjeta: destacar si está bloqueado por taller, documental, baja, etc. (Requisito 4)
               let cardBgClass = 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50';
-              if (isFocused) {
+              if (isBlocked) {
+                cardBgClass = 'bg-red-50/80 border-red-300 hover:border-red-400 hover:bg-red-100/60 shadow-xs';
+              } else if (isFocused) {
                 cardBgClass = 'bg-emerald-100/90 border-emerald-500 ring-2 ring-emerald-500 shadow-sm';
               } else if (isSelected) {
                 cardBgClass = 'bg-emerald-50 border-emerald-400 ring-1 ring-emerald-300 shadow-xs';
@@ -2398,25 +2447,46 @@ export default function AssignmentControl() {
               return (
                 <div 
                   key={truck.id} 
-                  draggable
-                  onDragStart={(e) => handleDragStartTruck(e, truck, isSemirremolque)}
+                  draggable={!isBlocked}
+                  onDragStart={(e) => {
+                    if (isBlocked) {
+                      e.preventDefault();
+                      handleShowBlockedModal(truck);
+                      return;
+                    }
+                    handleDragStartTruck(e, truck, isSemirremolque);
+                  }}
                   onClick={() => {
+                    if (isBlocked) {
+                      handleShowBlockedModal(truck);
+                      return;
+                    }
                     setSelectedTruckObject(isSelected ? null : truck);
                     if (truck.viajes > 0) {
                       handleToggleFocusTruck(truck);
                     }
                   }}
-                  className={`p-1.5 rounded-lg border cursor-grab active:cursor-grabbing transition-all select-none ${cardBgClass}`}
+                  className={`p-1.5 rounded-lg border transition-all select-none ${
+                    isBlocked ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'
+                  } ${cardBgClass}`}
                 >
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1">
-                      <div className="bg-slate-800 text-white text-[10px] font-black px-1.5 py-0.2 rounded tracking-wider">
-                        {truck.internal_number || truck.plate}
+                      <div className={`${isBlocked ? 'bg-red-700' : 'bg-slate-800'} text-white text-[10px] font-black px-1.5 py-0.2 rounded tracking-wider flex items-center gap-1`}>
+                        {isBlocked && <span>🚫</span>}
+                        <span>{truck.internal_number || truck.plate}</span>
                       </div>
                       <span className="text-[10px] text-slate-500 font-bold">
                         {truck.plate}
                       </span>
-                      {isVehicleExternal(truck) && (
+                      {isBlocked ? (
+                        <span 
+                          className="text-[8px] font-black px-1.5 py-0.2 rounded bg-red-100 text-red-800 border border-red-300 uppercase truncate max-w-[100px]" 
+                          title={`Vehículo bloqueado: ${truck.status}`}
+                        >
+                          {truck.status}
+                        </span>
+                      ) : isVehicleExternal(truck) && (
                         <span 
                           className="text-[8px] font-black px-1.5 py-0.2 rounded bg-purple-100 text-purple-700 border border-purple-200 uppercase truncate max-w-[85px]" 
                           title={`Flota Externa: ${truck.empresa_externa || 'Tercero'}`}
@@ -2430,6 +2500,10 @@ export default function AssignmentControl() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (isBlocked) {
+                          handleShowBlockedModal(truck);
+                          return;
+                        }
                         if (truck.viajes > 0) {
                           handleToggleFocusTruck(truck);
                         }
@@ -2447,8 +2521,13 @@ export default function AssignmentControl() {
                     </button>
                   </div>
 
-                  <div className="text-[9px] text-slate-500 truncate">
-                    {truck.brand || 'Equipo'} • {truck.type || 'General'}
+                  <div className="text-[9px] text-slate-500 truncate flex items-center justify-between">
+                    <span>{truck.brand || 'Equipo'} • {truck.type || 'General'}</span>
+                    {isBlocked && (
+                      <span className="text-[8px] font-bold text-red-600 bg-red-50 px-1 rounded">
+                        NO DISPONIBLE
+                      </span>
+                    )}
                   </div>
 
                   {/* Etiquetas de alerta de documentos (REV. TÉC., GASES, PC, SOAP, CARNES) */}
@@ -2477,6 +2556,10 @@ export default function AssignmentControl() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (isBlocked) {
+                            handleShowBlockedModal(truck);
+                            return;
+                          }
                           if (isSemirremolque) {
                             handleAssignRampla(truck);
                           } else {
@@ -2484,10 +2567,14 @@ export default function AssignmentControl() {
                           }
                         }}
                         className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded shadow-xs ${
-                          isSemirremolque ? 'bg-teal-600 hover:bg-teal-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                          isBlocked
+                            ? 'bg-red-500 hover:bg-red-600'
+                            : isSemirremolque 
+                            ? 'bg-teal-600 hover:bg-teal-700' 
+                            : 'bg-emerald-600 hover:bg-emerald-700'
                         }`}
                       >
-                        {isSemirremolque ? '+ Rampla' : '+ Camión'} ({selectedRowIds.length})
+                        {isBlocked ? '🚫 Bloqueado' : isSemirremolque ? '+ Rampla' : '+ Camión'} ({selectedRowIds.length})
                       </button>
                     </div>
                   )}
@@ -3337,6 +3424,51 @@ export default function AssignmentControl() {
                 Sí, eliminar {selectedRowIds.length} rutas
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* POP-UP MODAL: VEHÍCULO BLOQUEADO EN DISPONIBILIZACIÓN (Requisito 4) */}
+      {blockedTruckModal.isOpen && blockedTruckModal.truck && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-red-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 text-center">
+            <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4 border border-red-200 shadow-xs">
+              <AlertTriangle size={32} />
+            </div>
+            <h3 className="text-lg font-black text-slate-800 mb-1">
+              Vehículo Bloqueado para Asignación
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Este vehículo no está disponible para operar en la Disponibilización diaria.
+            </p>
+
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3.5 mb-5 text-left space-y-1.5">
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-semibold">N° Interno:</span>
+                <span className="font-mono font-black text-slate-800">{blockedTruckModal.truck.internal_number || 'S/N'}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-semibold">Patente:</span>
+                <span className="font-mono font-black text-slate-800">{blockedTruckModal.truck.plate}</span>
+              </div>
+              <div className="flex justify-between items-center text-xs">
+                <span className="text-slate-500 font-semibold">Motivo / Estado:</span>
+                <span className="font-black text-red-700 bg-red-100 px-2 py-0.5 rounded border border-red-300 uppercase">
+                  {blockedTruckModal.reason}
+                </span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500 italic mb-5">
+              Para desbloquearlo y asignarlo a una ruta, debes cambiar su estado a <strong className="text-emerald-700">"Activo"</strong> desde el menú <strong className="text-slate-700">Gestión de Flota</strong>.
+            </p>
+
+            <Button
+              onClick={() => setBlockedTruckModal({ isOpen: false, truck: null, reason: '' })}
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold h-10 rounded-xl shadow-sm"
+            >
+              Entendido
+            </Button>
           </div>
         </div>
       )}
