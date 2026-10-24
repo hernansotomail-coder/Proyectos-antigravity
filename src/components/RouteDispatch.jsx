@@ -148,15 +148,15 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   const camionText = formatCamionWithPlate(row.camion, fleetList) || 'Sin camión';
   const farthestComuna = findFarthestComunaForTrip([row]);
 
-  // Hora Cita en el apartado general (Requisito 5 & 6)
+  // Hora Cita en el apartado general (Requisito 5 & 6: solo la hora modificada según anticipación)
   const rawCita = (row.hora_cita || '').trim();
   let citaGeneralHeader = '';
   let routeCitaTag = '';
   if (rawCita) {
     if (anticipacionMinutos > 0) {
       const adj = subtractMinutesFromTime(rawCita, anticipacionMinutos);
-      citaGeneralHeader = `${adj} (${anticipacionMinutos} min antes • Cita base: ${rawCita})`;
-      routeCitaTag = ` | ⏰ Cita: ${adj} (Base: ${rawCita})`;
+      citaGeneralHeader = adj;
+      routeCitaTag = ` | ⏰ Cita: ${adj}`;
     } else {
       citaGeneralHeader = rawCita;
       routeCitaTag = ` | ⏰ Cita: ${rawCita}`;
@@ -200,14 +200,15 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
   const camionesFormatted = rawCamiones.map(c => formatCamionWithPlate(c, fleetList)).filter(Boolean);
   const camionText = camionesFormatted.join(', ') || 'Sin camión';
 
-  // Hora Cita en el apartado general recopilada de las rutas (Requisito 5 & 6)
+  // Hora Cita en el apartado general recopilada de las rutas (solo hora modificada según anticipación)
   const rawHorasCita = rows.map(r => r.hora_cita?.trim()).filter(Boolean);
   const distinctCitas = Array.from(new Set(rawHorasCita));
   let citasGeneralText = '';
   if (distinctCitas.length > 0) {
     if (anticipacionMinutos > 0) {
       const adjustedList = distinctCitas.map(c => subtractMinutesFromTime(c, anticipacionMinutos));
-      citasGeneralText = `${adjustedList.join(' / ')} (${anticipacionMinutos} min antes • Cita base: ${distinctCitas.join(' / ')})`;
+      const distinctAdjusted = Array.from(new Set(adjustedList));
+      citasGeneralText = distinctAdjusted.join(' / ');
     } else {
       citasGeneralText = distinctCitas.join(' / ');
     }
@@ -266,7 +267,7 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
       if (r.hora_cita) {
         const raw = r.hora_cita.trim();
         if (anticipacionMinutos > 0) {
-          routeCitaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)} (Base: ${raw})`;
+          routeCitaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)}`;
         } else {
           routeCitaTag = ` | ⏰ Cita: ${raw}`;
         }
@@ -292,9 +293,6 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
 // Formateador de resumen completo para grupo de operaciones
 export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinutos = 0) => {
   let msg = `🚛 *DISPONIBILIZACIÓN GENERAL* - ${fecha}\n`;
-  if (anticipacionMinutos > 0) {
-    msg += `⏱️ *Horario de Citación:* ${anticipacionMinutos} min antes de la cita programada\n`;
-  }
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   
   const totalRutas = rows.length;
@@ -316,7 +314,7 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinuto
     if (r.hora_cita) {
       const raw = r.hora_cita.trim();
       if (anticipacionMinutos > 0) {
-        citaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)} (Base: ${raw})`;
+        citaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)}`;
       } else {
         citaTag = ` | ⏰ Cita: ${raw}`;
       }
