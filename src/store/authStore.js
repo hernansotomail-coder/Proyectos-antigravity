@@ -23,6 +23,7 @@ export const canUserDeleteHistory = (user) => {
 // Verificar si el usuario tiene permiso para VER un menú
 export const canUserViewMenu = (user, menuKey) => {
   if (!user) return false;
+  if (menuKey === 'manual-de-uso') return true;
   const username = String(user.username || '').trim().toLowerCase();
   if (username === 'superadmin' || user.role === 'Administrador') return true;
 

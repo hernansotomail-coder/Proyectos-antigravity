@@ -438,6 +438,17 @@ export default function RuteoView() {
     horaModificada: ''
   });
 
+  // Fechas disponibles
+  const availableDates = useMemo(() => {
+    const setDates = new Set([
+      ...Object.keys(savedRuteoByDate || {}),
+      ...Object.keys(transmittedAssignments || {})
+    ]);
+    return Array.from(setDates).sort();
+  }, [savedRuteoByDate, transmittedAssignments]);
+
+  const activeDate = selectedRuteoDate || availableDates[0] || '14-10-2026';
+
   // Ref para capturar imagen de la matriz para copiar/descargar (Requisito 5)
   const matrixContainerRef = useRef(null);
 
@@ -469,17 +480,6 @@ export default function RuteoView() {
 
   // Filas expandidas para ver sub-paradas
   const [expandedKeys, setExpandedKeys] = useState({});
-
-  // Fechas disponibles
-  const availableDates = useMemo(() => {
-    const setDates = new Set([
-      ...Object.keys(savedRuteoByDate || {}),
-      ...Object.keys(transmittedAssignments || {})
-    ]);
-    return Array.from(setDates).sort();
-  }, [savedRuteoByDate, transmittedAssignments]);
-
-  const activeDate = selectedRuteoDate || availableDates[0] || '14-10-2026';
 
   // Rutas de la fecha activa
   const currentRoutes = useMemo(() => {

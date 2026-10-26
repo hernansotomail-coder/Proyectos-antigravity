@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
   LogOut, ChevronDown, ChevronRight, ChevronLeft, Truck, Key, Layers, 
-  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles
+  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen
 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore, canUserViewMenu } from '../store/authStore';
@@ -32,6 +32,7 @@ export default function Layout() {
     { key: 'ruteo', name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
     { key: 'change-history', name: 'Histórico de cambios', path: '/change-history', icon: History },
     { key: 'briefing', name: 'Briefing', path: '/briefing', icon: FileText },
+    { key: 'manual-de-uso', name: 'Manual de uso', path: '/manual-de-uso', icon: BookOpen },
   ];
 
   // 2. Menú Transporte (Operacional)

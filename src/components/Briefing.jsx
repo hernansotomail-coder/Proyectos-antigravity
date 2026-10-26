@@ -92,7 +92,23 @@ export default function Briefing() {
   });
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedOperation, setSelectedOperation] = useState('Vista general');
+  // Multi-selección de Operaciones (Requisito 3)
+  const [selectedOperations, setSelectedOperations] = useState([]);
+
+  const toggleOperation = (op) => {
+    setSelectedOperations(prev => {
+      const exists = prev.some(item => item.toLowerCase() === op.toLowerCase());
+      if (exists) {
+        return prev.filter(item => item.toLowerCase() !== op.toLowerCase());
+      } else {
+        return [...prev, op];
+      }
+    });
+  };
+
+  const clearOperationFilter = () => {
+    setSelectedOperations([]);
+  };
 
   // Filas del día seleccionado (Disponibilización / Ruteo)
   const currentAssignedRows = useMemo(() => {
@@ -306,8 +322,18 @@ export default function Briefing() {
       };
     });
 
-    // Ordenar alfabéticamente por cliente
-    rows.sort((a, b) => a.operacion.localeCompare(b.operacion));
+    // Ordenar filas: primero las operaciones que tienen servicios registrados (numRutas > 0 o cajas > 0 o volumenM3 > 0), luego las que no
+    rows.sort((a, b) => {
+      const hasServicesA = (a.numRutas > 0 || a.cajas > 0 || a.volumenM3 > 0) ? 1 : 0;
+      const hasServicesB = (b.numRutas > 0 || b.cajas > 0 || b.volumenM3 > 0) ? 1 : 0;
+      if (hasServicesA !== hasServicesB) {
+        return hasServicesB - hasServicesA;
+      }
+      if (a.numRutas !== b.numRutas) {
+        return b.numRutas - a.numRutas;
+      }
+      return a.operacion.localeCompare(b.operacion);
+    });
 
     // Totales Generales
     const totals = {
@@ -330,25 +356,74 @@ export default function Briefing() {
     return { rows, totals };
   }, [currentAssignedRows, fleetList]);
 
-  // Mini-etiquetas de todas las operaciones disponibles (Requisito 8)
+  // Mini-etiquetas de todas las operaciones disponibles (Requisito 3)
+  // Al comienzo van todas las tarjetas que tienen servicios registrados y al final las que no tienen servicios
   const operationsList = useMemo(() => {
     const presentOps = new Set(briefingData.rows.map(r => r.operacion));
     ALL_OPERACIONES.forEach(op => presentOps.add(op));
-    return Array.from(presentOps).sort((a, b) => a.localeCompare(b));
+
+    const opsArray = Array.from(presentOps);
+    const opCountMap = new Map();
+    briefingData.rows.forEach(r => {
+      opCountMap.set(r.operacion.toLowerCase(), {
+        count: r.numRutas || 0,
+        hasServices: (r.numRutas > 0 || r.cajas > 0 || r.volumenM3 > 0)
+      });
+    });
+
+    return opsArray.sort((a, b) => {
+      const infoA = opCountMap.get(a.toLowerCase()) || { count: 0, hasServices: false };
+      const infoB = opCountMap.get(b.toLowerCase()) || { count: 0, hasServices: false };
+
+      const hasServicesA = infoA.hasServices ? 1 : 0;
+      const hasServicesB = infoB.hasServices ? 1 : 0;
+
+      // 1. Tarjetas con servicios registrados al comienzo, sin servicios al final
+      if (hasServicesA !== hasServicesB) {
+        return hasServicesB - hasServicesA;
+      }
+      // 2. Si ambas tienen servicios, ordenar por mayor número de rutas/camiones
+      if (infoA.count !== infoB.count) {
+        return infoB.count - infoA.count;
+      }
+      // 3. Fallback alfabético
+      return a.localeCompare(b);
+    });
   }, [briefingData.rows]);
 
-  // Filtro de búsqueda y etiquetas de operación (Requisitos 8 y 9)
+  // Filtro de búsqueda y multi-etiquetas de operación (Requisito 3)
   const displayedRows = useMemo(() => {
     let list = briefingData.rows;
-    if (selectedOperation !== 'Vista general') {
-      list = list.filter(r => r.operacion.toLowerCase() === selectedOperation.toLowerCase());
+    if (selectedOperations.length > 0) {
+      const lowerSelected = new Set(selectedOperations.map(o => o.toLowerCase()));
+      list = list.filter(r => lowerSelected.has(r.operacion.toLowerCase()));
     }
     if (searchTerm.trim()) {
       const lower = searchTerm.toLowerCase();
       list = list.filter(r => r.operacion.toLowerCase().includes(lower));
     }
     return list;
-  }, [briefingData.rows, selectedOperation, searchTerm]);
+  }, [briefingData.rows, selectedOperations, searchTerm]);
+
+  // Totales dinámicos calculados sobre las filas mostradas (para tarjetas y pie de tabla)
+  const displayedTotals = useMemo(() => {
+    return {
+      operacion: selectedOperations.length > 0 ? `Subtotal (${selectedOperations.length} ops)` : 'Total general',
+      numRutas: displayedRows.reduce((acc, r) => acc + r.numRutas, 0),
+      propia1v: displayedRows.reduce((acc, r) => acc + r.propia1v, 0),
+      externa1v: displayedRows.reduce((acc, r) => acc + r.externa1v, 0),
+      propia2v: displayedRows.reduce((acc, r) => acc + r.propia2v, 0),
+      externa2v: displayedRows.reduce((acc, r) => acc + r.externa2v, 0),
+      sinCobertura: displayedRows.reduce((acc, r) => acc + r.sinCobertura, 0),
+      cajas: displayedRows.reduce((acc, r) => acc + r.cajas, 0),
+      kilos: Number(displayedRows.reduce((acc, r) => acc + r.kilos, 0).toFixed(2)),
+      congeladoM3: Number(displayedRows.reduce((acc, r) => acc + r.congeladoM3, 0).toFixed(2)),
+      refrigeradoM3: Number(displayedRows.reduce((acc, r) => acc + r.refrigeradoM3, 0).toFixed(2)),
+      secoM3: Number(displayedRows.reduce((acc, r) => acc + r.secoM3, 0).toFixed(2)),
+      volumenM3: Number(displayedRows.reduce((acc, r) => acc + r.volumenM3, 0).toFixed(2)),
+      numDestinos: displayedRows.reduce((acc, r) => acc + r.numDestinos, 0)
+    };
+  }, [displayedRows, selectedOperations]);
 
   // Exportar a Excel exactamente con las columnas solicitadas
   const handleExportExcel = () => {
@@ -446,99 +521,112 @@ export default function Briefing() {
         </div>
       </div>
 
-      {/* 2. Tarjetas KPI de Resumen Rápido */}
+      {/* 2. Tarjetas KPI de Resumen Rápido (Calculadas dinámicamente según filtros aplicados) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total # Rutas</span>
-          <p className="text-2xl font-black text-slate-800 mt-1">{briefingData.totals.numRutas}</p>
+          <p className="text-2xl font-black text-slate-800 mt-1">{displayedTotals.numRutas}</p>
           <span className="text-[10px] text-slate-500 mt-0.5">Camiones deduplicados</span>
         </div>
 
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Flota Propia 1V</span>
-          <p className="text-2xl font-black text-blue-600 mt-1">{briefingData.totals.propia1v}</p>
+          <p className="text-2xl font-black text-blue-600 mt-1">{displayedTotals.propia1v}</p>
           <span className="text-[10px] text-slate-500 mt-0.5">Real Key 1era Vuelta</span>
         </div>
 
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Flota Externa 1V</span>
-          <p className="text-2xl font-black text-amber-600 mt-1">{briefingData.totals.externa1v}</p>
+          <p className="text-2xl font-black text-amber-600 mt-1">{displayedTotals.externa1v}</p>
           <span className="text-[10px] text-slate-500 mt-0.5">Real Terceros 1era Vuelta</span>
         </div>
 
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Segundas Vueltas</span>
-          <p className="text-2xl font-black text-indigo-600 mt-1">{briefingData.totals.propia2v + briefingData.totals.externa2v}</p>
-          <span className="text-[10px] text-slate-500 mt-0.5">{briefingData.totals.propia2v} Key • {briefingData.totals.externa2v} Terceros</span>
+          <p className="text-2xl font-black text-indigo-600 mt-1">{displayedTotals.propia2v + displayedTotals.externa2v}</p>
+          <span className="text-[10px] text-slate-500 mt-0.5">{displayedTotals.propia2v} Key • {displayedTotals.externa2v} Terceros</span>
         </div>
 
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total Kilos</span>
-          <p className="text-xl font-black text-slate-800 mt-1">{formatDecimalAlways(briefingData.totals.kilos)} <span className="text-xs font-bold text-slate-500">Kg</span></p>
-          <span className="text-[10px] text-slate-500 mt-0.5">{formatIntAlways(briefingData.totals.cajas)} Cajas totales</span>
+          <p className="text-xl font-black text-slate-800 mt-1">{formatDecimalAlways(displayedTotals.kilos)} <span className="text-xs font-bold text-slate-500">Kg</span></p>
+          <span className="text-[10px] text-slate-500 mt-0.5">{formatIntAlways(displayedTotals.cajas)} Cajas totales</span>
         </div>
 
         <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Volumen Total</span>
-          <p className="text-xl font-black text-emerald-600 mt-1">{formatDecimalAlways(briefingData.totals.volumenM3)} <span className="text-xs font-bold text-slate-500">m³</span></p>
-          <span className="text-[10px] text-slate-500 mt-0.5">{briefingData.totals.numDestinos} Destinos únicos</span>
+          <p className="text-xl font-black text-emerald-600 mt-1">{formatDecimalAlways(displayedTotals.volumenM3)} <span className="text-xs font-bold text-slate-500">m³</span></p>
+          <span className="text-[10px] text-slate-500 mt-0.5">{displayedTotals.numDestinos} Destinos únicos</span>
         </div>
       </div>
 
-      {/* 3. Filtro por Mini-Etiquetas de Operación y Búsqueda (Requisito 8 y 9) */}
+      {/* 3. Filtro por Mini-Etiquetas de Operación Multi-selección (Requisito 3) */}
       <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 p-3.5 space-y-2.5 shrink-0">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Filter size={15} className="text-blue-600" />
             <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
-              Filtrar por Operación:
+              Filtrar por Operación (Multi-selección):
             </span>
           </div>
-          <span className="text-[11px] text-slate-500 font-semibold">
-            {displayedRows.length} de {briefingData.rows.length} operaciones mostradas
-          </span>
+          <div className="flex items-center gap-2">
+            {selectedOperations.length > 0 && (
+              <button
+                type="button"
+                onClick={clearOperationFilter}
+                className="text-xs text-blue-600 hover:text-blue-800 font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition-all cursor-pointer"
+              >
+                Limpiar filtros ({selectedOperations.length} seleccionadas)
+              </button>
+            )}
+            <span className="text-[11px] text-slate-500 font-semibold">
+              {displayedRows.length} de {briefingData.rows.length} operaciones mostradas
+            </span>
+          </div>
         </div>
 
         {/* Mini etiquetas desplazables con scroll horizontal */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin">
           <button
             type="button"
-            onClick={() => setSelectedOperation('Vista general')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all shrink-0 flex items-center gap-1.5 ${
-              selectedOperation === 'Vista general'
+            onClick={clearOperationFilter}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+              selectedOperations.length === 0
                 ? 'bg-blue-600 text-white shadow-xs scale-102 ring-2 ring-blue-300'
                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
             }`}
           >
             <span>🌐 Vista general</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-              selectedOperation === 'Vista general' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              selectedOperations.length === 0 ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
             }`}>
               {briefingData.rows.length}
             </span>
           </button>
 
           {operationsList.map(op => {
-            const isSelected = selectedOperation.toLowerCase() === op.toLowerCase();
-            const countInDay = briefingData.rows.find(r => r.operacion.toLowerCase() === op.toLowerCase())?.numRutas || 0;
-            const isPresent = briefingData.rows.some(r => r.operacion.toLowerCase() === op.toLowerCase());
+            const isSelected = selectedOperations.some(item => item.toLowerCase() === op.toLowerCase());
+            const rowData = briefingData.rows.find(r => r.operacion.toLowerCase() === op.toLowerCase());
+            const countInDay = rowData?.numRutas || 0;
+            const hasServices = !!(rowData && (rowData.numRutas > 0 || rowData.cajas > 0 || rowData.volumenM3 > 0));
 
             return (
               <button
                 key={op}
                 type="button"
-                onClick={() => setSelectedOperation(isSelected ? 'Vista general' : op)}
-                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
+                onClick={() => toggleOperation(op)}
+                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
                   isSelected
                     ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
-                    : isPresent
+                    : hasServices
                     ? 'bg-blue-50/90 hover:bg-blue-100 text-blue-900 border border-blue-200'
                     : 'bg-slate-50 hover:bg-slate-100 text-slate-400 border border-slate-200 opacity-60'
                 }`}
-                title={isPresent ? `${op}: ${countInDay} camiones asignados hoy` : `${op} (Sin rutas hoy)`}
+                title={hasServices ? `${op}: ${countInDay} camiones asignados hoy (con servicios)` : `${op} (Sin servicios registrados hoy)`}
               >
+                {isSelected && <span className="text-[11px] font-black">✓</span>}
                 <span>{op}</span>
-                {isPresent && (
+                {hasServices && (
                   <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
                     isSelected ? 'bg-white/20 text-white' : 'bg-blue-200 text-blue-900'
                   }`}>
@@ -678,50 +766,50 @@ export default function Briefing() {
               )}
             </tbody>
 
-            {/* Fila Total General (Idéntica a la imagen con fondo azul oscuro y números blancos en negrita) */}
+            {/* Fila Total General o Subtotal según filtro activo */}
             <tfoot className="bg-[#0e2a47] text-white font-black text-xs border-t-2 border-blue-900 tracking-wide">
               <tr>
                 <td className="px-3.5 py-3 uppercase border-r border-blue-900/40">
-                  Total general
+                  {displayedTotals.operacion}
                 </td>
                 <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40">
-                  {briefingData.totals.numRutas}
+                  {displayedTotals.numRutas}
                 </td>
                 <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-blue-200">
-                  {briefingData.totals.propia1v}
+                  {displayedTotals.propia1v}
                 </td>
                 <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-amber-200">
-                  {briefingData.totals.externa1v}
+                  {displayedTotals.externa1v}
                 </td>
                 <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-indigo-200">
-                  {briefingData.totals.propia2v}
+                  {displayedTotals.propia2v}
                 </td>
                 <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-amber-300">
-                  {briefingData.totals.externa2v}
+                  {displayedTotals.externa2v}
                 </td>
                 <td className="px-3 py-3 text-center font-mono border-r border-blue-900/40 text-red-300">
-                  {briefingData.totals.sinCobertura || ''}
+                  {displayedTotals.sinCobertura || ''}
                 </td>
                 <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40">
-                  {formatIntAlways(briefingData.totals.cajas)}
+                  {formatIntAlways(displayedTotals.cajas)}
                 </td>
                 <td className="px-3.5 py-3 text-right font-mono border-r border-blue-900/40">
-                  {formatDecimalAlways(briefingData.totals.kilos)} Kg
+                  {formatDecimalAlways(displayedTotals.kilos)} Kg
                 </td>
                 <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40 text-blue-200">
-                  {formatDecimalAlways(briefingData.totals.congeladoM3)}
+                  {formatDecimalAlways(displayedTotals.congeladoM3)}
                 </td>
                 <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40 text-cyan-200">
-                  {formatDecimalAlways(briefingData.totals.refrigeradoM3)}
+                  {formatDecimalAlways(displayedTotals.refrigeradoM3)}
                 </td>
                 <td className="px-3 py-3 text-right font-mono border-r border-blue-900/40 text-amber-200">
-                  {formatDecimalAlways(briefingData.totals.secoM3)}
+                  {formatDecimalAlways(displayedTotals.secoM3)}
                 </td>
                 <td className="px-3.5 py-3 text-right font-mono border-r border-blue-900/40 text-emerald-300">
-                  {formatDecimalAlways(briefingData.totals.volumenM3)} m3
+                  {formatDecimalAlways(displayedTotals.volumenM3)} m3
                 </td>
                 <td className="px-3 py-3 text-center font-mono">
-                  {briefingData.totals.numDestinos}
+                  {displayedTotals.numDestinos}
                 </td>
               </tr>
             </tfoot>
