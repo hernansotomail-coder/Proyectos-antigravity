@@ -32,7 +32,6 @@ export default function Layout() {
     { key: 'ruteo', name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
     { key: 'change-history', name: 'Histórico de cambios', path: '/change-history', icon: History },
     { key: 'briefing', name: 'Briefing', path: '/briefing', icon: FileText },
-    { key: 'manual-de-uso', name: 'Manual de uso', path: '/manual-de-uso', icon: BookOpen },
   ];
 
   // 2. Menú Transporte (Operacional)
@@ -285,6 +284,31 @@ export default function Layout() {
                   </div>
                 )}
               </div>
+
+              {/* 5. Menú Aparte Independiente: Manual de uso (Requisito: menú aparte, no sub-menú) */}
+              <div className="pt-2 mt-2 border-t border-slate-200/80">
+                <div className="px-3 mb-1.5 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                  Documentación
+                </div>
+                <NavLink
+                  to="/manual-de-uso"
+                  className={({ isActive }) =>
+                    `w-full flex items-center justify-between px-3 py-2.5 rounded-xl transition-all ${
+                      isActive
+                        ? 'bg-blue-600 text-white font-bold shadow-sm'
+                        : 'text-slate-700 bg-slate-50/90 hover:bg-blue-50 hover:text-blue-700 font-semibold border border-slate-200/70 shadow-2xs'
+                    }`
+                  }
+                >
+                  <div className="flex items-center gap-2.5">
+                    <BookOpen size={18} className="text-amber-500 shrink-0" />
+                    <span className="text-xs font-bold">Manual de uso</span>
+                  </div>
+                  <span className="text-[10px] bg-amber-400/20 text-amber-800 font-black px-1.5 py-0.5 rounded-md uppercase tracking-wide">
+                    OFICIAL
+                  </span>
+                </NavLink>
+              </div>
             </>
           ) : (
             /* VISTA RETRÁCTIL / COLAPSADA (Íconos centrados con Tooltip) */
@@ -380,6 +404,24 @@ export default function Layout() {
                     </NavLink>
                   );
                 })}
+              </div>
+
+              {/* Manual de uso colapsado */}
+              <div className="pt-2 border-t border-slate-200/80 w-full flex flex-col items-center gap-1.5">
+                <span className="text-[8px] font-black text-slate-300 uppercase">Guía</span>
+                <NavLink
+                  to="/manual-de-uso"
+                  title="Manual de uso"
+                  className={({ isActive }) =>
+                    `w-10 h-10 rounded-xl flex items-center justify-center transition-all ${
+                      isActive 
+                        ? 'bg-blue-600 text-white shadow-sm' 
+                        : 'text-slate-600 bg-slate-50 hover:bg-blue-50 hover:text-blue-600 border border-slate-200/60'
+                    }`
+                  }
+                >
+                  <BookOpen size={18} className="text-amber-500" />
+                </NavLink>
               </div>
 
             </div>
@@ -512,6 +554,27 @@ export default function Layout() {
                 <span>{item.name}</span>
               </NavLink>
             ))}
+
+            {/* Manual de uso en Mobile */}
+            <div className="pt-2 mt-2 border-t border-slate-200">
+              <NavLink
+                to="/manual-de-uso"
+                onClick={() => setIsMobileMenuOpen(false)}
+                className={({ isActive }) =>
+                  `flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold ${
+                    isActive ? 'bg-blue-600 text-white' : 'bg-slate-50 text-slate-700 border border-slate-200'
+                  }`
+                }
+              >
+                <div className="flex items-center gap-2.5">
+                  <BookOpen size={16} className="text-amber-500" />
+                  <span>Manual de uso</span>
+                </div>
+                <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-black">
+                  OFICIAL
+                </span>
+              </NavLink>
+            </div>
 
             {isAuthenticated && (
               <button

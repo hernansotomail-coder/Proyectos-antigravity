@@ -19,8 +19,9 @@ export async function copyMatrixAsImage(element, activeDate = '') {
     }
 
     const canvas = await html2canvas(element, {
-      scale: 2,
+      scale: 1.25,
       useCORS: true,
+      allowTaint: true,
       backgroundColor: '#ffffff',
       logging: false,
       scrollX: 0,
@@ -84,8 +85,9 @@ export async function downloadMatrixAsImage(element, activeDate = '') {
     }
 
     const canvas = await html2canvas(element, {
-      scale: 2,
+      scale: 1.25,
       useCORS: true,
+      allowTaint: true,
       backgroundColor: '#ffffff',
       logging: false,
       scrollX: 0,
