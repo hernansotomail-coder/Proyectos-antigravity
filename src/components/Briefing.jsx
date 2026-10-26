@@ -1,14 +1,52 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   Calendar, Download, Search, Filter, Layers, Truck, 
   Package, Scale, Snowflake, Thermometer, Wind, 
-  MapPin, AlertCircle, FileSpreadsheet, Building2
+  MapPin, AlertCircle, FileSpreadsheet, Building2, Copy
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { findOperationForRoute, getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
 import { Button } from './ui/Button';
+import { copyBriefingAsImage } from '../lib/matrixImageExporter';
+
+// Limpia de la operación la denominación "RUTA ENVÍOS" más el número y conectores sobrantes
+export const cleanBriefingOperationName = (name) => {
+  if (!name) return '';
+  let str = String(name);
+  // Elimina "RUTA ENVÍOS", "RUTA ENVIOS", "RUTA ENVÍO", "RUTA ENVIO" más números opcionales
+  str = str.replace(/RUTA\s+ENV[ÍI]OS?\s*\d*/gi, '');
+  // Limpia conectores sueltos al inicio o final (guiones, barras, espacios múltiples)
+  str = str.replace(/^\s*[-–—/:]+\s*/, '')
+           .replace(/\s*[-–—/:]+\s*$/, '')
+           .replace(/\s{2,}/g, ' ')
+           .trim();
+  return str;
+};
+
+// Verifica si la fila o servicio corresponde a "Traspaso" sin considerar "Aramark" (se excluye todo Traspaso excepto Aramark)
+export const isTraspasoExcluded = (route) => {
+  if (!route) return false;
+  const combined = [
+    route.cliente,
+    route.servicio,
+    route.operacion,
+    route.Operacion,
+    route.nombreRuta,
+    route.denominacion,
+    route.ruta
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  const hasTraspaso = combined.includes('traspaso');
+  const hasAramark = combined.includes('aramark');
+
+  // Si contiene Traspaso y NO contiene Aramark, se excluye
+  if (hasTraspaso && !hasAramark) {
+    return true;
+  }
+  return false;
+};
 
 // Normalizador de Operación / Cliente para agrupar exactamente como en el Briefing oficial
 export const getBriefingOperation = (route) => {
@@ -21,27 +59,36 @@ export const getBriefingOperation = (route) => {
     return 'SPID';
   }
 
+  let op = '';
   // Si la ruta ya tiene operacion oficial asignada
   if (route.operacion && route.operacion !== 'Sin Operación') {
-    return route.operacion;
+    op = cleanBriefingOperationName(route.operacion);
   }
 
   // Buscar en el catálogo maestro por número de ruta
-  if (rawRuta) {
+  if (!op && rawRuta) {
     const master = findOperationForRoute(rawRuta);
     if (master && master.operacion && master.operacion !== 'Sin Operación') {
-      return master.operacion;
+      op = cleanBriefingOperationName(master.operacion);
     }
   }
 
-  return getOperacionName(rawRuta, rawClient || route.nombreRuta || 'Otros');
+  if (!op) {
+    const candidate = route.denominacion || route.nombreRuta || rawClient || '';
+    const cleanedCandidate = cleanBriefingOperationName(candidate);
+    op = getOperacionName(rawRuta, cleanedCandidate || candidate || 'Otros');
+    op = cleanBriefingOperationName(op);
+  }
+
+  return op || 'Otros';
 };
 
 export const normalizeClientForBriefing = (rawName) => {
   if (!rawName) return 'OTROS';
   const upper = String(rawName).toUpperCase().trim();
   if (upper.includes('SPID')) return 'SPID';
-  return getOperacionName('', rawName);
+  const cleaned = cleanBriefingOperationName(rawName);
+  return getOperacionName('', cleaned || rawName);
 };
 
 // Formateadores numéricos de estilo chileno
@@ -111,19 +158,18 @@ export default function Briefing() {
   };
 
   // Filas del día seleccionado (Disponibilización / Ruteo)
+  // Requisito 2: Excluir todo lo que dice "Traspaso" a excepción de lo que dice "Aramark"
   const currentAssignedRows = useMemo(() => {
+    let rows = [];
     if (savedRuteoByDate?.[activeDate] && savedRuteoByDate[activeDate].length > 0) {
-      return savedRuteoByDate[activeDate];
+      rows = savedRuteoByDate[activeDate];
+    } else if (transmittedAssignments?.[activeDate] && transmittedAssignments[activeDate].length > 0) {
+      rows = transmittedAssignments[activeDate];
+    } else {
+      const matchedTrans = (transformedRoutes || []).filter(r => r.fecha === activeDate);
+      rows = matchedTrans.length > 0 ? matchedTrans : (transformedRoutes || []);
     }
-    if (transmittedAssignments?.[activeDate] && transmittedAssignments[activeDate].length > 0) {
-      return transmittedAssignments[activeDate];
-    }
-    // Fallback a transformedRoutes filtradas por fecha o todas si coincide
-    const matchedTrans = (transformedRoutes || []).filter(r => r.fecha === activeDate);
-    if (matchedTrans.length > 0) {
-      return matchedTrans;
-    }
-    return transformedRoutes || [];
+    return rows.filter(r => !isTraspasoExcluded(r));
   }, [savedRuteoByDate, transmittedAssignments, transformedRoutes, activeDate]);
 
   // Construcción de la Matriz de Briefing agrupada por Operación (Cliente)
@@ -360,7 +406,15 @@ export default function Briefing() {
   // Al comienzo van todas las tarjetas que tienen servicios registrados y al final las que no tienen servicios
   const operationsList = useMemo(() => {
     const presentOps = new Set(briefingData.rows.map(r => r.operacion));
-    ALL_OPERACIONES.forEach(op => presentOps.add(op));
+    ALL_OPERACIONES.forEach(op => {
+      const clean = cleanBriefingOperationName(op);
+      const lower = clean.toLowerCase();
+      // Excluir Traspaso a excepción de lo que dice Aramark
+      if (lower.includes('traspaso') && !lower.includes('aramark')) {
+        return;
+      }
+      if (clean) presentOps.add(clean);
+    });
 
     const opsArray = Array.from(presentOps);
     const opCountMap = new Map();
@@ -468,6 +522,17 @@ export default function Briefing() {
     XLSX.writeFile(workbook, `Resumen_Briefing_${activeDate}.xlsx`);
   };
 
+  const briefingContainerRef = useRef(null);
+
+  // Copiar Briefing al portapapeles combinando celdas de Excel con formato nativo (Requisito 4)
+  const handleCopyBriefing = async () => {
+    await copyBriefingAsImage(briefingContainerRef.current, activeDate, {
+      rows: displayedRows,
+      totals: displayedTotals,
+      activeDate
+    });
+  };
+
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-6 gap-4 overflow-y-auto">
       
@@ -510,6 +575,16 @@ export default function Briefing() {
               </select>
             </div>
           </div>
+
+          {/* Botón Copiar imagen para Excel (Requisito 4) */}
+          <Button
+            onClick={handleCopyBriefing}
+            className="flex items-center gap-1.5 text-xs font-bold h-9 bg-blue-700 hover:bg-blue-600 text-white shadow-sm border border-blue-400/40"
+            title="Copiar briefing para Excel (se combina en celdas con formato al presionar Ctrl + V)"
+          >
+            <Copy size={14} className="text-yellow-300" />
+            <span>Copiar imagen</span>
+          </Button>
 
           <Button
             onClick={handleExportExcel}
@@ -652,7 +727,7 @@ export default function Briefing() {
       </div>
 
       {/* 4. Matriz Principal de Briefing */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col shrink-0">
+      <div ref={briefingContainerRef} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col shrink-0">
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left border-collapse whitespace-nowrap">
             {/* Encabezados Azules Oficiales */}

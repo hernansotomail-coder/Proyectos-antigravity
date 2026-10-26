@@ -83,24 +83,21 @@ export default function Layout() {
       >
         {/* Header del Sidebar */}
         <div className={`border-b border-slate-100 flex items-center transition-all ${
-          isSidebarCollapsed ? 'p-3 flex-col gap-2 justify-center' : 'p-5 justify-between'
+          isSidebarCollapsed ? 'p-3 flex-col gap-2 justify-center' : 'p-4 justify-between'
         }`}>
           {!isSidebarCollapsed ? (
             <>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col items-center justify-center flex-1">
                 <img 
                   src="/keylogistics-logo.jpg" 
-                  alt="Key Logistics Logo" 
+                  alt="Torre de Control Logo" 
                   className="h-10 w-auto object-contain rounded-lg shadow-2xs bg-white border border-slate-200 p-0.5 shrink-0"
                 />
-                <div>
-                  <h1 className="text-lg font-black text-blue-600 tracking-tight leading-tight">Keylogistics</h1>
-                  <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Torre de Control</p>
-                </div>
+                <p className="text-[10px] text-slate-500 font-black tracking-widest uppercase mt-1 text-center">Torre de Control</p>
               </div>
               <button 
                 onClick={() => setIsSidebarCollapsed(true)}
-                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-700 transition-colors"
+                className="p-1.5 hover:bg-slate-100 rounded-xl text-slate-400 hover:text-slate-700 transition-colors ml-2"
                 title="Contraer menú"
               >
                 <ChevronLeft size={18} />
@@ -111,11 +108,11 @@ export default function Layout() {
               <div 
                 onClick={() => setIsSidebarCollapsed(false)}
                 className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs cursor-pointer hover:scale-105 transition-transform"
-                title="Keylogistics Torre de Control - Clic para expandir menú"
+                title="Torre de Control - Clic para expandir menú"
               >
                 <img 
                   src="/keylogistics-logo.jpg" 
-                  alt="KL" 
+                  alt="Torre de Control" 
                   className="w-full h-full object-contain rounded-lg"
                 />
               </div>
@@ -469,16 +466,13 @@ export default function Layout() {
         
         {/* Mobile Header */}
         <header className="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 z-10 shrink-0">
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-col items-center">
             <img 
               src="/keylogistics-logo.jpg" 
-              alt="Key Logistics" 
+              alt="Torre de Control Logo" 
               className="h-8 w-auto object-contain rounded-md border border-slate-200 p-0.5 bg-white"
             />
-            <div>
-              <h1 className="text-base font-black text-blue-600 leading-tight">Keylogistics</h1>
-              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Torre de Control</p>
-            </div>
+            <p className="text-[9px] text-slate-500 font-black uppercase tracking-wider mt-0.5">Torre de Control</p>
           </div>
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 

@@ -1242,7 +1242,7 @@ export default function RuteoView() {
     </Borders>
     <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#713F12" ss:Bold="1"/>
     <Interior ss:Color="#FEF9C3" ss:Pattern="Solid"/>
-    <NumberFormat ss:Format="#,##0.000"/>
+    <NumberFormat ss:Format="#,##0.0000"/>
   </Style>
 
   <!-- Redespacho (Negro Pastel: #334155, Texto: #FFFFFF, Borde: #1E293B) -->
@@ -1278,7 +1278,7 @@ export default function RuteoView() {
     </Borders>
     <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#FFFFFF" ss:Bold="1"/>
     <Interior ss:Color="#334155" ss:Pattern="Solid"/>
-    <NumberFormat ss:Format="#,##0.000"/>
+    <NumberFormat ss:Format="#,##0.0000"/>
   </Style>
 
   <!-- Filas Normales Pares (Blanco) -->
@@ -1314,7 +1314,7 @@ export default function RuteoView() {
     </Borders>
     <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
     <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
-    <NumberFormat ss:Format="#,##0.000"/>
+    <NumberFormat ss:Format="#,##0.0000"/>
   </Style>
 
   <!-- Filas Normales Impares (Gris Claro) -->
@@ -1350,25 +1350,60 @@ export default function RuteoView() {
     </Borders>
     <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#1E293B"/>
     <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
-    <NumberFormat ss:Format="#,##0.000"/>
+    <NumberFormat ss:Format="#,##0.0000"/>
+  </Style>
+
+  <!-- Fila de Totales -->
+  <Style ss:ID="TotalRow_Label">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#0F172A" ss:Bold="1"/>
+    <Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/>
+  </Style>
+  <Style ss:ID="TotalRow_Right">
+    <Alignment ss:Horizontal="Right" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
+    </Borders>
+    <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#0F172A" ss:Bold="1"/>
+    <Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/>
+    <NumberFormat ss:Format="#,##0.0000"/>
+  </Style>
+  <Style ss:ID="TotalRow_Empty">
+    <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+    <Borders>
+      <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
+      <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
+      <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
+      <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
+    </Borders>
+    <Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/>
   </Style>
 </Styles>
 
 <Worksheet ss:Name="Matriz Ruteo">
   <Table>
     <Column ss:Width="85"/>
-    <Column ss:Width="140"/>
-    <Column ss:Width="110"/>
-    <Column ss:Width="110"/>
-    <Column ss:Width="95"/>
     <Column ss:Width="180"/>
-    <Column ss:Width="150"/>
-    <Column ss:Width="420"/>
-    <Column ss:Width="85"/>
-    <Column ss:Width="80"/>
-    <Column ss:Width="90"/>
-    <Column ss:Width="130"/>
+    <Column ss:Width="110"/>
+    <Column ss:Width="125"/>
+    <Column ss:Width="95"/>
+    <Column ss:Width="200"/>
     <Column ss:Width="160"/>
+    <Column ss:Width="550"/>
+    <Column ss:Width="95"/>
+    <Column ss:Width="85"/>
+    <Column ss:Width="85"/>
+    <Column ss:Width="130"/>
+    <Column ss:Width="180"/>
 
     <!-- Banner Superior -->
     <Row ss:Height="26">
@@ -1411,7 +1446,10 @@ export default function RuteoView() {
         const center = `${prefix}_Center`;
         const right = `${prefix}_Right`;
 
-        const zonaCompleta = (trip.zonaItems || []).map(z => z.text).join(' | ');
+        let zonaCompleta = (trip.zonaItems || []).map(z => z.text).join(' | ');
+        if (trip.destino_prioritario) {
+          zonaCompleta += ` | 🎯 Prioridad: ${trip.destino_prioritario}`;
+        }
         const auxStr = trip.auxiliares?.length > 0 ? trip.auxiliares.join(', ') : '-';
         const volNum = Number(trip.totalM3) || 0;
 
@@ -1431,6 +1469,14 @@ export default function RuteoView() {
       <Cell ss:StyleID="${left}"><Data ss:Type="String">${escapeXml(trip.destino_prioritario || '')}</Data></Cell>
     </Row>\n`;
       });
+
+      // Fila de Totales con formato idéntico al de la matriz en pantalla (Requisito 3)
+      const totalM3Sum = tripsList.reduce((acc, t) => acc + (Number(t.totalM3) || 0), 0);
+      xml += `    <Row ss:Height="24">
+      <Cell ss:MergeAcross="7" ss:StyleID="TotalRow_Label"><Data ss:Type="String">TOTAL CARGA (m³):</Data></Cell>
+      <Cell ss:StyleID="TotalRow_Right"><Data ss:Type="Number">${totalM3Sum}</Data></Cell>
+      <Cell ss:MergeAcross="3" ss:StyleID="TotalRow_Empty"><Data ss:Type="String"></Data></Cell>
+    </Row>\n`;
 
       xml += `  </Table>
   <WorksheetOptions xmlns="urn:schemas-microsoft-com:office:excel">

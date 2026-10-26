@@ -15,6 +15,35 @@ function escapeHtml(unsafe) {
 }
 
 /**
+ * Dibuja un rectángulo con esquinas redondeadas (pill / badge) en un contexto Canvas 2D
+ */
+function drawRoundedRect(ctx, x, y, width, height, radius, fill, stroke) {
+  ctx.save();
+  ctx.beginPath();
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+  if (fill) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/**
  * Construye una tabla HTML con estilos en línea nativos y metadatos de Microsoft Excel,
  * permitiendo que al pegar en Excel (Ctrl + V) se combine directamente con las celdas y formato de este.
  */
@@ -66,7 +95,10 @@ export function generateMatrixHtmlTable({ tripsList = [], bannerTitle = '', acti
       isBold = true;
     }
 
-    const zonaCompleta = (trip.zonaItems || []).map(z => z.text).join(' | ');
+    let zonaCompleta = (trip.zonaItems || []).map(z => z.text).join(' | ');
+    if (trip.destino_prioritario) {
+      zonaCompleta += ` | 🎯 Prioridad: ${trip.destino_prioritario}`;
+    }
     const auxStr = trip.auxiliares?.length > 0 ? trip.auxiliares.join(', ') : '-';
     const volNum = (Number(trip.totalM3) || 0).toFixed(4);
 
@@ -178,6 +210,181 @@ export function generateMatrixHtmlTable({ tripsList = [], bannerTitle = '', acti
 }
 
 /**
+ * Genera HTML y TSV para copiar el Briefing directamente en celdas de Excel
+ */
+export function generateBriefingHtmlTable({ rows = [], totals = {}, activeDate = '' }) {
+  const fullBannerTitle = `RESUMEN DE ASIGNACIÓN · BRIEFING - DESPACHO ${activeDate}`;
+  const subtitle = `Control operacional y balance de flota, cajas, kilos y ambientes por cliente`;
+
+  const headers = [
+    'Operación', '# Rutas', 'Real Key 1era V', 'Real Terceros 1era V',
+    '2da V (Cubiertas Key)', '2da V (Terceros)', 'Sin cobertura',
+    'Cajas', 'Kilos', 'Congelado m3', 'Refrigerado m3', 'Seco m3',
+    'Volumen', 'N° Destinos'
+  ];
+
+  const tsvRows = [];
+  tsvRows.push(fullBannerTitle);
+  tsvRows.push(subtitle);
+  tsvRows.push('');
+  tsvRows.push(headers.join('\t'));
+
+  let rowsHtml = '';
+  rows.forEach((r, idx) => {
+    const isZebra = idx % 2 === 1;
+    const rowBg = isZebra ? '#F4F7FB' : '#FFFFFF';
+    const border = '#CBD5E1';
+
+    const cellL = `border: 1px solid ${border}; padding: 5px 8px; font-family: Calibri, sans-serif; font-size: 10pt; text-align: left; background-color: ${rowBg};`;
+    const cellC = `border: 1px solid ${border}; padding: 5px 8px; font-family: Calibri, sans-serif; font-size: 10pt; text-align: center; background-color: ${rowBg};`;
+    const cellR = `border: 1px solid ${border}; padding: 5px 8px; font-family: Calibri, sans-serif; font-size: 10pt; text-align: right; background-color: ${rowBg};`;
+
+    rowsHtml += `
+    <tr style="background-color: ${rowBg};">
+      <td style="${cellL} font-weight: bold; text-transform: uppercase;">${escapeHtml(r.operacion)}</td>
+      <td style="${cellC} font-weight: bold; background-color: #EBF3FF;">${r.numRutas || 0}</td>
+      <td style="${cellC}">${r.propia1v || 0}</td>
+      <td style="${cellC}">${r.externa1v || 0}</td>
+      <td style="${cellC}">${r.propia2v || 0}</td>
+      <td style="${cellC}">${r.externa2v || 0}</td>
+      <td style="${cellC} color: #DC2626; font-weight: bold;">${r.sinCobertura || 0}</td>
+      <td style="${cellR} mso-number-format:'#,##0';">${r.cajas || 0}</td>
+      <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.kilos) || 0).toFixed(2)} Kg</td>
+      <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.congeladoM3) || 0).toFixed(2)}</td>
+      <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.refrigeradoM3) || 0).toFixed(2)}</td>
+      <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.secoM3) || 0).toFixed(2)}</td>
+      <td style="${cellR} font-weight: bold; mso-number-format:'#,##0.00';">${(Number(r.volumenM3) || 0).toFixed(2)} m3</td>
+      <td style="${cellC}">${r.numDestinos || 0}</td>
+    </tr>`;
+
+    tsvRows.push([
+      r.operacion,
+      r.numRutas || 0,
+      r.propia1v || 0,
+      r.externa1v || 0,
+      r.propia2v || 0,
+      r.externa2v || 0,
+      r.sinCobertura || 0,
+      r.cajas || 0,
+      `${(Number(r.kilos) || 0).toFixed(2)} Kg`,
+      (Number(r.congeladoM3) || 0).toFixed(2),
+      (Number(r.refrigeradoM3) || 0).toFixed(2),
+      (Number(r.secoM3) || 0).toFixed(2),
+      `${(Number(r.volumenM3) || 0).toFixed(2)} m3`,
+      r.numDestinos || 0
+    ].join('\t'));
+  });
+
+  // Fila Total
+  const t = totals || {};
+  const totBg = '#0E2A47';
+  const totCellL = `border: 1px solid #1E3A8A; padding: 6px 8px; font-family: Calibri, sans-serif; font-size: 10pt; font-weight: bold; text-align: left; background-color: ${totBg}; color: #FFFFFF;`;
+  const totCellC = `border: 1px solid #1E3A8A; padding: 6px 8px; font-family: Calibri, sans-serif; font-size: 10pt; font-weight: bold; text-align: center; background-color: ${totBg}; color: #FFFFFF;`;
+  const totCellR = `border: 1px solid #1E3A8A; padding: 6px 8px; font-family: Calibri, sans-serif; font-size: 10pt; font-weight: bold; text-align: right; background-color: ${totBg}; color: #FFFFFF;`;
+
+  rowsHtml += `
+  <tr style="background-color: ${totBg}; color: #FFFFFF; font-weight: bold;">
+    <td style="${totCellL}">TOTAL GENERAL</td>
+    <td style="${totCellC}">${t.numRutas || 0}</td>
+    <td style="${totCellC}">${t.propia1v || 0}</td>
+    <td style="${totCellC}">${t.externa1v || 0}</td>
+    <td style="${totCellC}">${t.propia2v || 0}</td>
+    <td style="${totCellC}">${t.externa2v || 0}</td>
+    <td style="${totCellC}">${t.sinCobertura || 0}</td>
+    <td style="${totCellR} mso-number-format:'#,##0';">${t.cajas || 0}</td>
+    <td style="${totCellR} mso-number-format:'#,##0.00';">${(Number(t.kilos) || 0).toFixed(2)} Kg</td>
+    <td style="${totCellR} mso-number-format:'#,##0.00';">${(Number(t.congeladoM3) || 0).toFixed(2)}</td>
+    <td style="${totCellR} mso-number-format:'#,##0.00';">${(Number(t.refrigeradoM3) || 0).toFixed(2)}</td>
+    <td style="${totCellR} mso-number-format:'#,##0.00';">${(Number(t.secoM3) || 0).toFixed(2)}</td>
+    <td style="${totCellR} color: #6EE7B7; mso-number-format:'#,##0.00';">${(Number(t.volumenM3) || 0).toFixed(2)} m3</td>
+    <td style="${totCellC}">${t.numDestinos || 0}</td>
+  </tr>`;
+
+  tsvRows.push([
+    'TOTAL GENERAL',
+    t.numRutas || 0,
+    t.propia1v || 0,
+    t.externa1v || 0,
+    t.propia2v || 0,
+    t.externa2v || 0,
+    t.sinCobertura || 0,
+    t.cajas || 0,
+    `${(Number(t.kilos) || 0).toFixed(2)} Kg`,
+    (Number(t.congeladoM3) || 0).toFixed(2),
+    (Number(t.refrigeradoM3) || 0).toFixed(2),
+    (Number(t.secoM3) || 0).toFixed(2),
+    `${(Number(t.volumenM3) || 0).toFixed(2)} m3`,
+    t.numDestinos || 0
+  ].join('\t'));
+
+  const html = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:x="urn:schemas-microsoft-com:office:excel"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8">
+<!--[if gte mso 9]>
+<xml>
+ <x:ExcelWorkbook>
+  <x:ExcelWorksheets>
+   <x:ExcelWorksheet>
+    <x:Name>Briefing</x:Name>
+    <x:WorksheetOptions>
+     <x:DisplayGridlines/>
+    </x:WorksheetOptions>
+   </x:ExcelWorksheet>
+  </x:ExcelWorksheets>
+ </x:ExcelWorkbook>
+</xml>
+<![endif]-->
+<style>
+  table { border-collapse: collapse; font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 10pt; }
+  th, td { border: 1px solid #cbd5e1; }
+</style>
+</head>
+<body>
+<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse; font-family: Calibri, 'Segoe UI', Arial, sans-serif; font-size: 10pt;">
+  <tr style="height: 30px;">
+    <th colspan="14" style="background-color: #0B2545; color: #FFFFFF; font-size: 13pt; font-weight: bold; text-align: left; padding: 8px 12px; border: 1px solid #0B2545;">
+      ${escapeHtml(fullBannerTitle)}
+    </th>
+  </tr>
+  <tr style="height: 20px;">
+    <th colspan="14" style="background-color: #0B2545; color: #93C5FD; font-size: 9.5pt; font-weight: normal; text-align: left; padding: 3px 12px; border: 1px solid #0B2545;">
+      ${escapeHtml(subtitle)}
+    </th>
+  </tr>
+  <tr style="height: 6px;">
+    <td colspan="14" style="border: none; background-color: #ffffff; height: 6px;"></td>
+  </tr>
+  <tr style="background-color: #0E2A47; color: #FFFFFF; font-weight: bold; font-size: 9pt; text-transform: uppercase;">
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: left;">Operación</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: center;"># Rutas</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: center;">Real Key 1era V</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: center;">Real Terceros 1era V</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: center;">2da V (Cubiertas Key)</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: center;">2da V (Terceros)</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: center;">Sin cobertura</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: right;">Cajas</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: right;">Kilos</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: right;">Congelado m3</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: right;">Refrigerado m3</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: right;">Seco m3</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: right;">Volumen</th>
+    <th style="background-color: #0E2A47; color: #ffffff; border: 1px solid #1E3A8A; padding: 6px 8px; text-align: center;">N° Destinos</th>
+  </tr>
+  ${rowsHtml}
+</table>
+</body>
+</html>`;
+
+  return {
+    html,
+    tsv: tsvRows.join('\r\n')
+  };
+}
+
+/**
  * Fallback para generar HTML a partir del elemento DOM si no se cuenta con datos estructurados
  */
 function extractHtmlFromDomElement(element, activeDate) {
@@ -186,17 +393,19 @@ function extractHtmlFromDomElement(element, activeDate) {
 
   const clone = table.cloneNode(true);
 
-  // Remover primera columna (checkbox) y última columna (acciones/detalle)
+  // Remover primera columna (checkbox) y última columna (acciones/detalle) si existen
   clone.querySelectorAll('tr').forEach(row => {
     const firstCell = row.firstElementChild;
-    if (firstCell) row.removeChild(firstCell);
+    if (firstCell && firstCell.querySelector('input[type="checkbox"]')) {
+      row.removeChild(firstCell);
+    }
     const lastCell = row.lastElementChild;
     if (lastCell && lastCell.querySelector('button, svg')) {
       row.removeChild(lastCell);
     }
   });
 
-  const bannerEl = element.querySelector('h2');
+  const bannerEl = element.querySelector('h1, h2');
   const bannerTitle = bannerEl ? bannerEl.innerText : 'ASIGNACIÓN DE RUTAS';
 
   const html = `<!DOCTYPE html>
@@ -219,7 +428,10 @@ ${clone.outerHTML}
 }
 
 /**
- * Motor de Renderizado 100% Nativo en Canvas 2D (Sin CORS, sin taint de SVG, 100% compatible con todos los PCs)
+ * Motor de Renderizado 100% Nativo en Canvas 2D para la Matriz de Ruteo
+ * - Altura dinámica por fila según desglose completo de Zona (Rutas, Comunas, Locales, m³, Destino Prioritario)
+ * - Ancho de columnas expandido para evitar truncamiento con '...'
+ * - Calidad Retina HD (DPR = 2) sin pixelación ni desenfoque
  */
 export function renderMatrixWithCanvas2D(tableData) {
   const canvas = document.createElement('canvas');
@@ -227,18 +439,18 @@ export function renderMatrixWithCanvas2D(tableData) {
 
   const cols = [
     { title: 'Fecha', key: 'fecha', width: 95, align: 'center' },
-    { title: 'Operación', key: 'operacionStr', width: 160, align: 'left' },
-    { title: 'Ruta', key: 'rutasStr', width: 100, align: 'center', mono: true },
-    { title: 'Camión', key: 'camion', width: 125, align: 'left', bold: true },
-    { title: 'N° vuelta', key: 'displayVuelta', width: 95, align: 'center' },
-    { title: 'Conductor', key: 'conductor_name', width: 195, align: 'left' },
-    { title: 'Auxiliar', key: 'auxiliares', width: 165, align: 'left' },
-    { title: 'Zona (Ruta, Cliente, Comuna Más Lejana, LC, m³)', key: 'zona', width: 380, align: 'left' },
-    { title: 'Vol Carga', key: 'vol', width: 95, align: 'right' },
-    { title: 'Turno', key: 'turno', width: 85, align: 'center' },
-    { title: 'Hora Cita', key: 'hora_cita', width: 85, align: 'center' },
-    { title: 'Prioridad', key: 'prioridad', width: 130, align: 'center' },
-    { title: 'Destino Prioritario', key: 'destino_prioritario', width: 160, align: 'left' }
+    { title: 'Operación', key: 'operacionStr', width: 250, align: 'left', bold: true },
+    { title: 'Ruta', key: 'rutasStr', width: 130, align: 'center', mono: true },
+    { title: 'Camión', key: 'camion', width: 145, align: 'left', bold: true },
+    { title: 'N° vuelta', key: 'displayVuelta', width: 100, align: 'center' },
+    { title: 'Conductor', key: 'conductor_name', width: 220, align: 'left', bold: true },
+    { title: 'Auxiliar', key: 'auxiliares', width: 180, align: 'left' },
+    { title: 'Zona (Ruta, Cliente, Comuna Más Lejana, LC, m³)', key: 'zona', width: 700, align: 'left' },
+    { title: 'Vol Carga', key: 'vol', width: 105, align: 'right', mono: true, bold: true },
+    { title: 'Turno', key: 'turno', width: 95, align: 'center', bold: true },
+    { title: 'Hora Cita', key: 'hora_cita', width: 95, align: 'center', bold: true },
+    { title: 'Prioridad', key: 'prioridad', width: 135, align: 'center', bold: true },
+    { title: 'Destino Prioritario', key: 'destino_prioritario', width: 190, align: 'left', bold: true }
   ];
 
   const totalWidth = cols.reduce((a, c) => a + c.width, 0);
@@ -246,14 +458,23 @@ export function renderMatrixWithCanvas2D(tableData) {
   const bannerTitle = `ASIGNACIÓN DE RUTAS - ${tableData?.bannerTitle || 'FAST FOOD'}`;
   const subtitle = `Despacho ${tableData?.activeDate || ''} | Base: Lago Riñihue 02319, San Bernardo`;
 
-  const bannerHeight = 70;
-  const colHeaderHeight = 36;
-  const rowHeight = 30;
-  const totalRowHeight = 34;
-  const totalHeight = bannerHeight + colHeaderHeight + (trips.length * rowHeight) + totalRowHeight;
+  const bannerHeight = 78;
+  const colHeaderHeight = 40;
+  const totalRowHeight = 40;
 
-  // Escala para calidad Retina / HD
-  const dpr = 1.35;
+  // Cálculo de alturas dinámicas por fila para detallar completamente la información
+  const rowHeights = trips.map(trip => {
+    const zonaItems = trip.zonaItems || [];
+    const hasPrio = !!trip.destino_prioritario;
+    const numLines = Math.max(1, zonaItems.length + (hasPrio ? 1 : 0));
+    return Math.max(48, numLines * 25 + 16);
+  });
+
+  const sumRowsHeight = rowHeights.reduce((a, b) => a + b, 0);
+  const totalHeight = bannerHeight + colHeaderHeight + sumRowsHeight + totalRowHeight;
+
+  // Escala para calidad Retina 2x ultra nítida
+  const dpr = 2;
   canvas.width = Math.round(totalWidth * dpr);
   canvas.height = Math.round(totalHeight * dpr);
   ctx.scale(dpr, dpr);
@@ -267,14 +488,23 @@ export function renderMatrixWithCanvas2D(tableData) {
   ctx.fillRect(0, 0, totalWidth, bannerHeight);
 
   ctx.fillStyle = '#FFFFFF';
-  ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
+  ctx.font = 'bold 20px "Segoe UI", Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText(`🚛  ${bannerTitle}`, 16, 26);
+  ctx.fillText(`🚛  ${bannerTitle}`, 20, 28);
 
   ctx.fillStyle = '#FDE047';
+  ctx.font = 'bold 13px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(`📅  ${subtitle}`, 20, 56);
+
+  // Badge derecho de estadísticas en banner
+  const badgeText = `${trips.length} Viajes Planificados  •  Volumen Total: ${tableData?.totalM3 || '0'} m³`;
   ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
-  ctx.fillText(subtitle, 16, 52);
+  const badgeW = ctx.measureText(badgeText).width + 24;
+  drawRoundedRect(ctx, totalWidth - badgeW - 20, 24, badgeW, 30, 8, 'rgba(255, 255, 255, 0.12)', 'rgba(255, 255, 255, 0.3)');
+  ctx.fillStyle = '#FFFFFF';
+  ctx.textAlign = 'center';
+  ctx.fillText(badgeText, totalWidth - badgeW / 2 - 20, 39);
 
   // 2. ENCABEZADOS DE COLUMNA
   let currentY = bannerHeight;
@@ -288,16 +518,16 @@ export function renderMatrixWithCanvas2D(tableData) {
     ctx.strokeRect(currentX, currentY, col.width, colHeaderHeight);
 
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+    ctx.font = 'bold 11.5px "Segoe UI", Arial, sans-serif';
     ctx.textBaseline = 'middle';
 
-    let textX = currentX + 8;
+    let textX = currentX + 10;
     if (col.align === 'center') {
       ctx.textAlign = 'center';
       textX = currentX + col.width / 2;
     } else if (col.align === 'right') {
       ctx.textAlign = 'right';
-      textX = currentX + col.width - 8;
+      textX = currentX + col.width - 10;
     } else {
       ctx.textAlign = 'left';
     }
@@ -308,11 +538,12 @@ export function renderMatrixWithCanvas2D(tableData) {
 
   currentY += colHeaderHeight;
 
-  // 3. FILAS DE DATOS
+  // 3. FILAS DE DATOS (DETALLADO COMPLETO)
   trips.forEach((trip, idx) => {
     const isPrioUrgente = trip.prioridad === 'Prioridad urgente';
     const isUrgente = trip.prioridad === 'Urgente';
     const isRedespacho = trip.prioridad === 'Redespacho';
+    const rHeight = rowHeights[idx];
 
     let rowBg = idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
     let textColor = '#1E293B';
@@ -333,75 +564,272 @@ export function renderMatrixWithCanvas2D(tableData) {
     }
 
     ctx.fillStyle = rowBg;
-    ctx.fillRect(0, currentY, totalWidth, rowHeight);
+    ctx.fillRect(0, currentY, totalWidth, rHeight);
 
     let cellX = 0;
     cols.forEach(col => {
       ctx.strokeStyle = borderColor;
       ctx.lineWidth = 1;
-      ctx.strokeRect(cellX, currentY, col.width, rowHeight);
+      ctx.strokeRect(cellX, currentY, col.width, rHeight);
 
-      let val = '';
-      if (col.key === 'fecha') val = trip.fecha || '';
-      else if (col.key === 'operacionStr') val = trip.operacionStr || '';
-      else if (col.key === 'rutasStr') val = trip.rutasStr || '';
-      else if (col.key === 'camion') val = trip.camion || '';
-      else if (col.key === 'displayVuelta') val = trip.displayVuelta || '';
-      else if (col.key === 'conductor_name') val = trip.conductor_name || '';
-      else if (col.key === 'auxiliares') val = trip.auxiliares?.join(', ') || '-';
-      else if (col.key === 'zona') val = (trip.zonaItems || []).map(z => z.text).join(' | ');
-      else if (col.key === 'vol') val = (Number(trip.totalM3) || 0).toFixed(4);
-      else if (col.key === 'turno') val = trip.turno || '';
-      else if (col.key === 'hora_cita') val = trip.hora_cita || '';
-      else if (col.key === 'prioridad') val = trip.prioridad || 'Normal';
-      else if (col.key === 'destino_prioritario') val = trip.destino_prioritario || '';
+      const midY = currentY + rHeight / 2;
 
-      ctx.fillStyle = textColor;
-      ctx.font = col.mono 
-        ? 'bold 11px Consolas, monospace' 
-        : (col.bold || isPrioUrgente || isUrgente || isRedespacho ? 'bold 11px "Segoe UI", Arial, sans-serif' : '11px "Segoe UI", Arial, sans-serif');
-      ctx.textBaseline = 'middle';
+      // Columna especializada: Zona (Desglose ruta por ruta)
+      if (col.key === 'zona') {
+        const zonaItems = trip.zonaItems || [];
+        const startY = currentY + 14;
 
-      let drawX = cellX + 8;
-      if (col.align === 'center') {
-        ctx.textAlign = 'center';
-        drawX = cellX + col.width / 2;
-      } else if (col.align === 'right') {
-        ctx.textAlign = 'right';
-        drawX = cellX + col.width - 8;
-      } else {
-        ctx.textAlign = 'left';
-      }
+        zonaItems.forEach((z, zIdx) => {
+          const itemY = startY + zIdx * 24;
+          let drawCursor = cellX + 10;
 
-      let textToDraw = String(val);
-      const maxW = col.width - 16;
-      if (ctx.measureText(textToDraw).width > maxW) {
-        while (textToDraw.length > 3 && ctx.measureText(textToDraw + '...').width > maxW) {
-          textToDraw = textToDraw.slice(0, -1);
+          // 1. Badge Ruta
+          ctx.font = 'bold 11px Consolas, monospace';
+          const rText = String(z.ruta || '');
+          const rW = ctx.measureText(rText).width + 12;
+          drawRoundedRect(ctx, drawCursor, itemY - 11, rW, 19, 4, '#FFFFFF', '#CBD5E1');
+          ctx.fillStyle = '#1E3A8A';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(rText, drawCursor + 6, itemY);
+          drawCursor += rW + 8;
+
+          // 2. Cliente / Operación
+          ctx.fillStyle = isRedespacho ? '#F8FAFC' : '#0F172A';
+          ctx.font = 'bold 11.5px "Segoe UI", Arial, sans-serif';
+          const cText = String(z.cliente || '');
+          ctx.fillText(cText, drawCursor, itemY);
+          drawCursor += ctx.measureText(cText).width + 8;
+
+          // 3. Separador •
+          ctx.fillStyle = '#94A3B8';
+          ctx.font = 'bold 11px Arial';
+          ctx.fillText('•', drawCursor, itemY);
+          drawCursor += 12;
+
+          // 4. Comuna 📍
+          ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+          const comText = `📍 ${z.comuna || 'Sin comuna'}`;
+          const comW = ctx.measureText(comText).width + 10;
+          drawRoundedRect(ctx, drawCursor, itemY - 10, comW, 18, 4, isRedespacho ? '#1E293B' : '#F1F5F9', '#CBD5E1');
+          ctx.fillStyle = isRedespacho ? '#E2E8F0' : '#334155';
+          ctx.fillText(comText, drawCursor + 5, itemY);
+          drawCursor += comW + 8;
+
+          // 5. Separador •
+          ctx.fillStyle = '#94A3B8';
+          ctx.fillText('•', drawCursor, itemY);
+          drawCursor += 12;
+
+          // 6. Locales
+          ctx.fillStyle = isRedespacho ? '#93C5FD' : '#3730A3';
+          ctx.font = 'bold 11.5px "Segoe UI", Arial, sans-serif';
+          const locText = `${z.locales || 0} LC`;
+          ctx.fillText(locText, drawCursor, itemY);
+          drawCursor += ctx.measureText(locText).width + 8;
+
+          // 7. Separador •
+          ctx.fillStyle = '#94A3B8';
+          ctx.fillText('•', drawCursor, itemY);
+          drawCursor += 12;
+
+          // 8. Volumen m³
+          ctx.fillStyle = isRedespacho ? '#6EE7B7' : '#065F46';
+          ctx.font = 'bold 11.5px Consolas, monospace';
+          const m3Text = `${z.m3 || '0.0000'} m³`;
+          ctx.fillText(m3Text, drawCursor, itemY);
+        });
+
+        // Línea Destino Prioritario si existe
+        if (trip.destino_prioritario) {
+          const prioLineY = startY + zonaItems.length * 24;
+          const prioText = `🎯 Prioridad: ${trip.destino_prioritario}`;
+          ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+          const pW = ctx.measureText(prioText).width + 16;
+          drawRoundedRect(ctx, cellX + 10, prioLineY - 10, pW, 20, 4, '#FEE2E2', '#FCA5A5');
+          ctx.fillStyle = '#991B1B';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(prioText, cellX + 18, prioLineY);
         }
-        textToDraw += '...';
+      } 
+      // Columna especializada: Ruta
+      else if (col.key === 'rutasStr') {
+        const rStr = String(trip.rutasStr || '');
+        ctx.font = 'bold 12px Consolas, monospace';
+        const rw = ctx.measureText(rStr).width + 16;
+        let pillBg = '#DBEAFE';
+        let pillBorder = '#93C5FD';
+        let pillText = '#1E3A8A';
+
+        if (isPrioUrgente) {
+          pillBg = '#FCA5A5';
+          pillBorder = '#EF4444';
+          pillText = '#7F1D1D';
+        } else if (isUrgente) {
+          pillBg = '#FDE047';
+          pillBorder = '#EAB308';
+          pillText = '#713F12';
+        } else if (isRedespacho) {
+          pillBg = '#0F172A';
+          pillBorder = '#475569';
+          pillText = '#FFFFFF';
+        }
+
+        drawRoundedRect(ctx, cellX + (col.width - rw) / 2, midY - 11, rw, 22, 6, pillBg, pillBorder);
+        ctx.fillStyle = pillText;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(rStr, cellX + col.width / 2, midY);
+      }
+      // Columna especializada: N° vuelta
+      else if (col.key === 'displayVuelta') {
+        const vStr = String(trip.displayVuelta || 'Vuelta 1');
+        const isSecond = vStr.includes('2') || vStr.includes('3');
+        ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+        const vw = ctx.measureText(vStr).width + 14;
+        const vBg = isSecond ? '#FEF08A' : (isRedespacho ? '#1E293B' : '#F1F5F9');
+        const vBorder = isSecond ? '#FACC15' : '#CBD5E1';
+        const vColor = isSecond ? '#713F12' : (isRedespacho ? '#F8FAFC' : '#334155');
+
+        drawRoundedRect(ctx, cellX + (col.width - vw) / 2, midY - 10, vw, 20, 6, vBg, vBorder);
+        ctx.fillStyle = vColor;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(vStr, cellX + col.width / 2, midY);
+      }
+      // Columna especializada: Camión
+      else if (col.key === 'camion') {
+        const cStr = `🚛  ${trip.camion || 'Sin Camión'}`;
+        ctx.fillStyle = textColor;
+        ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cStr, cellX + 10, midY);
+      }
+      // Columna especializada: Prioridad
+      else if (col.key === 'prioridad') {
+        const pStr = String(trip.prioridad || 'Normal');
+        ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+        const pw = ctx.measureText(pStr).width + 14;
+        let pBg = '#F1F5F9';
+        let pBorder = '#CBD5E1';
+        let pText = '#334155';
+
+        if (isPrioUrgente) {
+          pBg = '#FEE2E2';
+          pBorder = '#F87171';
+          pText = '#991B1B';
+        } else if (isUrgente) {
+          pBg = '#FEF9C3';
+          pBorder = '#FACC15';
+          pText = '#854D0E';
+        } else if (isRedespacho) {
+          pBg = '#0F172A';
+          pBorder = '#64748B';
+          pText = '#FFFFFF';
+        }
+
+        drawRoundedRect(ctx, cellX + (col.width - pw) / 2, midY - 10, pw, 20, 6, pBg, pBorder);
+        ctx.fillStyle = pText;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pStr, cellX + col.width / 2, midY);
+      }
+      // Columna especializada: Destino Prioritario
+      else if (col.key === 'destino_prioritario') {
+        const dStr = trip.destino_prioritario || '';
+        if (dStr) {
+          ctx.fillStyle = isRedespacho ? '#FCA5A5' : '#B91C1C';
+          ctx.font = 'bold 11.5px "Segoe UI", Arial, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`🎯 ${dStr}`, cellX + 10, midY);
+        } else {
+          ctx.fillStyle = isRedespacho ? '#94A3B8' : '#94A3B8';
+          ctx.font = '11px "Segoe UI", Arial, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('-', cellX + 10, midY);
+        }
+      }
+      // Columnas Estándar con soporte multi-línea si es necesario
+      else {
+        let val = '';
+        if (col.key === 'fecha') val = trip.fecha || '';
+        else if (col.key === 'operacionStr') val = trip.operacionStr || '';
+        else if (col.key === 'conductor_name') val = trip.conductor_name || '';
+        else if (col.key === 'auxiliares') val = trip.auxiliares?.join(', ') || '-';
+        else if (col.key === 'vol') val = (Number(trip.totalM3) || 0).toFixed(4);
+        else if (col.key === 'turno') val = trip.turno || '-';
+        else if (col.key === 'hora_cita') val = trip.hora_cita || '-';
+
+        ctx.fillStyle = textColor;
+        if (col.mono) {
+          ctx.font = col.bold ? 'bold 12px Consolas, monospace' : '11.5px Consolas, monospace';
+        } else {
+          ctx.font = col.bold ? 'bold 12px "Segoe UI", Arial, sans-serif' : '11.5px "Segoe UI", Arial, sans-serif';
+        }
+        ctx.textBaseline = 'middle';
+
+        let textX = cellX + 10;
+        if (col.align === 'center') {
+          ctx.textAlign = 'center';
+          textX = cellX + col.width / 2;
+        } else if (col.align === 'right') {
+          ctx.textAlign = 'right';
+          textX = cellX + col.width - 10;
+        } else {
+          ctx.textAlign = 'left';
+        }
+
+        // Si es Operación o Conductor y es muy largo, permitir 2 líneas
+        const maxW = col.width - 20;
+        if (ctx.measureText(val).width > maxW && (col.key === 'operacionStr' || col.key === 'conductor_name')) {
+          const words = val.split(' ');
+          let l1 = '';
+          let l2 = '';
+          words.forEach(w => {
+            if (ctx.measureText(l1 + ' ' + w).width < maxW) {
+              l1 += (l1 ? ' ' : '') + w;
+            } else {
+              l2 += (l2 ? ' ' : '') + w;
+            }
+          });
+          ctx.fillText(l1, textX, midY - 8);
+          ctx.fillText(l2, textX, midY + 8);
+        } else {
+          let drawStr = val;
+          if (ctx.measureText(drawStr).width > maxW) {
+            while (drawStr.length > 3 && ctx.measureText(drawStr + '...').width > maxW) {
+              drawStr = drawStr.slice(0, -1);
+            }
+            drawStr += '...';
+          }
+          ctx.fillText(drawStr, textX, midY);
+        }
       }
 
-      ctx.fillText(textToDraw, drawX, currentY + rowHeight / 2);
       cellX += col.width;
     });
 
-    currentY += rowHeight;
+    currentY += rHeight;
   });
 
-  // 4. TOTALES
+  // 4. TOTALES GENERALES
   ctx.fillStyle = '#E2E8F0';
   ctx.fillRect(0, currentY, totalWidth, totalRowHeight);
   ctx.strokeStyle = '#CBD5E1';
   ctx.strokeRect(0, currentY, totalWidth, totalRowHeight);
 
   ctx.fillStyle = '#0F172A';
-  ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+  ctx.font = 'bold 13px "Segoe UI", Arial, sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillText('TOTAL CARGA (m³):', 16, currentY + totalRowHeight / 2);
+  ctx.fillText('TOTAL CARGA (m³):', 20, currentY + totalRowHeight / 2);
 
   ctx.textAlign = 'right';
+  ctx.font = 'bold 14px Consolas, monospace';
   const totalM3Str = `${tableData?.totalM3 || '0'} m³`;
   ctx.fillText(totalM3Str, totalWidth - 24, currentY + totalRowHeight / 2);
 
@@ -409,10 +837,203 @@ export function renderMatrixWithCanvas2D(tableData) {
 }
 
 /**
- * Genera un canvas a partir del contenedor de la matriz, utilizando html2canvas
- * con fallback infalible de renderizado Canvas 2D nativo sin taint ni CORS.
+ * Motor de Renderizado en Canvas 2D para la Matriz de Briefing
+ */
+export function renderBriefingWithCanvas2D(briefingData) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const cols = [
+    { title: 'Operación', key: 'operacion', width: 220, align: 'left', bold: true },
+    { title: '# Rutas', key: 'numRutas', width: 85, align: 'center', bold: true },
+    { title: 'Real Key 1era V', key: 'propia1v', width: 115, align: 'center' },
+    { title: 'Real Terceros 1era V', key: 'externa1v', width: 125, align: 'center' },
+    { title: '2da V (Cubiertas Key)', key: 'propia2v', width: 135, align: 'center' },
+    { title: '2da V (Terceros)', key: 'externa2v', width: 115, align: 'center' },
+    { title: 'Sin cobertura', key: 'sinCobertura', width: 105, align: 'center', bold: true },
+    { title: 'Cajas', key: 'cajas', width: 90, align: 'right' },
+    { title: 'Kilos', key: 'kilos', width: 120, align: 'right' },
+    { title: 'Congelado m3', key: 'congeladoM3', width: 105, align: 'right' },
+    { title: 'Refrigerado m3', key: 'refrigeradoM3', width: 110, align: 'right' },
+    { title: 'Seco m3', key: 'secoM3', width: 95, align: 'right' },
+    { title: 'Volumen', key: 'volumenM3', width: 115, align: 'right', bold: true },
+    { title: 'N° Destinos', key: 'numDestinos', width: 95, align: 'center' }
+  ];
+
+  const totalWidth = cols.reduce((a, c) => a + c.width, 0);
+  const rows = briefingData?.rows || [];
+  const totals = briefingData?.totals || {};
+  const activeDate = briefingData?.activeDate || 'Despacho';
+
+  const bannerHeight = 72;
+  const colHeaderHeight = 38;
+  const rowHeight = 32;
+  const totalRowHeight = 36;
+  const totalHeight = bannerHeight + colHeaderHeight + (rows.length * rowHeight) + totalRowHeight;
+
+  const dpr = 2;
+  canvas.width = Math.round(totalWidth * dpr);
+  canvas.height = Math.round(totalHeight * dpr);
+  ctx.scale(dpr, dpr);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, totalWidth, totalHeight);
+
+  // Banner
+  ctx.fillStyle = '#0B2545';
+  ctx.fillRect(0, 0, totalWidth, bannerHeight);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 18px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('RESUMEN DE ASIGNACIÓN · BRIEFING', 20, 26);
+
+  ctx.fillStyle = '#93C5FD';
+  ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(`Despacho ${activeDate} | Balance de flota, cajas, kilos y ambientes por cliente`, 20, 50);
+
+  // Encabezados
+  let currentY = bannerHeight;
+  ctx.fillStyle = '#0E2A47';
+  ctx.fillRect(0, currentY, totalWidth, colHeaderHeight);
+
+  let currentX = 0;
+  cols.forEach(col => {
+    ctx.strokeStyle = '#1E3A8A';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(currentX, currentY, col.width, colHeaderHeight);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+
+    let tx = currentX + 8;
+    if (col.align === 'center') {
+      ctx.textAlign = 'center';
+      tx = currentX + col.width / 2;
+    } else if (col.align === 'right') {
+      ctx.textAlign = 'right';
+      tx = currentX + col.width - 8;
+    } else {
+      ctx.textAlign = 'left';
+    }
+
+    ctx.fillText(col.title.toUpperCase(), tx, currentY + colHeaderHeight / 2);
+    currentX += col.width;
+  });
+
+  currentY += colHeaderHeight;
+
+  // Filas
+  rows.forEach((r, idx) => {
+    const isZebra = idx % 2 === 1;
+    const bg = isZebra ? '#F4F7FB' : '#FFFFFF';
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, currentY, totalWidth, rowHeight);
+
+    let cellX = 0;
+    cols.forEach(col => {
+      ctx.strokeStyle = '#CBD5E1';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cellX, currentY, col.width, rowHeight);
+
+      let text = '';
+      if (col.key === 'operacion') text = r.operacion || '';
+      else if (col.key === 'numRutas') text = String(r.numRutas || 0);
+      else if (col.key === 'propia1v') text = String(r.propia1v || 0);
+      else if (col.key === 'externa1v') text = String(r.externa1v || 0);
+      else if (col.key === 'propia2v') text = String(r.propia2v || 0);
+      else if (col.key === 'externa2v') text = String(r.externa2v || 0);
+      else if (col.key === 'sinCobertura') text = String(r.sinCobertura || 0);
+      else if (col.key === 'cajas') text = (r.cajas || 0).toLocaleString('de-DE');
+      else if (col.key === 'kilos') text = `${(Number(r.kilos) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kg`;
+      else if (col.key === 'congeladoM3') text = (Number(r.congeladoM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      else if (col.key === 'refrigeradoM3') text = (Number(r.refrigeradoM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      else if (col.key === 'secoM3') text = (Number(r.secoM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      else if (col.key === 'volumenM3') text = `${(Number(r.volumenM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m3`;
+      else if (col.key === 'numDestinos') text = String(r.numDestinos || 0);
+
+      ctx.fillStyle = col.key === 'sinCobertura' && r.sinCobertura > 0 ? '#DC2626' : '#1E293B';
+      ctx.font = col.bold ? 'bold 11px "Segoe UI", Arial, sans-serif' : '11px "Segoe UI", Arial, sans-serif';
+      ctx.textBaseline = 'middle';
+
+      let tx = cellX + 8;
+      if (col.align === 'center') {
+        ctx.textAlign = 'center';
+        tx = cellX + col.width / 2;
+      } else if (col.align === 'right') {
+        ctx.textAlign = 'right';
+        tx = cellX + col.width - 8;
+      } else {
+        ctx.textAlign = 'left';
+      }
+
+      ctx.fillText(text, tx, currentY + rowHeight / 2);
+      cellX += col.width;
+    });
+
+    currentY += rowHeight;
+  });
+
+  // Fila Total
+  ctx.fillStyle = '#0E2A47';
+  ctx.fillRect(0, currentY, totalWidth, totalRowHeight);
+
+  let cellX = 0;
+  cols.forEach(col => {
+    ctx.strokeStyle = '#1E3A8A';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cellX, currentY, col.width, totalRowHeight);
+
+    let text = '';
+    if (col.key === 'operacion') text = 'TOTAL GENERAL';
+    else if (col.key === 'numRutas') text = String(totals.numRutas || 0);
+    else if (col.key === 'propia1v') text = String(totals.propia1v || 0);
+    else if (col.key === 'externa1v') text = String(totals.externa1v || 0);
+    else if (col.key === 'propia2v') text = String(totals.propia2v || 0);
+    else if (col.key === 'externa2v') text = String(totals.externa2v || 0);
+    else if (col.key === 'sinCobertura') text = String(totals.sinCobertura || 0);
+    else if (col.key === 'cajas') text = (totals.cajas || 0).toLocaleString('de-DE');
+    else if (col.key === 'kilos') text = `${(Number(totals.kilos) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kg`;
+    else if (col.key === 'congeladoM3') text = (Number(totals.congeladoM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    else if (col.key === 'refrigeradoM3') text = (Number(totals.refrigeradoM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    else if (col.key === 'secoM3') text = (Number(totals.secoM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    else if (col.key === 'volumenM3') text = `${(Number(totals.volumenM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m3`;
+    else if (col.key === 'numDestinos') text = String(totals.numDestinos || 0);
+
+    ctx.fillStyle = col.key === 'volumenM3' ? '#6EE7B7' : '#FFFFFF';
+    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+
+    let tx = cellX + 8;
+    if (col.align === 'center') {
+      ctx.textAlign = 'center';
+      tx = cellX + col.width / 2;
+    } else if (col.align === 'right') {
+      ctx.textAlign = 'right';
+      tx = cellX + col.width - 8;
+    } else {
+      ctx.textAlign = 'left';
+    }
+
+    ctx.fillText(text, tx, currentY + totalRowHeight / 2);
+    cellX += col.width;
+  });
+
+  return canvas;
+}
+
+/**
+ * Genera el Canvas final optimizado para exportación o portapapeles
  */
 async function renderMatrixCanvas(element, tableData = null) {
+  // Si contamos con la data estructurada de los viajes, el motor Canvas 2D nativo
+  // produce una renderización 100% nítida, sin recorte de texto y con todo el detalle de Zona
+  if (tableData && tableData.tripsList && tableData.tripsList.length > 0) {
+    return renderMatrixWithCanvas2D(tableData);
+  }
+
   const html2canvas = getHtml2Canvas();
   if (html2canvas && element) {
     try {
@@ -421,7 +1042,7 @@ async function renderMatrixCanvas(element, tableData = null) {
       const scrollH = Math.max(element.scrollHeight || 0, Math.ceil(rect.height) || 800);
 
       const canvas = await html2canvas(element, {
-        scale: 1.25,
+        scale: 1.5,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
@@ -446,7 +1067,7 @@ async function renderMatrixCanvas(element, tableData = null) {
 }
 
 /**
- * Copia la matriz al portapapeles combinando el formato nativo para Excel (text/html y text/plain)
+ * Copia la matriz de Ruteo al portapapeles combinando el formato nativo para Excel (text/html y text/plain)
  * y formato de imagen (image/png). Al pegar en Excel (Ctrl + V), se combina directamente
  * en las celdas con el diseño, colores pastel y bordes de la matriz.
  */
@@ -459,7 +1080,6 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
   const toastId = toast.loading('Copiando matriz para Excel con formato...');
 
   try {
-    // 1. Generar contenido HTML y TSV optimizado para Excel
     let htmlContent = '';
     let tsvContent = '';
 
@@ -478,7 +1098,6 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
       tsvContent = extracted.tsv;
     }
 
-    // 2. Generar imagen PNG de respaldo/rasterizada (utilizando motor dual)
     let pngBlob = null;
     try {
       const canvas = await renderMatrixCanvas(element, tableData);
@@ -491,12 +1110,10 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
 
     let copied = false;
 
-    // 3. Escribir al portapapeles mediante Async Clipboard API
     if (navigator.clipboard && window.ClipboardItem) {
       const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
       const textBlob = new Blob([tsvContent], { type: 'text/plain' });
 
-      // Intento A: paquete completo si el navegador soporta tipos múltiples (incluyendo image/png)
       if (pngBlob) {
         try {
           const item = new ClipboardItem({
@@ -511,7 +1128,6 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
         }
       }
 
-      // Intento B: text/html + text/plain (formato que Excel interpreta directamente como celdas con formato)
       if (!copied) {
         try {
           const item = new ClipboardItem({
@@ -537,7 +1153,6 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
       }
     }
 
-    // 4. Intento C: Fallback tradicional con document.execCommand('copy') (ideal para HTTP o PCs de red local)
     if (!copied && htmlContent) {
       try {
         const copyHandler = (e) => {
@@ -556,7 +1171,6 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
     if (copied) {
       toast.success('¡Matriz copiada! Al presionar Ctrl + V en Excel se pegará combinada en celdas con el formato de la matriz.', { id: toastId });
     } else if (pngBlob) {
-      // Si el navegador bloquea escritura de portapapeles, descargar archivo de imagen como respaldo
       const url = URL.createObjectURL(pngBlob);
       const link = document.createElement('a');
       link.download = `Matriz_Ruteo_${activeDate || 'Despacho'}.png`;
@@ -578,7 +1192,123 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
 }
 
 /**
- * Descarga la matriz completa en formato de imagen PNG (compatible con todos los computadores)
+ * Copia el Briefing al portapapeles combinando formato Excel nativo (text/html y text/plain)
+ * e imagen PNG. Al pegar en Excel se combina directamente en celdas con diseño y formato oficial.
+ */
+export async function copyBriefingAsImage(element, activeDate = '', briefingData = null) {
+  const toastId = toast.loading('Copiando Briefing para Excel con formato...');
+
+  try {
+    let htmlContent = '';
+    let tsvContent = '';
+
+    if (briefingData && briefingData.rows) {
+      const formatted = generateBriefingHtmlTable({
+        rows: briefingData.rows,
+        totals: briefingData.totals,
+        activeDate: briefingData.activeDate || activeDate
+      });
+      htmlContent = formatted.html;
+      tsvContent = formatted.tsv;
+    } else if (element) {
+      const extracted = extractHtmlFromDomElement(element, activeDate);
+      htmlContent = extracted.html;
+      tsvContent = extracted.tsv;
+    }
+
+    let pngBlob = null;
+    try {
+      const canvas = renderBriefingWithCanvas2D(briefingData || { rows: [], totals: {}, activeDate });
+      if (canvas) {
+        pngBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      }
+    } catch (canvasErr) {
+      console.warn('Briefing canvas rasterization warning:', canvasErr);
+    }
+
+    let copied = false;
+
+    if (navigator.clipboard && window.ClipboardItem) {
+      const htmlBlob = new Blob([htmlContent], { type: 'text/html' });
+      const textBlob = new Blob([tsvContent], { type: 'text/plain' });
+
+      if (pngBlob) {
+        try {
+          const item = new ClipboardItem({
+            'text/html': htmlBlob,
+            'text/plain': textBlob,
+            'image/png': pngBlob
+          });
+          await navigator.clipboard.write([item]);
+          copied = true;
+        } catch (multiErr) {
+          console.warn('Briefing clipboard multi-MIME attempt rejected, writing text/html + text/plain:', multiErr);
+        }
+      }
+
+      if (!copied) {
+        try {
+          const item = new ClipboardItem({
+            'text/html': htmlBlob,
+            'text/plain': textBlob
+          });
+          await navigator.clipboard.write([item]);
+          copied = true;
+        } catch (htmlErr) {
+          console.warn('Briefing HTML clipboard failed, fallback image:', htmlErr);
+          if (pngBlob) {
+            try {
+              const item = new ClipboardItem({ 'image/png': pngBlob });
+              await navigator.clipboard.write([item]);
+              copied = true;
+            } catch (imgErr) {
+              console.error('All briefing clipboard writes failed:', imgErr);
+            }
+          }
+        }
+      }
+    }
+
+    if (!copied && htmlContent) {
+      try {
+        const copyHandler = (e) => {
+          e.preventDefault();
+          e.clipboardData.setData('text/html', htmlContent);
+          e.clipboardData.setData('text/plain', tsvContent);
+        };
+        document.addEventListener('copy', copyHandler);
+        copied = document.execCommand('copy');
+        document.removeEventListener('copy', copyHandler);
+      } catch (execErr) {
+        console.warn('execCommand copy fallback failed:', execErr);
+      }
+    }
+
+    if (copied) {
+      toast.success('¡Briefing copiado! Al presionar Ctrl + V en Excel se pegará combinado en celdas con formato.', { id: toastId });
+    } else if (pngBlob) {
+      const url = URL.createObjectURL(pngBlob);
+      const link = document.createElement('a');
+      link.download = `Resumen_Briefing_${activeDate || 'Despacho'}.png`;
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 1500);
+      toast.info('Se descargó la imagen PNG del Briefing.', { id: toastId });
+    } else {
+      throw new Error('No se pudo copiar el Briefing al portapapeles.');
+    }
+  } catch (error) {
+    console.error('Error copying briefing to clipboard:', error);
+    toast.error('Error al copiar el Briefing al portapapeles.', { id: toastId });
+  }
+}
+
+/**
+ * Descarga la matriz completa en formato de imagen PNG en ultra alta definición (Retina 2x, sin recortes)
  */
 export async function downloadMatrixAsImage(element, activeDate = '', tableData = null) {
   if (!element && !tableData) {
@@ -586,7 +1316,7 @@ export async function downloadMatrixAsImage(element, activeDate = '', tableData 
     return;
   }
 
-  const toastId = toast.loading('Preparando descarga de imagen en formato PNG...');
+  const toastId = toast.loading('Generando imagen de alta definición sin recortes...');
 
   try {
     const canvas = await renderMatrixCanvas(element, tableData);
@@ -609,7 +1339,7 @@ export async function downloadMatrixAsImage(element, activeDate = '', tableData 
       URL.revokeObjectURL(url);
     }, 1500);
 
-    toast.success('¡Imagen descargada exitosamente en formato PNG!', { id: toastId });
+    toast.success('¡Imagen descargada exitosamente en formato PNG de alta resolución!', { id: toastId });
   } catch (error) {
     console.error('Error downloading matrix image:', error);
     toast.error('Error al descargar la imagen de la matriz.', { id: toastId });
