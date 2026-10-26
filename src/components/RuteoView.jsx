@@ -452,22 +452,6 @@ export default function RuteoView() {
   // Ref para capturar imagen de la matriz para copiar/descargar (Requisito 5)
   const matrixContainerRef = useRef(null);
 
-  const handleCopyImage = useCallback(async () => {
-    if (!matrixContainerRef.current) {
-      toast.error('No se encontró el contenedor de la matriz.');
-      return;
-    }
-    await copyMatrixAsImage(matrixContainerRef.current, activeDate);
-  }, [activeDate]);
-
-  const handleDownloadImage = useCallback(async () => {
-    if (!matrixContainerRef.current) {
-      toast.error('No se encontró el contenedor de la matriz.');
-      return;
-    }
-    await downloadMatrixAsImage(matrixContainerRef.current, activeDate);
-  }, [activeDate]);
-
   // Estado para selección de filas de viajes para acciones masivas
   const [selectedTripKeys, setSelectedTripKeys] = useState([]);
   const [batchHoraCita, setBatchHoraCita] = useState('');
@@ -1038,6 +1022,31 @@ export default function RuteoView() {
   };
 
   // ==========================================
+  // COPIAR Y DESCARGAR IMAGEN / MATRIZ
+  // Al copiar imagen para Excel, se combinan las celdas, colores pastel y formato nativo
+  // ==========================================
+  const handleCopyImage = useCallback(async () => {
+    if (!matrixContainerRef.current) {
+      toast.error('No se encontró el contenedor de la matriz.');
+      return;
+    }
+    await copyMatrixAsImage(matrixContainerRef.current, activeDate, {
+      tripsList,
+      bannerTitle: bannerClientTitle,
+      activeDate: formatBannerDate(activeDate),
+      totalM3
+    });
+  }, [activeDate, tripsList, bannerClientTitle, totalM3]);
+
+  const handleDownloadImage = useCallback(async () => {
+    if (!matrixContainerRef.current) {
+      toast.error('No se encontró el contenedor de la matriz.');
+      return;
+    }
+    await downloadMatrixAsImage(matrixContainerRef.current, activeDate);
+  }, [activeDate]);
+
+  // ==========================================
   // EXPORTACIÓN A EXCEL CON FORMATO Y COLORES (SpreadsheetML)
   // ==========================================
   const handleExportExcel = () => {
@@ -1533,7 +1542,7 @@ export default function RuteoView() {
             onClick={handleCopyImage}
             variant="outline"
             className="flex items-center gap-2 text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 hover:text-indigo-800 text-xs font-bold px-3.5 py-2 rounded-xl border-indigo-200 shadow-2xs transition-all"
-            title="Copiar imagen de la matriz para pegarla directamente en Excel (Ctrl + V)"
+            title="Copiar matriz para pegarla en Excel (Ctrl + V) combinándose con el formato de celdas"
           >
             <Copy size={15} className="text-indigo-600" />
             Copiar imagen
