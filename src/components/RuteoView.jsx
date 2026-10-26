@@ -15,7 +15,7 @@ import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
-import { getOperacionName } from '../data/operacionesMaster';
+import { getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
 
 // ==========================================
 // 1. MAPA DE DISTANCIAS Y CÁLCULO DE COMUNA
@@ -509,6 +509,24 @@ export default function RuteoView() {
   const [selectedAuxiliares, setSelectedAuxiliares] = useState([]);
   const [selectedVueltas, setSelectedVueltas] = useState([]);
 
+  // Multi-selección de Operaciones (Requisito: igual que en Briefing)
+  const [selectedOperations, setSelectedOperations] = useState([]);
+
+  const toggleOperation = (op) => {
+    setSelectedOperations(prev => {
+      const exists = prev.some(item => item.toLowerCase() === op.toLowerCase());
+      if (exists) {
+        return prev.filter(item => item.toLowerCase() !== op.toLowerCase());
+      } else {
+        return [...prev, op];
+      }
+    });
+  };
+
+  const clearOperationFilter = () => {
+    setSelectedOperations([]);
+  };
+
   const normalizedQuickTerm = useMemo(() => {
     return normalizeSearchText(quickSearch.trim());
   }, [quickSearch]);
@@ -609,6 +627,13 @@ export default function RuteoView() {
       if (!selectedVueltas.includes(vLabel)) return false;
     }
 
+    // 8. Operación Multi-selección (Filtro por Operación / Cliente de Briefing)
+    if (excludeFilter !== 'operacion' && selectedOperations.length > 0) {
+      const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
+      const matchesOp = selectedOperations.some(op => op.toLowerCase() === opName.toLowerCase());
+      if (!matchesOp) return false;
+    }
+
     return true;
   }, [
     normalizedQuickTerm,
@@ -618,7 +643,8 @@ export default function RuteoView() {
     selectedRutas,
     selectedConductores,
     selectedAuxiliares,
-    selectedVueltas
+    selectedVueltas,
+    selectedOperations
   ]);
 
   // Listas de opciones dinámicas y combinadas (Requisito 2)
@@ -701,10 +727,56 @@ export default function RuteoView() {
   }, [currentRoutes, isRouteMatching]);
 
   // ==========================================
-  // TÍTULO DINÁMICO DEL BANNER SEGÚN CLIENTE (Requisito 3)
-  // Quita cualquier numeración y deja solo el texto de la columna
+  // OPERACIONES: CONTEO Y ORDENAMIENTO (Requisito: igual que en Briefing)
+  // Al inicio operaciones con servicios hoy, al final operaciones sin servicios
+  // ==========================================
+  const operationRouteCounts = useMemo(() => {
+    const map = new Map();
+    currentRoutes.forEach(r => {
+      const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
+      if (opName) {
+        const key = opName.toLowerCase();
+        map.set(key, (map.get(key) || 0) + 1);
+      }
+    });
+    return map;
+  }, [currentRoutes]);
+
+  const operationsList = useMemo(() => {
+    const presentOps = new Set();
+    currentRoutes.forEach(r => {
+      const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
+      if (opName) presentOps.add(opName);
+    });
+    ALL_OPERACIONES.forEach(op => presentOps.add(op));
+
+    const opsArray = Array.from(presentOps);
+    return opsArray.sort((a, b) => {
+      const countA = operationRouteCounts.get(a.toLowerCase()) || 0;
+      const countB = operationRouteCounts.get(b.toLowerCase()) || 0;
+      const hasA = countA > 0 ? 1 : 0;
+      const hasB = countB > 0 ? 1 : 0;
+
+      // 1. Con servicios/rutas hoy al comienzo, sin servicios al final
+      if (hasA !== hasB) return hasB - hasA;
+      // 2. Mayor número de rutas
+      if (countA !== countB) return countB - countA;
+      // 3. Fallback alfabético
+      return a.localeCompare(b);
+    });
+  }, [currentRoutes, operationRouteCounts]);
+
+  // ==========================================
+  // TÍTULO DINÁMICO DEL BANNER SEGÚN OPERACIÓN / CLIENTE
+  // Si se seleccionan operaciones, cambia el título dinámicamente: ASIGNACIÓN DE RUTAS - [OPERACIONES]
   // ==========================================
   const bannerClientTitle = useMemo(() => {
+    // 1. Si hay filtro de Operación activo (Multi-selección), refleja los nombres seleccionados
+    if (selectedOperations.length > 0) {
+      return selectedOperations.map(o => o.trim().toUpperCase()).join(' + ');
+    }
+
+    // 2. Si hay filtro de Cliente activo
     if (selectedClientes.length > 0) {
       const cleanedNames = Array.from(new Set(
         selectedClientes.map(cleanClientNameForBanner).filter(Boolean)
@@ -714,7 +786,15 @@ export default function RuteoView() {
       }
     }
 
-    // Si no hay filtro de cliente activo pero todas las rutas filtradas pertenecen a un solo cliente:
+    // 3. Si no hay filtro pero todas las rutas pertenecen a una sola operación
+    const activeRouteOps = Array.from(new Set(
+      filteredRoutes.map(r => getOperacionName(r.ruta, r.operacion || r.cliente)).filter(Boolean)
+    ));
+    if (activeRouteOps.length === 1) {
+      return activeRouteOps[0].toUpperCase();
+    }
+
+    // 4. Fallback si todas pertenecen a un solo cliente
     const activeRouteClients = Array.from(new Set(
       filteredRoutes.map(r => cleanClientNameForBanner(r.cliente)).filter(Boolean)
     ));
@@ -723,7 +803,7 @@ export default function RuteoView() {
     }
 
     return 'FAST FOOD';
-  }, [selectedClientes, filteredRoutes]);
+  }, [selectedOperations, selectedClientes, filteredRoutes]);
 
   // ==========================================
   // CONSOLIDACIÓN DE VIAJES (TRIPS) EN MATRIZ
@@ -934,6 +1014,7 @@ export default function RuteoView() {
   }, [filteredRoutes]);
 
   const hasActiveFilters = quickSearch.trim() !== '' ||
+    selectedOperations.length > 0 ||
     selectedTransportistas.length > 0 || 
     selectedClientes.length > 0 || 
     selectedRutas.length > 0 || 
@@ -943,6 +1024,7 @@ export default function RuteoView() {
 
   const handleResetFilters = () => {
     setQuickSearch('');
+    setSelectedOperations([]);
     setSelectedTransportistas([]);
     setSelectedClientes([]);
     setSelectedRutas([]);
@@ -1466,6 +1548,84 @@ export default function RuteoView() {
             <Camera size={15} className="text-sky-600" />
             Descargar imagen
           </Button>
+        </div>
+      </div>
+
+      {/* Filtro por Mini-Etiquetas de Operación Multi-selección (Igual que Briefing) */}
+      <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 p-3.5 space-y-2.5 shrink-0">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <Filter size={15} className="text-blue-600" />
+            <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
+              Filtrar por Operación (Multi-selección):
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {selectedOperations.length > 0 && (
+              <button
+                type="button"
+                onClick={clearOperationFilter}
+                className="text-xs text-blue-600 hover:text-blue-800 font-bold bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 transition-all cursor-pointer"
+              >
+                Limpiar filtros ({selectedOperations.length} seleccionadas)
+              </button>
+            )}
+            <span className="text-[11px] text-slate-500 font-semibold">
+              {filteredRoutes.length} de {currentRoutes.length} rutas mostradas
+            </span>
+          </div>
+        </div>
+
+        {/* Mini etiquetas desplazables con scroll horizontal */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin">
+          <button
+            type="button"
+            onClick={clearOperationFilter}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+              selectedOperations.length === 0
+                ? 'bg-blue-600 text-white shadow-xs scale-102 ring-2 ring-blue-300'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <span>🌐 Vista general</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+              selectedOperations.length === 0 ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+            }`}>
+              {currentRoutes.length}
+            </span>
+          </button>
+
+          {operationsList.map(op => {
+            const isSelected = selectedOperations.some(item => item.toLowerCase() === op.toLowerCase());
+            const countInDay = operationRouteCounts.get(op.toLowerCase()) || 0;
+            const hasServices = countInDay > 0;
+
+            return (
+              <button
+                key={op}
+                type="button"
+                onClick={() => toggleOperation(op)}
+                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                  isSelected
+                    ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
+                    : hasServices
+                    ? 'bg-blue-50/90 hover:bg-blue-100 text-blue-900 border border-blue-200'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-400 border border-slate-200 opacity-60'
+                }`}
+                title={hasServices ? `${op}: ${countInDay} rutas asignadas hoy (con servicios)` : `${op} (Sin rutas registradas hoy)`}
+              >
+                {isSelected && <span className="text-[11px] font-black">✓</span>}
+                <span>{op}</span>
+                {hasServices && (
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
+                    isSelected ? 'bg-white/20 text-white' : 'bg-blue-200 text-blue-900'
+                  }`}>
+                    {countInDay}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
