@@ -148,22 +148,19 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   const camionText = formatCamionWithPlate(row.camion, fleetList) || 'Sin camión';
   const farthestComuna = findFarthestComunaForTrip([row]);
 
-  // Hora Cita en el apartado general (Requisito 5 & 6: solo la hora modificada según anticipación)
+  // Hora Cita en el apartado general (Requisito 1: solo aparece en la cabecera general)
   const rawCita = (row.hora_cita || '').trim();
   let citaGeneralHeader = '';
-  let routeCitaTag = '';
   if (rawCita) {
     if (anticipacionMinutos > 0) {
-      const adj = subtractMinutesFromTime(rawCita, anticipacionMinutos);
-      citaGeneralHeader = adj;
-      routeCitaTag = ` | ⏰ Cita: ${adj}`;
+      citaGeneralHeader = subtractMinutesFromTime(rawCita, anticipacionMinutos);
     } else {
       citaGeneralHeader = rawCita;
-      routeCitaTag = ` | ⏰ Cita: ${rawCita}`;
     }
   }
 
-  const tripIcon = vueltaNum === 1 ? '   📦' : '🔄';
+  // Requisito 2: El icono 📦 debe aparecer en cada Viaje planificado
+  const tripIcon = '   📦';
 
   let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
@@ -175,7 +172,7 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   }
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `${tripIcon} *VIAJE ${vueltaNum} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
-  msg += `   ▫️ *Ruta ${ruta}* (${cliente}): ${locales} ${localesWord} | ${m3Val} m³${routeCitaTag}`;
+  msg += `   ▫️ *Ruta ${ruta}* (${cliente}): ${locales} ${localesWord} | ${m3Val} m³`;
   if (row.prioridad && row.prioridad !== 'Normal') msg += ` | 🚨 ${row.prioridad.toUpperCase()}`;
   msg += `\n`;
   if (row.destino_prioritario) {
@@ -249,12 +246,12 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     const viajeRows = viaje.rows;
     const farthestComuna = findFarthestComunaForTrip(viajeRows);
 
-    // Icono según vuelta: 📦 para Viaje 1, 🔄 para Viaje 2 en adelante
-    const tripIcon = viajeIndex === 1 ? '   📦' : '🔄';
+    // Requisito 2: El icono 📦 debe aparecer en cada Viaje planificado
+    const tripIcon = '   📦';
 
     msg += `${tripIcon} *VIAJE ${viajeIndex} (VUELTA ${viaje.vueltaNum})* [${farthestComuna}]\n`;
 
-    // Desglose de cada ruta incluida en este viaje
+    // Desglose de cada ruta incluida en este viaje (Requisito 1: solo en cabecera general)
     viajeRows.forEach(r => {
       const uParadas = getUniqueParadas(r.paradas);
       const locales = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
@@ -263,17 +260,7 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
       const clienteName = (r.cliente || 'Centralizado').trim();
       const rutaNum = r.ruta || 'S/N';
 
-      let routeCitaTag = '';
-      if (r.hora_cita) {
-        const raw = r.hora_cita.trim();
-        if (anticipacionMinutos > 0) {
-          routeCitaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)}`;
-        } else {
-          routeCitaTag = ` | ⏰ Cita: ${raw}`;
-        }
-      }
-
-      msg += `   ▫️ *Ruta ${rutaNum}* (${clienteName}): ${locales} ${localesWord} | ${m3Val} m³${routeCitaTag}`;
+      msg += `   ▫️ *Ruta ${rutaNum}* (${clienteName}): ${locales} ${localesWord} | ${m3Val} m³`;
       if (r.prioridad && r.prioridad !== 'Normal') msg += ` | 🚨 ${r.prioridad.toUpperCase()}`;
       msg += `\n`;
       if (r.destino_prioritario) {
@@ -310,21 +297,12 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinuto
     const loc = r.locales || (getUniqueParadas(r.paradas).length || 1);
     const prioTag = r.prioridad && r.prioridad !== 'Normal' ? ` [${r.prioridad.toUpperCase()}]` : '';
     
-    let citaTag = '';
-    if (r.hora_cita) {
-      const raw = r.hora_cita.trim();
-      if (anticipacionMinutos > 0) {
-        citaTag = ` | ⏰ Cita: ${subtractMinutesFromTime(raw, anticipacionMinutos)}`;
-      } else {
-        citaTag = ` | ⏰ Cita: ${raw}`;
-      }
-    }
     const turnoTag = r.turno ? ` | 🕐 T.${r.turno}` : '';
     const prioDest = r.destino_prioritario ? `\n   ⭐ Destino Prioritario: ${r.destino_prioritario}` : '';
 
     msg += `${idx + 1}️⃣ *Ruta ${r.ruta}* ${vuelta} - ${r.cliente}${prioTag}\n`;
     msg += `   👤 Cond: *${cond}* | 👥 Aux: *${aux}*\n`;
-    if (citaTag || turnoTag) msg += `  ${citaTag}${turnoTag}\n`;
+    if (turnoTag) msg += `  ${turnoTag}\n`;
     if (prioDest) msg += `${prioDest}\n`;
     msg += `   📍 Locales: ${loc} | 📦 ${m3} m³\n\n`;
   });

@@ -564,8 +564,10 @@ export default function AssignmentControl() {
       camion: r.camion,
       tipo_equipo: r.tipo_equipo || 'Camión',
       rampla: r.rampla || '',
-      servicio: r.servicio === 'Otro' ? (r.nota || 'Servicio especial') : (r.nota ? `${r.servicio} - ${r.nota}` : r.servicio),
-      ruta: `EXTRA-${idx + 1}`,
+      servicio: r.servicio === 'Otro' ? (r.nota || 'Servicio especial') : (r.nota && r.servicio !== 'SPID' ? `${r.servicio} - ${r.nota}` : r.servicio),
+      cliente: r.servicio === 'SPID' ? 'SPID' : (r.servicio || 'Servicio Extra'),
+      operacion: r.servicio === 'SPID' ? 'SPID' : (r.servicio || 'Servicios Extras'),
+      ruta: r.servicio === 'SPID' ? `SPID-EXTRA-${idx + 1}` : `EXTRA-${idx + 1}`,
       nota: r.nota || ''
     }));
 
@@ -3280,6 +3282,7 @@ export default function AssignmentControl() {
                           <option value="Servicio de vulcanización">Servicio de vulcanización</option>
                           <option value="Traspasos">Traspasos</option>
                           <option value="Apoyo Centro">Apoyo Centro</option>
+                          <option value="SPID">SPID</option>
                           <option value="Otro">Otro (anotar personalización)</option>
                         </select>
                       </td>

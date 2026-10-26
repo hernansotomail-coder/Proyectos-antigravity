@@ -5,7 +5,7 @@ import {
   MapPin, User, Truck, Package, Weight, CheckCircle2,
   ChevronDown, ChevronRight, ArrowUpDown, FileSpreadsheet, RefreshCw, X, Check,
   Save, AlertTriangle, History, Clock, Star, Edit3, Trash2, CheckSquare, Square,
-  Store
+  Store, Copy, Camera, Image
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTiendasCriticasStore } from '../store/tiendasCriticasStore';
@@ -14,6 +14,8 @@ import { usePlanningStore, ensureRowTransportista } from '../store/planningStore
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
+import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
+import { getOperacionName } from '../data/operacionesMaster';
 
 // ==========================================
 // 1. MAPA DE DISTANCIAS Y CÁLCULO DE COMUNA
@@ -436,6 +438,25 @@ export default function RuteoView() {
     horaModificada: ''
   });
 
+  // Ref para capturar imagen de la matriz para copiar/descargar (Requisito 5)
+  const matrixContainerRef = useRef(null);
+
+  const handleCopyImage = useCallback(async () => {
+    if (!matrixContainerRef.current) {
+      toast.error('No se encontró el contenedor de la matriz.');
+      return;
+    }
+    await copyMatrixAsImage(matrixContainerRef.current, activeDate);
+  }, [activeDate]);
+
+  const handleDownloadImage = useCallback(async () => {
+    if (!matrixContainerRef.current) {
+      toast.error('No se encontró el contenedor de la matriz.');
+      return;
+    }
+    await downloadMatrixAsImage(matrixContainerRef.current, activeDate);
+  }, [activeDate]);
+
   // Estado para selección de filas de viajes para acciones masivas
   const [selectedTripKeys, setSelectedTripKeys] = useState([]);
   const [batchHoraCita, setBatchHoraCita] = useState('');
@@ -756,25 +777,24 @@ export default function RuteoView() {
     return Array.from(tripMap.values()).map(trip => {
       const rutasStr = trip.rutas.map(r => r.ruta).join('+');
       
-      // Operación (Clientes deduplicados y concatenados)
+      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro)
       const opsSet = new Set(trip.rutas.map(r => {
-        let c = r.cliente || 'Operación';
-        c = c.replace(/^RUTA\s+/i, '').trim();
-        return c;
+        return getOperacionName(r.ruta, r.operacion || r.cliente);
       }).filter(Boolean));
       const operacionStr = Array.from(opsSet).join(' + ') || 'FAST FOOD';
 
-      // Zona detallada: [Ruta], [Cliente], [Comuna más lejana], [Locales] LC, [m³] m³
+      // Zona detallada: [Ruta], [Operación/Cliente], [Comuna más lejana], [Locales] LC, [m³] m³
       const zonaItems = trip.rutas.map(r => {
         const farthest = findFarthestComunaForRoute(r);
         const m3Fmt = (parseFloat(r.m3) || 0).toFixed(4);
+        const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
         return {
           ruta: r.ruta,
-          cliente: r.cliente,
+          cliente: opName,
           comuna: farthest,
           locales: r.locales || 0,
           m3: m3Fmt,
-          text: `${r.ruta}, ${r.cliente}, ${farthest}, ${r.locales || 0} LC, ${m3Fmt} m³`
+          text: `${r.ruta}, ${opName}, ${farthest}, ${r.locales || 0} LC, ${m3Fmt} m³`
         };
       });
 
@@ -1421,9 +1441,30 @@ export default function RuteoView() {
             onClick={handleExportExcel}
             variant="outline"
             className="flex items-center gap-2 text-slate-700 hover:bg-slate-100 text-xs font-bold px-3.5 py-2 rounded-xl border-slate-200 shadow-2xs transition-all"
+            title="Exportar matriz a Excel con colores y formato oficial"
           >
             <Download size={15} />
             Exportar Excel
+          </Button>
+
+          <Button 
+            onClick={handleCopyImage}
+            variant="outline"
+            className="flex items-center gap-2 text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 hover:text-indigo-800 text-xs font-bold px-3.5 py-2 rounded-xl border-indigo-200 shadow-2xs transition-all"
+            title="Copiar imagen de la matriz para pegarla directamente en Excel (Ctrl + V)"
+          >
+            <Copy size={15} className="text-indigo-600" />
+            Copiar imagen
+          </Button>
+
+          <Button 
+            onClick={handleDownloadImage}
+            variant="outline"
+            className="flex items-center gap-2 text-sky-700 bg-sky-50/70 hover:bg-sky-100 hover:text-sky-800 text-xs font-bold px-3.5 py-2 rounded-xl border-sky-200 shadow-2xs transition-all"
+            title="Descargar matriz en formato de imagen PNG"
+          >
+            <Camera size={15} className="text-sky-600" />
+            Descargar imagen
           </Button>
         </div>
       </div>
@@ -1682,7 +1723,7 @@ export default function RuteoView() {
       )}
 
       {/* 5. TABLA MATRIZ ENTERPRISE TIPO FOTO ADJUNTA */}
-      <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
+      <div ref={matrixContainerRef} className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden">
         
         {/* Banner Superior Estilo Enterprise: ASIGNACIÓN DE RUTAS - [CLIENTE DINÁMICO] (Requisito 3) */}
         <div className="bg-[#132c54] text-white px-4 py-3 flex items-center justify-between shrink-0 shadow-sm">

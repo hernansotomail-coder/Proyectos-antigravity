@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
+import { findOperationForRoute, getOperacionName } from '../data/operacionesMaster';
 
 const PRELOADED_ROUTES_MAP = new Map();
 (PRELOADED_EXCEL_ROUTES || []).forEach(r => {
@@ -796,12 +797,20 @@ export const usePlanningStore = create((set, get) => ({
 
         const ambientesSet = new Set(sortedParadas.map(p => p.ambiente));
 
+        const masterOp = findOperationForRoute(g.ruta);
+        const resolvedOp = masterOp?.operacion || getOperacionName(g.ruta, g.nombreRuta);
+        const resolvedDenom = masterOp?.denominacion || g.nombreRuta;
+        const resolvedTransp = masterOp?.transportista || Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista';
+
         return {
           id: `trans-${g.ruta}-${index}`,
           ruta: g.ruta,
-          nombreRuta: g.nombreRuta,
+          nombreRuta: resolvedDenom,
+          operacion: resolvedOp,
+          cliente: resolvedOp,
+          denominacion: resolvedDenom,
           fecha: g.fecha,
-          transportista: Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista',
+          transportista: resolvedTransp,
           ambientes: Array.from(ambientesSet),
           recuentoDestino: g.destinosSet.size || (new Set(sortedParadas.map(p => p.destino)).size) || 1,
           sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
@@ -858,6 +867,9 @@ export const usePlanningStore = create((set, get) => ({
         (a) => a.ruta === route.ruta && a.cliente === route.nombreRuta
       );
 
+      const opName = route.operacion || getOperacionName(route.ruta, route.nombreRuta);
+      const denomName = route.denominacion || route.nombreRuta || `Ruta ${route.ruta}`;
+
       const assignmentRow = {
         id: `disp-${fecha}-${route.ruta}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         fecha: fecha,
@@ -873,7 +885,9 @@ export const usePlanningStore = create((set, get) => ({
         n_vuelta: '', // Vacía inicialmente, seleccionable del 1 al 8
         tipo_servicio: 'Centralizado',
         ruta: route.ruta,
-        cliente: route.nombreRuta,
+        cliente: opName,
+        operacion: opName,
+        denominacion: denomName,
         transportista: route.transportista || ensureRowTransportista(route),
         referencia: '',
         locales: route.recuentoDestino,
@@ -1698,8 +1712,9 @@ export const usePlanningStore = create((set, get) => ({
         rampla: item.rampla || '',
         n_vuelta: item.n_vuelta || '1',
         tipo_servicio: item.servicio || 'Servicio especial',
-        ruta: item.ruta || `EXT-${nextAssignments[fecha].length + 1}`,
-        cliente: item.servicio || 'Servicio Extra',
+        ruta: item.ruta || (item.servicio === 'SPID' ? `SPID-${nextAssignments[fecha].length + 1}` : `EXT-${nextAssignments[fecha].length + 1}`),
+        cliente: item.cliente || (item.servicio === 'SPID' ? 'SPID' : item.servicio || 'Servicio Extra'),
+        operacion: item.operacion || (item.servicio === 'SPID' ? 'SPID' : item.servicio || 'Servicios Extras'),
         referencia: item.nota || 'Servicio Extra Operativo',
         locales: 1,
         m3: 0,

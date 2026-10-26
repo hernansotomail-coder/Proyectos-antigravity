@@ -7,27 +7,41 @@ import {
 import * as XLSX from 'xlsx';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { findOperationForRoute, getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
 import { Button } from './ui/Button';
 
 // Normalizador de Operación / Cliente para agrupar exactamente como en el Briefing oficial
+export const getBriefingOperation = (route) => {
+  if (!route) return 'Otros';
+  const rawClient = String(route.cliente || route.servicio || route.Operacion || '').trim();
+  const rawRuta = String(route.ruta || '').trim();
+
+  // Si es servicio SPID explícito (ej: desde Servicios Extras o ruta directa)
+  if (rawClient.toUpperCase().includes('SPID') || rawRuta.toUpperCase().includes('SPID')) {
+    return 'SPID';
+  }
+
+  // Si la ruta ya tiene operacion oficial asignada
+  if (route.operacion && route.operacion !== 'Sin Operación') {
+    return route.operacion;
+  }
+
+  // Buscar en el catálogo maestro por número de ruta
+  if (rawRuta) {
+    const master = findOperationForRoute(rawRuta);
+    if (master && master.operacion && master.operacion !== 'Sin Operación') {
+      return master.operacion;
+    }
+  }
+
+  return getOperacionName(rawRuta, rawClient || route.nombreRuta || 'Otros');
+};
+
 export const normalizeClientForBriefing = (rawName) => {
   if (!rawName) return 'OTROS';
   const upper = String(rawName).toUpperCase().trim();
-  if (upper.includes('CANTABRIA')) return 'CANTABRIA';
-  if (upper.includes('CARLS') || upper.includes('CARL S')) return 'CARLS';
-  if (upper.includes('CENTRALIZADO')) return 'CENTRALIZADOS';
-  if (upper.includes('GOLFO')) return 'EL GOLFO';
-  if (upper.includes('JUAN VALDEZ') || upper.includes('SISA')) return 'JUAN VALDEZ';
-  if (upper.includes('KEYFOOD')) return 'KEYFOODS';
-  if (upper.includes('NEWREST') || upper.includes('BYI')) return 'NEWREST';
-  if (upper.includes('OXXO')) return 'OXXO';
-  if (upper.includes('PETROLERA') || upper.includes('FAST FOOD') || upper.includes('COPEC') || upper.includes('ENEX') || upper.includes('ESMAX')) return 'PETROLERA';
-  if (upper.includes('SBARRO')) return 'SBARRO';
   if (upper.includes('SPID')) return 'SPID';
-  if (upper.includes('STREAT') || upper.includes('BURGUER') || upper.includes('BURGER')) return 'STREAT BURGUER';
-  if (upper.includes('SUBWAY')) return 'SUBWAY';
-
-  return upper.replace(/^RUTA\s+/i, '').replace(/\s+\d+$/i, '').trim() || 'OTROS';
+  return getOperacionName('', rawName);
 };
 
 // Formateadores numéricos de estilo chileno
@@ -78,6 +92,7 @@ export default function Briefing() {
   });
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedOperation, setSelectedOperation] = useState('Vista general');
 
   // Filas del día seleccionado (Disponibilización / Ruteo)
   const currentAssignedRows = useMemo(() => {
@@ -101,7 +116,7 @@ export default function Briefing() {
     const clientsMap = new Map();
 
     currentAssignedRows.forEach((r, idx) => {
-      const clientName = normalizeClientForBriefing(r.cliente || r.nombreRuta || r.Operacion);
+      const clientName = getBriefingOperation(r);
       if (!clientsMap.has(clientName)) {
         clientsMap.set(clientName, {
           operacion: clientName,
@@ -315,12 +330,25 @@ export default function Briefing() {
     return { rows, totals };
   }, [currentAssignedRows, fleetList]);
 
-  // Filtro de búsqueda sobre la tabla
+  // Mini-etiquetas de todas las operaciones disponibles (Requisito 8)
+  const operationsList = useMemo(() => {
+    const presentOps = new Set(briefingData.rows.map(r => r.operacion));
+    ALL_OPERACIONES.forEach(op => presentOps.add(op));
+    return Array.from(presentOps).sort((a, b) => a.localeCompare(b));
+  }, [briefingData.rows]);
+
+  // Filtro de búsqueda y etiquetas de operación (Requisitos 8 y 9)
   const displayedRows = useMemo(() => {
-    if (!searchTerm.trim()) return briefingData.rows;
-    const lower = searchTerm.toLowerCase();
-    return briefingData.rows.filter(r => r.operacion.toLowerCase().includes(lower));
-  }, [briefingData.rows, searchTerm]);
+    let list = briefingData.rows;
+    if (selectedOperation !== 'Vista general') {
+      list = list.filter(r => r.operacion.toLowerCase() === selectedOperation.toLowerCase());
+    }
+    if (searchTerm.trim()) {
+      const lower = searchTerm.toLowerCase();
+      list = list.filter(r => r.operacion.toLowerCase().includes(lower));
+    }
+    return list;
+  }, [briefingData.rows, selectedOperation, searchTerm]);
 
   // Exportar a Excel exactamente con las columnas solicitadas
   const handleExportExcel = () => {
@@ -368,16 +396,15 @@ export default function Briefing() {
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-6 gap-4 overflow-y-auto">
       
-      {/* 1. Header Ejecutivo idéntico a la plantilla oficial */}
+      {/* 1. Header Ejecutivo idéntico a la plantilla oficial con Logo Key Logistics (Requisito 4) */}
       <div className="bg-[#0B2545] text-white rounded-2xl shadow-md p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 pr-4 border-r border-blue-400/30">
-            <span className="text-2xl font-black tracking-tight text-white flex items-center">
-              <span className="text-blue-400 mr-0.5">K</span>Key
-            </span>
-            <span className="text-[10px] font-mono tracking-widest text-slate-300 uppercase mt-1">
-              logistics
-            </span>
+        <div className="flex items-center gap-3.5">
+          <div className="flex items-center pr-3.5 border-r border-blue-400/30">
+            <img 
+              src="/keylogistics-logo.jpg" 
+              alt="Key Logistics" 
+              className="h-11 w-auto object-contain rounded-lg shadow-xs bg-white/10 p-0.5 border border-white/20"
+            />
           </div>
           <div>
             <h1 className="text-sm sm:text-base font-black tracking-wide uppercase text-white">
@@ -458,22 +485,82 @@ export default function Briefing() {
         </div>
       </div>
 
-      {/* 3. Filtro de búsqueda */}
-      <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 p-3 flex items-center justify-between gap-3 shrink-0">
-        <div className="relative w-full max-w-xs">
-          <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
-          <input
-            type="text"
-            placeholder="Filtrar operación o cliente..."
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 h-9 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-          />
+      {/* 3. Filtro por Mini-Etiquetas de Operación y Búsqueda (Requisito 8 y 9) */}
+      <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 p-3.5 space-y-2.5 shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Filter size={15} className="text-blue-600" />
+            <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
+              Filtrar por Operación:
+            </span>
+          </div>
+          <span className="text-[11px] text-slate-500 font-semibold">
+            {displayedRows.length} de {briefingData.rows.length} operaciones mostradas
+          </span>
         </div>
 
-        <span className="text-xs text-slate-500 font-semibold">
-          {displayedRows.length} de {briefingData.rows.length} operaciones
-        </span>
+        {/* Mini etiquetas desplazables con scroll horizontal */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin">
+          <button
+            type="button"
+            onClick={() => setSelectedOperation('Vista general')}
+            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all shrink-0 flex items-center gap-1.5 ${
+              selectedOperation === 'Vista general'
+                ? 'bg-blue-600 text-white shadow-xs scale-102 ring-2 ring-blue-300'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+            }`}
+          >
+            <span>🌐 Vista general</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+              selectedOperation === 'Vista general' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+            }`}>
+              {briefingData.rows.length}
+            </span>
+          </button>
+
+          {operationsList.map(op => {
+            const isSelected = selectedOperation.toLowerCase() === op.toLowerCase();
+            const countInDay = briefingData.rows.find(r => r.operacion.toLowerCase() === op.toLowerCase())?.numRutas || 0;
+            const isPresent = briefingData.rows.some(r => r.operacion.toLowerCase() === op.toLowerCase());
+
+            return (
+              <button
+                key={op}
+                type="button"
+                onClick={() => setSelectedOperation(isSelected ? 'Vista general' : op)}
+                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1.5 ${
+                  isSelected
+                    ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-300'
+                    : isPresent
+                    ? 'bg-blue-50/90 hover:bg-blue-100 text-blue-900 border border-blue-200'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-400 border border-slate-200 opacity-60'
+                }`}
+                title={isPresent ? `${op}: ${countInDay} camiones asignados hoy` : `${op} (Sin rutas hoy)`}
+              >
+                <span>{op}</span>
+                {isPresent && (
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
+                    isSelected ? 'bg-white/20 text-white' : 'bg-blue-200 text-blue-900'
+                  }`}>
+                    {countInDay}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Buscador de texto */}
+        <div className="relative w-full max-w-sm pt-0.5">
+          <Search className="absolute left-3 top-2.5 text-slate-400" size={14} />
+          <input
+            type="text"
+            placeholder="Buscar operación o cliente en la lista..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-1.5 h-8 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
+          />
+        </div>
       </div>
 
       {/* 4. Matriz Principal de Briefing */}
