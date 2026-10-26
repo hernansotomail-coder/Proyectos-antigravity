@@ -8351,3 +8351,69 @@ export function getOperacionName(routeCode, fallbackClient = '') {
   }
   return 'Otros';
 }
+
+// Helper para separar nombres compuestos de operación (ej: "Subway + Carls Jr", "Petrolera - Oxxo - Carls")
+export function splitOperationNames(raw) {
+  if (!raw || typeof raw !== 'string') return [];
+  const parts = raw.split(/[\+\/,|]|\s+-\s+/);
+  const result = [];
+  parts.forEach(p => {
+    const trimmed = p.trim();
+    if (!trimmed) return;
+    const matched = ALL_OPERACIONES.find(o => o.toLowerCase() === trimmed.toLowerCase());
+    if (matched) {
+      if (!result.includes(matched)) result.push(matched);
+    } else {
+      if (!result.includes(trimmed)) result.push(trimmed);
+    }
+  });
+  return result;
+}
+
+// Helper para obtener TODAS las operaciones asociadas a una ruta (soporta rutas con más de una operación)
+export function getAllOperationsForRoute(r) {
+  if (!r) return [];
+  const ops = new Set();
+
+  // 1. Catálogo maestro por número de ruta
+  const found = findOperationForRoute(r.ruta);
+  if (found && found.operacion && found.operacion !== 'Sin Operación') {
+    splitOperationNames(found.operacion).forEach(o => ops.add(o));
+  }
+
+  // 2. Campo r.operacion
+  if (r.operacion && typeof r.operacion === 'string') {
+    splitOperationNames(r.operacion).forEach(o => ops.add(o));
+  }
+
+  // 3. Campo r.cliente o r.nombreRuta
+  if (r.cliente && typeof r.cliente === 'string') {
+    splitOperationNames(r.cliente).forEach(o => ops.add(o));
+  }
+  if (r.nombreRuta && typeof r.nombreRuta === 'string') {
+    splitOperationNames(r.nombreRuta).forEach(o => ops.add(o));
+  }
+
+  // 4. Paradas de la ruta
+  if (Array.isArray(r.paradas)) {
+    r.paradas.forEach(p => {
+      if (p.operacion) splitOperationNames(p.operacion).forEach(o => ops.add(o));
+      if (p.cliente) splitOperationNames(p.cliente).forEach(o => ops.add(o));
+      if (p.destino) {
+        ALL_OPERACIONES.forEach(knownOp => {
+          if (p.destino.toLowerCase().includes(knownOp.toLowerCase())) {
+            ops.add(knownOp);
+          }
+        });
+      }
+    });
+  }
+
+  // 5. Fallback si no se encontró
+  if (ops.size === 0) {
+    const fallback = getOperacionName(r.ruta, r.operacion || r.cliente);
+    if (fallback) ops.add(fallback);
+  }
+
+  return Array.from(ops);
+}

@@ -1142,8 +1142,48 @@ export const usePlanningStore = create((set, get) => ({
       if (dbState) {
         const { assignmentsMap, ruteoOverridesFromDb, historyListFromDb } = dbState;
         set(state => {
-          const mergedAssignments = { ...state.transmittedAssignments, ...assignmentsMap };
-          const mergedSaved = { ...state.savedRuteoByDate, ...assignmentsMap };
+          const mergedAssignments = { ...state.transmittedAssignments };
+          Object.entries(assignmentsMap).forEach(([fecha, dbRows]) => {
+            const localRows = state.transmittedAssignments?.[fecha] || [];
+            if (!localRows || localRows.length === 0) {
+              mergedAssignments[fecha] = dbRows;
+            } else {
+              // Fusionar respetando filas ya asignadas localmente
+              const dbRowMap = new Map();
+              dbRows.forEach(r => {
+                const k = `${r.ruta || ''}:::${r.id || ''}`;
+                dbRowMap.set(k, r);
+              });
+              
+              mergedAssignments[fecha] = localRows.map(lr => {
+                const k = `${lr.ruta || ''}:::${lr.id || ''}`;
+                const dbR = dbRowMap.get(k) || dbRows.find(dr => dr.ruta && dr.ruta === lr.ruta);
+                if (dbR) {
+                  // Si el local tiene conductor y el de la DB está vacío, mantener local
+                  return {
+                    ...dbR,
+                    conductor_name: lr.conductor_name || dbR.conductor_name || '',
+                    conductor_rut: lr.conductor_rut || dbR.conductor_rut || '',
+                    camion: lr.camion || dbR.camion || '',
+                    tipo_equipo: lr.tipo_equipo || dbR.tipo_equipo || '',
+                    rampla: lr.rampla || dbR.rampla || '',
+                    n_vuelta: lr.n_vuelta || dbR.n_vuelta || '',
+                    aux1_name: lr.aux1_name || dbR.aux1_name || '',
+                    aux1_rut: lr.aux1_rut || dbR.aux1_rut || '',
+                    aux2_name: lr.aux2_name || dbR.aux2_name || '',
+                    aux2_rut: lr.aux2_rut || dbR.aux2_rut || '',
+                    turno: lr.turno || dbR.turno || '',
+                    hora_cita: lr.hora_cita || dbR.hora_cita || '',
+                    prioridad: lr.prioridad || dbR.prioridad || 'Normal',
+                    destino_prioritario: lr.destino_prioritario || dbR.destino_prioritario || ''
+                  };
+                }
+                return lr;
+              });
+            }
+          });
+
+          const mergedSaved = { ...state.savedRuteoByDate, ...mergedAssignments };
           const mergedOverrides = ruteoOverridesFromDb 
             ? { ...state.ruteoOverrides, ...ruteoOverridesFromDb } 
             : state.ruteoOverrides;
@@ -1203,13 +1243,23 @@ export const usePlanningStore = create((set, get) => ({
     set({ selectedRuteoDate: date });
   },
 
-  // Update a single field in an assignment row (Sincroniza en tiempo real con Histórico y Ruteo)
+  // Update a single field in an assignment row (Sincroniza en tiempo real con Histórico, Ruteo y Supabase)
   updateAssignmentField: (fecha, rowId, field, value) => {
     set((state) => {
       const rows = state.transmittedAssignments[fecha] || [];
-      const updatedRows = rows.map((r) => (r.id === rowId ? { ...r, [field]: value } : r));
+      const targetRow = rows.find(r => r.id === rowId);
+      const targetRuta = targetRow?.ruta ? String(targetRow.ruta).trim() : null;
+
+      // Mantener consistencia en todas las filas que compartan el mismo número de ruta
+      const updatedRows = rows.map((r) => {
+        if (r.id === rowId || (targetRuta && r.ruta && String(r.ruta).trim() === targetRuta)) {
+          return { ...r, [field]: value };
+        }
+        return r;
+      });
       const updatedMap = { ...state.transmittedAssignments, [fecha]: updatedRows };
       persistAssignments(updatedMap);
+      persistAssignmentsToDb(fecha, updatedRows);
       const synced = syncHistoryAndSavedForDate(state, fecha, updatedRows);
       return { 
         transmittedAssignments: updatedMap,
@@ -1218,14 +1268,30 @@ export const usePlanningStore = create((set, get) => ({
     });
   },
 
-  // Batch update fields on multiple rows (Sincroniza en tiempo real con Histórico y Ruteo)
+  // Batch update fields on multiple rows (Sincroniza en tiempo real con toda la ruta, Histórico, Ruteo y Supabase)
   batchUpdateRows: (fecha, rowIds, updates) => {
     set((state) => {
       const rows = state.transmittedAssignments[fecha] || [];
       const idSet = new Set(rowIds);
-      const updatedRows = rows.map((r) => (idSet.has(r.id) ? { ...r, ...updates } : r));
+
+      // Identificar todos los números de ruta afectados para mantener coherencia en toda la ruta
+      const affectedRutas = new Set();
+      rows.forEach(r => {
+        if (idSet.has(r.id) && r.ruta) affectedRutas.add(String(r.ruta).trim());
+      });
+
+      const updatedRows = rows.map((r) => {
+        const matchesId = idSet.has(r.id);
+        const matchesRuta = r.ruta && affectedRutas.has(String(r.ruta).trim());
+        if (matchesId || matchesRuta) {
+          return { ...r, ...updates };
+        }
+        return r;
+      });
+
       const updatedMap = { ...state.transmittedAssignments, [fecha]: updatedRows };
       persistAssignments(updatedMap);
+      persistAssignmentsToDb(fecha, updatedRows);
       const synced = syncHistoryAndSavedForDate(state, fecha, updatedRows);
       return { 
         transmittedAssignments: updatedMap,

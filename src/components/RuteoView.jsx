@@ -15,7 +15,7 @@ import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
-import { getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
+import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute } from '../data/operacionesMaster';
 
 // ==========================================
 // 1. MAPA DE DISTANCIAS Y CÁLCULO DE COMUNA
@@ -611,10 +611,12 @@ export default function RuteoView() {
       if (!selectedVueltas.includes(vLabel)) return false;
     }
 
-    // 8. Operación Multi-selección (Filtro por Operación / Cliente de Briefing)
+    // 8. Operación Multi-selección (Filtro por Operación / Cliente de Briefing, soporta multi-operación)
     if (excludeFilter !== 'operacion' && selectedOperations.length > 0) {
-      const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
-      const matchesOp = selectedOperations.some(op => op.toLowerCase() === opName.toLowerCase());
+      const routeOps = getAllOperationsForRoute(r);
+      const matchesOp = selectedOperations.some(sel =>
+        routeOps.some(ro => ro.toLowerCase() === sel.toLowerCase())
+      );
       if (!matchesOp) return false;
     }
 
@@ -717,11 +719,13 @@ export default function RuteoView() {
   const operationRouteCounts = useMemo(() => {
     const map = new Map();
     currentRoutes.forEach(r => {
-      const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
-      if (opName) {
-        const key = opName.toLowerCase();
-        map.set(key, (map.get(key) || 0) + 1);
-      }
+      const routeOps = getAllOperationsForRoute(r);
+      routeOps.forEach(opName => {
+        if (opName) {
+          const key = opName.toLowerCase();
+          map.set(key, (map.get(key) || 0) + 1);
+        }
+      });
     });
     return map;
   }, [currentRoutes]);
@@ -729,8 +733,8 @@ export default function RuteoView() {
   const operationsList = useMemo(() => {
     const presentOps = new Set();
     currentRoutes.forEach(r => {
-      const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
-      if (opName) presentOps.add(opName);
+      const routeOps = getAllOperationsForRoute(r);
+      routeOps.forEach(opName => presentOps.add(opName));
     });
     ALL_OPERACIONES.forEach(op => presentOps.add(op));
 
@@ -793,9 +797,48 @@ export default function RuteoView() {
   // CONSOLIDACIÓN DE VIAJES (TRIPS) EN MATRIZ
   // ==========================================
   const tripsList = useMemo(() => {
+    // 1. Coherencia por número de ruta: garantiza que todas las filas de una misma ruta compartan el mismo conductor y camión
+    const rutaAssignMap = new Map();
+    filteredRoutes.forEach(r => {
+      if (r.ruta && r.conductor_name && r.conductor_name !== 'Sin Asignar') {
+        const k = String(r.ruta).trim();
+        if (!rutaAssignMap.has(k)) {
+          rutaAssignMap.set(k, {
+            conductor_name: r.conductor_name,
+            conductor_rut: r.conductor_rut || '',
+            camion: r.camion || '',
+            tipo_equipo: r.tipo_equipo || '',
+            rampla: r.rampla || '',
+            n_vuelta: r.n_vuelta || '1',
+            aux1_name: r.aux1_name || '',
+            aux2_name: r.aux2_name || ''
+          });
+        }
+      }
+    });
+
+    const normalizedFilteredRoutes = filteredRoutes.map(row => {
+      const k = row.ruta ? String(row.ruta).trim() : null;
+      if (k && rutaAssignMap.has(k)) {
+        const assign = rutaAssignMap.get(k);
+        return {
+          ...row,
+          conductor_name: row.conductor_name || assign.conductor_name,
+          conductor_rut: row.conductor_rut || assign.conductor_rut,
+          camion: row.camion || assign.camion,
+          tipo_equipo: row.tipo_equipo || assign.tipo_equipo,
+          rampla: row.rampla || assign.rampla,
+          n_vuelta: row.n_vuelta || assign.n_vuelta,
+          aux1_name: row.aux1_name || assign.aux1_name,
+          aux2_name: row.aux2_name || assign.aux2_name
+        };
+      }
+      return row;
+    });
+
     const tripMap = new Map();
 
-    filteredRoutes.forEach(row => {
+    normalizedFilteredRoutes.forEach(row => {
       const hasAssignment = !!(row.camion && row.conductor_name);
       const vueltaKey = row.n_vuelta ? String(row.n_vuelta).trim() : '1';
       
@@ -841,10 +884,8 @@ export default function RuteoView() {
     return Array.from(tripMap.values()).map(trip => {
       const rutasStr = trip.rutas.map(r => r.ruta).join('+');
       
-      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro)
-      const opsSet = new Set(trip.rutas.map(r => {
-        return getOperacionName(r.ruta, r.operacion || r.cliente);
-      }).filter(Boolean));
+      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación)
+      const opsSet = new Set(trip.rutas.flatMap(r => getAllOperationsForRoute(r)).filter(Boolean));
       const operacionStr = Array.from(opsSet).join(' + ') || 'FAST FOOD';
 
       // Zona detallada: [Ruta], [Operación/Cliente], [Comuna más lejana], [Locales] LC, [m³] m³
@@ -1043,8 +1084,13 @@ export default function RuteoView() {
       toast.error('No se encontró el contenedor de la matriz.');
       return;
     }
-    await downloadMatrixAsImage(matrixContainerRef.current, activeDate);
-  }, [activeDate]);
+    await downloadMatrixAsImage(matrixContainerRef.current, activeDate, {
+      tripsList,
+      bannerTitle: bannerClientTitle,
+      activeDate: formatBannerDate(activeDate),
+      totalM3
+    });
+  }, [activeDate, tripsList, bannerClientTitle, totalM3]);
 
   // ==========================================
   // EXPORTACIÓN A EXCEL CON FORMATO Y COLORES (SpreadsheetML)

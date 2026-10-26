@@ -219,69 +219,230 @@ ${clone.outerHTML}
 }
 
 /**
- * Genera un canvas a partir del contenedor de la matriz, utilizando html2canvas
- * con fallback a SVG foreignObject si ocurre algún error de renderizado.
+ * Motor de Renderizado 100% Nativo en Canvas 2D (Sin CORS, sin taint de SVG, 100% compatible con todos los PCs)
  */
-async function renderMatrixCanvas(element) {
+export function renderMatrixWithCanvas2D(tableData) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const cols = [
+    { title: 'Fecha', key: 'fecha', width: 95, align: 'center' },
+    { title: 'Operación', key: 'operacionStr', width: 160, align: 'left' },
+    { title: 'Ruta', key: 'rutasStr', width: 100, align: 'center', mono: true },
+    { title: 'Camión', key: 'camion', width: 125, align: 'left', bold: true },
+    { title: 'N° vuelta', key: 'displayVuelta', width: 95, align: 'center' },
+    { title: 'Conductor', key: 'conductor_name', width: 195, align: 'left' },
+    { title: 'Auxiliar', key: 'auxiliares', width: 165, align: 'left' },
+    { title: 'Zona (Ruta, Cliente, Comuna Más Lejana, LC, m³)', key: 'zona', width: 380, align: 'left' },
+    { title: 'Vol Carga', key: 'vol', width: 95, align: 'right' },
+    { title: 'Turno', key: 'turno', width: 85, align: 'center' },
+    { title: 'Hora Cita', key: 'hora_cita', width: 85, align: 'center' },
+    { title: 'Prioridad', key: 'prioridad', width: 130, align: 'center' },
+    { title: 'Destino Prioritario', key: 'destino_prioritario', width: 160, align: 'left' }
+  ];
+
+  const totalWidth = cols.reduce((a, c) => a + c.width, 0);
+  const trips = tableData?.tripsList || [];
+  const bannerTitle = `ASIGNACIÓN DE RUTAS - ${tableData?.bannerTitle || 'FAST FOOD'}`;
+  const subtitle = `Despacho ${tableData?.activeDate || ''} | Base: Lago Riñihue 02319, San Bernardo`;
+
+  const bannerHeight = 70;
+  const colHeaderHeight = 36;
+  const rowHeight = 30;
+  const totalRowHeight = 34;
+  const totalHeight = bannerHeight + colHeaderHeight + (trips.length * rowHeight) + totalRowHeight;
+
+  // Escala para calidad Retina / HD
+  const dpr = 1.35;
+  canvas.width = Math.round(totalWidth * dpr);
+  canvas.height = Math.round(totalHeight * dpr);
+  ctx.scale(dpr, dpr);
+
+  // Fondo blanco completo
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, totalWidth, totalHeight);
+
+  // 1. BANNER ENTERPRISE
+  ctx.fillStyle = '#132C54';
+  ctx.fillRect(0, 0, totalWidth, bannerHeight);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.font = 'bold 17px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`🚛  ${bannerTitle}`, 16, 26);
+
+  ctx.fillStyle = '#FDE047';
+  ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+  ctx.fillText(subtitle, 16, 52);
+
+  // 2. ENCABEZADOS DE COLUMNA
+  let currentY = bannerHeight;
+  ctx.fillStyle = '#183564';
+  ctx.fillRect(0, currentY, totalWidth, colHeaderHeight);
+
+  let currentX = 0;
+  cols.forEach(col => {
+    ctx.strokeStyle = '#22447C';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(currentX, currentY, col.width, colHeaderHeight);
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 11px "Segoe UI", Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+
+    let textX = currentX + 8;
+    if (col.align === 'center') {
+      ctx.textAlign = 'center';
+      textX = currentX + col.width / 2;
+    } else if (col.align === 'right') {
+      ctx.textAlign = 'right';
+      textX = currentX + col.width - 8;
+    } else {
+      ctx.textAlign = 'left';
+    }
+
+    ctx.fillText(col.title.toUpperCase(), textX, currentY + colHeaderHeight / 2);
+    currentX += col.width;
+  });
+
+  currentY += colHeaderHeight;
+
+  // 3. FILAS DE DATOS
+  trips.forEach((trip, idx) => {
+    const isPrioUrgente = trip.prioridad === 'Prioridad urgente';
+    const isUrgente = trip.prioridad === 'Urgente';
+    const isRedespacho = trip.prioridad === 'Redespacho';
+
+    let rowBg = idx % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
+    let textColor = '#1E293B';
+    let borderColor = '#E2E8F0';
+
+    if (isPrioUrgente) {
+      rowBg = '#FFD6D6';
+      textColor = '#7F1D1D';
+      borderColor = '#FCA5A5';
+    } else if (isUrgente) {
+      rowBg = '#FEF9C3';
+      textColor = '#78350F';
+      borderColor = '#FDE047';
+    } else if (isRedespacho) {
+      rowBg = '#334155';
+      textColor = '#FFFFFF';
+      borderColor = '#1E293B';
+    }
+
+    ctx.fillStyle = rowBg;
+    ctx.fillRect(0, currentY, totalWidth, rowHeight);
+
+    let cellX = 0;
+    cols.forEach(col => {
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cellX, currentY, col.width, rowHeight);
+
+      let val = '';
+      if (col.key === 'fecha') val = trip.fecha || '';
+      else if (col.key === 'operacionStr') val = trip.operacionStr || '';
+      else if (col.key === 'rutasStr') val = trip.rutasStr || '';
+      else if (col.key === 'camion') val = trip.camion || '';
+      else if (col.key === 'displayVuelta') val = trip.displayVuelta || '';
+      else if (col.key === 'conductor_name') val = trip.conductor_name || '';
+      else if (col.key === 'auxiliares') val = trip.auxiliares?.join(', ') || '-';
+      else if (col.key === 'zona') val = (trip.zonaItems || []).map(z => z.text).join(' | ');
+      else if (col.key === 'vol') val = (Number(trip.totalM3) || 0).toFixed(4);
+      else if (col.key === 'turno') val = trip.turno || '';
+      else if (col.key === 'hora_cita') val = trip.hora_cita || '';
+      else if (col.key === 'prioridad') val = trip.prioridad || 'Normal';
+      else if (col.key === 'destino_prioritario') val = trip.destino_prioritario || '';
+
+      ctx.fillStyle = textColor;
+      ctx.font = col.mono 
+        ? 'bold 11px Consolas, monospace' 
+        : (col.bold || isPrioUrgente || isUrgente || isRedespacho ? 'bold 11px "Segoe UI", Arial, sans-serif' : '11px "Segoe UI", Arial, sans-serif');
+      ctx.textBaseline = 'middle';
+
+      let drawX = cellX + 8;
+      if (col.align === 'center') {
+        ctx.textAlign = 'center';
+        drawX = cellX + col.width / 2;
+      } else if (col.align === 'right') {
+        ctx.textAlign = 'right';
+        drawX = cellX + col.width - 8;
+      } else {
+        ctx.textAlign = 'left';
+      }
+
+      let textToDraw = String(val);
+      const maxW = col.width - 16;
+      if (ctx.measureText(textToDraw).width > maxW) {
+        while (textToDraw.length > 3 && ctx.measureText(textToDraw + '...').width > maxW) {
+          textToDraw = textToDraw.slice(0, -1);
+        }
+        textToDraw += '...';
+      }
+
+      ctx.fillText(textToDraw, drawX, currentY + rowHeight / 2);
+      cellX += col.width;
+    });
+
+    currentY += rowHeight;
+  });
+
+  // 4. TOTALES
+  ctx.fillStyle = '#E2E8F0';
+  ctx.fillRect(0, currentY, totalWidth, totalRowHeight);
+  ctx.strokeStyle = '#CBD5E1';
+  ctx.strokeRect(0, currentY, totalWidth, totalRowHeight);
+
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 12px "Segoe UI", Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('TOTAL CARGA (m³):', 16, currentY + totalRowHeight / 2);
+
+  ctx.textAlign = 'right';
+  const totalM3Str = `${tableData?.totalM3 || '0'} m³`;
+  ctx.fillText(totalM3Str, totalWidth - 24, currentY + totalRowHeight / 2);
+
+  return canvas;
+}
+
+/**
+ * Genera un canvas a partir del contenedor de la matriz, utilizando html2canvas
+ * con fallback infalible de renderizado Canvas 2D nativo sin taint ni CORS.
+ */
+async function renderMatrixCanvas(element, tableData = null) {
   const html2canvas = getHtml2Canvas();
-  if (html2canvas) {
+  if (html2canvas && element) {
     try {
+      const rect = element.getBoundingClientRect();
+      const scrollW = Math.max(element.scrollWidth || 0, Math.ceil(rect.width) || 1200);
+      const scrollH = Math.max(element.scrollHeight || 0, Math.ceil(rect.height) || 800);
+
       const canvas = await html2canvas(element, {
         scale: 1.25,
         useCORS: true,
         allowTaint: true,
         backgroundColor: '#ffffff',
         logging: false,
+        width: scrollW,
+        height: scrollH,
         scrollX: 0,
-        scrollY: 0
+        scrollY: 0,
+        windowWidth: Math.max(scrollW, 1920),
+        windowHeight: Math.max(scrollH, 1080)
       });
       if (canvas && canvas.width > 0 && canvas.height > 0) {
         return canvas;
       }
     } catch (h2cError) {
-      console.warn('html2canvas capture warning, intentando fallback de rasterización:', h2cError);
+      console.warn('html2canvas capture warning, activando motor Canvas 2D nativo:', h2cError);
     }
   }
 
-  // Fallback rasterizer mediante SVG ForeignObject
-  const rect = element.getBoundingClientRect();
-  const width = Math.max(element.scrollWidth || 0, Math.ceil(rect.width) || 1200);
-  const height = Math.max(element.scrollHeight || 0, Math.ceil(rect.height) || 800);
-
-  const clone = element.cloneNode(true);
-  clone.style.width = `${width}px`;
-  clone.style.height = `${height}px`;
-  clone.style.backgroundColor = '#ffffff';
-
-  const wrapper = document.createElement('div');
-  wrapper.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
-  wrapper.appendChild(clone);
-
-  const xml = new XMLSerializer().serializeToString(wrapper);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><foreignObject width="100%" height="100%">${xml}</foreignObject></svg>`;
-  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(width * 1.25);
-      canvas.height = Math.round(height * 1.25);
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(1.25, 1.25);
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-      resolve(canvas);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('No se pudo generar la imagen de la matriz.'));
-    };
-    img.src = url;
-  });
+  // Fallback garantizado sin restricciones de seguridad
+  return renderMatrixWithCanvas2D(tableData || { tripsList: [], bannerTitle: 'RUTEO' });
 }
 
 /**
@@ -290,7 +451,7 @@ async function renderMatrixCanvas(element) {
  * en las celdas con el diseño, colores pastel y bordes de la matriz.
  */
 export async function copyMatrixAsImage(element, activeDate = '', tableData = null) {
-  if (!element) {
+  if (!element && !tableData) {
     toast.error('No se encontró el contenedor de la matriz para copiar.');
     return;
   }
@@ -311,21 +472,21 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
       });
       htmlContent = formatted.html;
       tsvContent = formatted.tsv;
-    } else {
+    } else if (element) {
       const extracted = extractHtmlFromDomElement(element, activeDate);
       htmlContent = extracted.html;
       tsvContent = extracted.tsv;
     }
 
-    // 2. Generar imagen PNG de respaldo/rasterizada
+    // 2. Generar imagen PNG de respaldo/rasterizada (utilizando motor dual)
     let pngBlob = null;
     try {
-      const canvas = await renderMatrixCanvas(element);
+      const canvas = await renderMatrixCanvas(element, tableData);
       if (canvas) {
         pngBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
       }
     } catch (canvasErr) {
-      console.warn('Canvas rasterization warning (continuing with HTML clipboard):', canvasErr);
+      console.warn('Canvas rasterization warning (continuando con copiado HTML):', canvasErr);
     }
 
     let copied = false;
@@ -376,7 +537,7 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
       }
     }
 
-    // 4. Intento C: Fallback tradicional con document.execCommand('copy')
+    // 4. Intento C: Fallback tradicional con document.execCommand('copy') (ideal para HTTP o PCs de red local)
     if (!copied && htmlContent) {
       try {
         const copyHandler = (e) => {
@@ -396,10 +557,16 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
       toast.success('¡Matriz copiada! Al presionar Ctrl + V en Excel se pegará combinada en celdas con el formato de la matriz.', { id: toastId });
     } else if (pngBlob) {
       // Si el navegador bloquea escritura de portapapeles, descargar archivo de imagen como respaldo
+      const url = URL.createObjectURL(pngBlob);
       const link = document.createElement('a');
       link.download = `Matriz_Ruteo_${activeDate || 'Despacho'}.png`;
-      link.href = URL.createObjectURL(pngBlob);
+      link.href = url;
+      document.body.appendChild(link);
       link.click();
+      setTimeout(() => {
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }, 1500);
       toast.info('Se descargó la imagen PNG para pegarla en Excel.', { id: toastId });
     } else {
       throw new Error('No se pudo transferir la matriz al portapapeles.');
@@ -411,10 +578,10 @@ export async function copyMatrixAsImage(element, activeDate = '', tableData = nu
 }
 
 /**
- * Descarga la matriz completa en formato de imagen PNG
+ * Descarga la matriz completa en formato de imagen PNG (compatible con todos los computadores)
  */
-export async function downloadMatrixAsImage(element, activeDate = '') {
-  if (!element) {
+export async function downloadMatrixAsImage(element, activeDate = '', tableData = null) {
+  if (!element && !tableData) {
     toast.error('No se encontró el contenedor de la matriz para descargar.');
     return;
   }
@@ -422,12 +589,26 @@ export async function downloadMatrixAsImage(element, activeDate = '') {
   const toastId = toast.loading('Preparando descarga de imagen en formato PNG...');
 
   try {
-    const canvas = await renderMatrixCanvas(element);
-    const dataUrl = canvas.toDataURL('image/png');
+    const canvas = await renderMatrixCanvas(element, tableData);
+    
+    const blob = await new Promise((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) resolve(b);
+        else reject(new Error('No se pudo generar el archivo de imagen.'));
+      }, 'image/png');
+    });
+
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.download = `Matriz_Ruteo_${activeDate || 'Despacho'}.png`;
-    link.href = dataUrl;
+    link.href = url;
+    document.body.appendChild(link);
     link.click();
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 1500);
+
     toast.success('¡Imagen descargada exitosamente en formato PNG!', { id: toastId });
   } catch (error) {
     console.error('Error downloading matrix image:', error);

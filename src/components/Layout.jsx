@@ -87,9 +87,16 @@ export default function Layout() {
         }`}>
           {!isSidebarCollapsed ? (
             <>
-              <div>
-                <h1 className="text-xl font-black text-blue-600 tracking-tight">Keylogistics</h1>
-                <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Torre de Control</p>
+              <div className="flex items-center gap-3">
+                <img 
+                  src="/keylogistics-logo.jpg" 
+                  alt="Key Logistics Logo" 
+                  className="h-10 w-auto object-contain rounded-lg shadow-2xs bg-white border border-slate-200 p-0.5 shrink-0"
+                />
+                <div>
+                  <h1 className="text-lg font-black text-blue-600 tracking-tight leading-tight">Keylogistics</h1>
+                  <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Torre de Control</p>
+                </div>
               </div>
               <button 
                 onClick={() => setIsSidebarCollapsed(true)}
@@ -103,10 +110,14 @@ export default function Layout() {
             <div className="flex flex-col items-center gap-2 w-full">
               <div 
                 onClick={() => setIsSidebarCollapsed(false)}
-                className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 to-indigo-600 text-white flex items-center justify-center font-black text-base shadow-sm cursor-pointer hover:scale-105 transition-transform"
-                title="Keylogistics - Clic para expandir menú"
+                className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center p-0.5 shadow-2xs cursor-pointer hover:scale-105 transition-transform"
+                title="Keylogistics Torre de Control - Clic para expandir menú"
               >
-                KL
+                <img 
+                  src="/keylogistics-logo.jpg" 
+                  alt="KL" 
+                  className="w-full h-full object-contain rounded-lg"
+                />
               </div>
               <button 
                 onClick={() => setIsSidebarCollapsed(false)}
@@ -458,11 +469,16 @@ export default function Layout() {
         
         {/* Mobile Header */}
         <header className="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 z-10 shrink-0">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black text-sm">
-              KL
+          <div className="flex items-center gap-2.5">
+            <img 
+              src="/keylogistics-logo.jpg" 
+              alt="Key Logistics" 
+              className="h-8 w-auto object-contain rounded-md border border-slate-200 p-0.5 bg-white"
+            />
+            <div>
+              <h1 className="text-base font-black text-blue-600 leading-tight">Keylogistics</h1>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Torre de Control</p>
             </div>
-            <h1 className="text-lg font-bold text-slate-800">Keylogistics</h1>
           </div>
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
