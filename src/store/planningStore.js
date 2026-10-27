@@ -5,7 +5,7 @@ import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
 import { findOperationForRoute, getOperacionName } from '../data/operacionesMaster';
 
 // Cache invalidation version for cross-computer synchronization
-const CURRENT_STORAGE_VERSION = 'v2026_10_28_prod_sync_v6';
+const CURRENT_STORAGE_VERSION = 'v2026_10_28_prod_sync_v8';
 try {
   if (typeof window !== 'undefined' && window.localStorage) {
     const savedVer = localStorage.getItem('keylogistics_storage_version');
@@ -13,6 +13,7 @@ try {
       console.warn(`[StorageSync] Storage version mismatch (${savedVer} vs ${CURRENT_STORAGE_VERSION}). Purging stale local cache.`);
       localStorage.removeItem('keylogistics_transmitted_assignments');
       localStorage.removeItem('keylogistics_saved_ruteo');
+      localStorage.removeItem('keylogistics_saved_baseline');
       localStorage.removeItem('keylogistics_transformed_routes_v2');
       localStorage.setItem('keylogistics_storage_version', CURRENT_STORAGE_VERSION);
     }
@@ -1222,6 +1223,7 @@ export const usePlanningStore = create((set, get) => ({
           });
 
           const mergedSaved = { ...state.savedRuteoByDate, ...mergedAssignments };
+          const mergedBaseline = { ...(state.savedRuteoBaseline || {}), ...mergedAssignments };
           const mergedOverrides = ruteoOverridesFromDb 
             ? { ...state.ruteoOverrides, ...ruteoOverridesFromDb } 
             : state.ruteoOverrides;
@@ -1232,6 +1234,7 @@ export const usePlanningStore = create((set, get) => ({
           try {
             localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(mergedAssignments));
             localStorage.setItem('keylogistics_saved_ruteo', JSON.stringify(mergedSaved));
+            localStorage.setItem('keylogistics_saved_baseline', JSON.stringify(mergedBaseline));
             if (ruteoOverridesFromDb) {
               localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(mergedOverrides));
             }
@@ -1243,6 +1246,7 @@ export const usePlanningStore = create((set, get) => ({
           return {
             transmittedAssignments: mergedAssignments,
             savedRuteoByDate: mergedSaved,
+            savedRuteoBaseline: mergedBaseline,
             ruteoOverrides: mergedOverrides,
             savedHistoryList: mergedHistory
           };
