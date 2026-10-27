@@ -44,13 +44,33 @@ export const isTruckStatusBlocked = (truck) => {
   const rawStatus = String(truck.status || '').trim();
   if (!rawStatus) return false;
   const stLower = rawStatus.toLowerCase();
-  // Si está en "Activo", está habilitado para uso
-  if (stLower === 'activo') return false;
-  // Flota externa operativa (ej: Externo_TRANSPORTES ABC)
-  if (stLower.startsWith('externo') && !stLower.includes('taller') && !stLower.includes('baja') && !stLower.includes('doc')) {
-    return false;
-  }
-  // Cualquier estado que no sea "Activo" (ej: Taller, Por documentación, Baja, etc.) queda bloqueado
+
+  // Si está en "Activo" o "Disponible", está 100% habilitado para uso
+  if (stLower === 'activo' || stLower === 'disponible') return false;
+
+  // Estados de bloqueo explícitos para cualquier vehículo (propio o externo):
+  // Taller, Mantención, De Baja, Por documentación, Inactivo, Bloqueado
+  const isExplicitBlocked = 
+    stLower.includes('taller') || 
+    stLower.includes('baja') || 
+    stLower.includes('doc') || 
+    stLower.includes('inactiv') ||
+    stLower.includes('bloque') ||
+    stLower.includes('mantenc');
+
+  if (isExplicitBlocked) return true;
+
+  // Flota externa operativa: si es vehículo externo (por tipo_flota, empresa_externa,
+  // prefijo 'externo' o nombre de empresa de transportes en el status) y no tiene un motivo
+  // explícito de bloqueo arriba, está completamente habilitado
+  const isExt = isVehicleExternal(truck) || 
+                stLower.startsWith('externo') || 
+                stLower.startsWith('transportes') ||
+                (truck.empresa_externa && String(truck.empresa_externa).trim() !== '');
+
+  if (isExt) return false;
+
+  // Para flota propia: si no es 'activo' ni 'disponible' y tiene un estado no operacional, queda bloqueado
   return true;
 };
 
@@ -742,13 +762,35 @@ export default function AssignmentControl() {
 
     activeTrucks.forEach(t => {
       const typeLower = (t.type || '').toLowerCase();
-      if (typeLower.includes('semirremolque') || typeLower.includes('semiremolque') || typeLower.includes('rampla')) {
+      const intUpper = (t.internal_number || '').trim().toUpperCase();
+
+      // 1. Semirremolques / Ramplas: Prefijo S o R en el interno (ej: S287, R101) o tipo que incluya rampla/semirremolque
+      const isSemirremolque = 
+        intUpper.startsWith('S') || 
+        intUpper.startsWith('R') || 
+        typeLower.includes('semirremolque') || 
+        typeLower.includes('semiremolque') || 
+        typeLower.includes('rampla');
+
+      if (isSemirremolque) {
         semis.push(t);
-      } else if (typeLower.includes('tracto')) {
-        tractos.push(t);
-      } else {
-        camiones.push(t);
+        return;
       }
+
+      // 2. Tractos: Prefijo T en el interno (ej: T589, T1365) o tipo que incluya tracto.
+      // Excluir estrictamente si tiene prefijo de camión/externo (C, VL, TL) o tipo explícito de camión/camioneta.
+      const hasTruckPrefix = intUpper.startsWith('C') || intUpper.startsWith('VL') || intUpper.startsWith('TL');
+      const isExplicitTruck = typeLower.includes('camion') || typeLower.includes('camión') || typeLower.includes('camioneta');
+
+      const isTracto = (intUpper.startsWith('T') || typeLower.includes('tracto')) && !hasTruckPrefix && !isExplicitTruck;
+
+      if (isTracto) {
+        tractos.push(t);
+        return;
+      }
+
+      // 3. Camiones y Camionetas: todo el resto (C..., VL..., TL..., camión, camioneta)
+      camiones.push(t);
     });
 
     const sortByViajes = (a, b) => sortTrucksAsc ? a.viajes - b.viajes : b.viajes - a.viajes;
@@ -1267,7 +1309,8 @@ export default function AssignmentControl() {
         let slot = slotPreference;
         if (slot === 'auto' || !slot) {
           const truckType = (parsed.data?.type || '').toLowerCase();
-          if (parsed.type === 'rampla' || truckType.includes('semirremolque') || truckType.includes('rampla')) {
+          const truckInt = (parsed.data?.internal_number || '').trim().toUpperCase();
+          if (parsed.type === 'rampla' || truckInt.startsWith('S') || truckInt.startsWith('R') || truckType.includes('semirremolque') || truckType.includes('rampla')) {
             slot = 'rampla';
           } else {
             slot = 'camion';

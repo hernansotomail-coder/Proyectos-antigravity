@@ -3,11 +3,28 @@ import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
 
+export const isValidVehicleKey = (k) => {
+  if (!k) return false;
+  const s = String(k).trim();
+  if (s.length < 3) return false;
+  const upper = s.toUpperCase();
+  if (upper === 'S/N' || upper === 'N/A' || upper === 'SIN PATENTE' || upper === 'NULL' || upper === 'UNDEFINED' || upper === '---' || upper === '...') return false;
+  return true;
+};
+
 // Persistencia local para Lavados y Certificaciones de Flota
 const loadPersistedFleetWashes = () => {
   try {
     const saved = localStorage.getItem('keylogistics_fleet_washes');
-    return saved ? JSON.parse(saved) : {};
+    if (!saved) return {};
+    const parsed = JSON.parse(saved);
+    const cleaned = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (isValidVehicleKey(k) || (k && k.length > 20)) {
+        cleaned[k] = v;
+      }
+    }
+    return cleaned;
   } catch (e) {
     return {};
   }
@@ -25,7 +42,15 @@ const persistFleetWashes = (map) => {
 const loadPersistedFleetOverrides = () => {
   try {
     const saved = localStorage.getItem('keylogistics_fleet_overrides');
-    return saved ? JSON.parse(saved) : {};
+    if (!saved) return {};
+    const parsed = JSON.parse(saved);
+    const cleaned = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (isValidVehicleKey(k) || (k && k.length > 20)) {
+        cleaned[k] = v;
+      }
+    }
+    return cleaned;
   } catch (e) {
     return {};
   }
@@ -117,17 +142,34 @@ export const useFleetStore = create((set, get) => ({
         const normPlateKey = f.plate ? normalizeVehicleCode(f.plate) : null;
         const idKey = f.id ? String(f.id) : null;
 
-        const washInfo = (intKey && washesMap[intKey]) || 
-                         (normIntKey && washesMap[normIntKey]) ||
-                         (plateKey && washesMap[plateKey]) || 
-                         (normPlateKey && washesMap[normPlateKey]) ||
+        const washInfo = (isValidVehicleKey(intKey) && washesMap[intKey]) || 
+                         (isValidVehicleKey(normIntKey) && washesMap[normIntKey]) ||
+                         (isValidVehicleKey(plateKey) && washesMap[plateKey]) || 
+                         (isValidVehicleKey(normPlateKey) && washesMap[normPlateKey]) ||
                          (idKey && washesMap[idKey]) || {};
 
-        const overrideInfo = (intKey && overridesMap[intKey]) || 
-                             (normIntKey && overridesMap[normIntKey]) ||
-                             (plateKey && overridesMap[plateKey]) || 
-                             (normPlateKey && overridesMap[normPlateKey]) ||
-                             (idKey && overridesMap[idKey]) || {};
+        const rawOverride = (idKey && overridesMap[idKey]) || 
+                            (isValidVehicleKey(intKey) && overridesMap[intKey]) || 
+                            (isValidVehicleKey(normIntKey) && overridesMap[normIntKey]) || 
+                            (isValidVehicleKey(plateKey) && overridesMap[plateKey]) || 
+                            (isValidVehicleKey(normPlateKey) && overridesMap[normPlateKey]) || {};
+
+        // Proteger la identidad primaria del vehículo desde Supabase
+        // NUNCA permitir que un override sobreescriba internal_number, plate, type o brand
+        // si la fila de Supabase ya tiene un valor válido.
+        const overrideInfo = { ...rawOverride };
+        if (f.internal_number && f.internal_number !== 'S/N' && f.internal_number !== '-') {
+          delete overrideInfo.internal_number;
+        }
+        if (f.plate && f.plate !== '-' && f.plate !== '1' && f.plate.length >= 4) {
+          delete overrideInfo.plate;
+        }
+        if (f.type && String(f.type).trim() !== '') {
+          delete overrideInfo.type;
+        }
+        if (f.brand && String(f.brand).trim() !== '') {
+          delete overrideInfo.brand;
+        }
 
         const tipo = inferTipoFlota(f, overrideInfo);
         const empresa = inferEmpresaExterna(f, overrideInfo);
@@ -135,6 +177,11 @@ export const useFleetStore = create((set, get) => ({
         return {
           ...f,
           ...overrideInfo,
+          id: f.id,
+          type: f.type || overrideInfo.type || 'Camión',
+          internal_number: f.internal_number || overrideInfo.internal_number || '',
+          plate: f.plate || overrideInfo.plate || '',
+          brand: f.brand || overrideInfo.brand || '',
           tipo_flota: tipo,
           empresa_externa: empresa,
           ultima_certificacion: f.ultima_certificacion || washInfo.ultima_certificacion || null,
@@ -260,7 +307,7 @@ export const useFleetStore = create((set, get) => ({
         insertedRow?.id ? String(insertedRow.id) : null,
         insertedRow?.plate ? String(insertedRow.plate).trim().toUpperCase() : null,
         insertedRow?.internal_number ? String(insertedRow.internal_number).trim() : null
-      ].filter(Boolean);
+      ].filter(k => k && (k.length > 20 || isValidVehicleKey(k)));
 
       keysToMap.forEach(k => {
         overridesMap[k] = {
@@ -268,11 +315,14 @@ export const useFleetStore = create((set, get) => ({
           tipo_flota: tipoFlota,
           empresa_externa: empresaExterna
         };
-        overridesMap[normalizeVehicleCode(k)] = {
-          ...(overridesMap[normalizeVehicleCode(k)] || {}),
-          tipo_flota: tipoFlota,
-          empresa_externa: empresaExterna
-        };
+        const normK = normalizeVehicleCode(k);
+        if (isValidVehicleKey(normK)) {
+          overridesMap[normK] = {
+            ...(overridesMap[normK] || {}),
+            tipo_flota: tipoFlota,
+            empresa_externa: empresaExterna
+          };
+        }
       });
       persistFleetOverrides(overridesMap);
       
@@ -337,8 +387,8 @@ export const useFleetStore = create((set, get) => ({
         }
 
         const keys = [
-          plateKey,
-          f.internal_number ? String(f.internal_number).trim() : null
+          isValidVehicleKey(plateKey) ? plateKey : null,
+          isValidVehicleKey(f.internal_number) ? String(f.internal_number).trim() : null
         ].filter(Boolean);
 
         keys.forEach(k => {
@@ -347,11 +397,14 @@ export const useFleetStore = create((set, get) => ({
             tipo_flota: tipoFlota,
             empresa_externa: empresa
           };
-          overridesMap[normalizeVehicleCode(k)] = {
-            ...(overridesMap[normalizeVehicleCode(k)] || {}),
-            tipo_flota: tipoFlota,
-            empresa_externa: empresa
-          };
+          const normK = normalizeVehicleCode(k);
+          if (isValidVehicleKey(normK)) {
+            overridesMap[normK] = {
+              ...(overridesMap[normK] || {}),
+              tipo_flota: tipoFlota,
+              empresa_externa: empresa
+            };
+          }
         });
       });
       persistFleetOverrides(overridesMap);
@@ -447,10 +500,12 @@ export const useFleetStore = create((set, get) => ({
     try {
       const overridesMap = loadPersistedFleetOverrides();
       const current = get().fleetList.find(f => f.id === id);
+      const rawPlate = fleetData.plate ? String(fleetData.plate).trim().toUpperCase() : (current?.plate?.toUpperCase());
+      const rawInt = fleetData.internal_number ? String(fleetData.internal_number).trim() : current?.internal_number;
       const keys = [
         id ? String(id) : null,
-        fleetData.plate ? String(fleetData.plate).trim().toUpperCase() : (current?.plate?.toUpperCase()),
-        fleetData.internal_number ? String(fleetData.internal_number).trim() : current?.internal_number
+        isValidVehicleKey(rawPlate) ? rawPlate : null,
+        isValidVehicleKey(rawInt) ? rawInt : null
       ].filter(Boolean);
 
       // Sanitización completa para PostgreSQL / Supabase
@@ -478,18 +533,23 @@ export const useFleetStore = create((set, get) => ({
         }
       });
 
-      // Guardar en overridesMap local
+      // Guardar en overridesMap local solo columnas extendidas o tipo/empresa
+      const overrideDataToSave = {
+        ...sanitizedData
+      };
+
       keys.forEach(k => {
         overridesMap[k] = {
           ...(overridesMap[k] || {}),
-          ...fleetData,
-          ...sanitizedData
+          ...overrideDataToSave
         };
-        overridesMap[normalizeVehicleCode(k)] = {
-          ...(overridesMap[normalizeVehicleCode(k)] || {}),
-          ...fleetData,
-          ...sanitizedData
-        };
+        const normK = normalizeVehicleCode(k);
+        if (isValidVehicleKey(normK)) {
+          overridesMap[normK] = {
+            ...(overridesMap[normK] || {}),
+            ...overrideDataToSave
+          };
+        }
       });
       persistFleetOverrides(overridesMap);
 
