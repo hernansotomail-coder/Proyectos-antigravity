@@ -5,7 +5,7 @@ import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
 import { findOperationForRoute, getOperacionName } from '../data/operacionesMaster';
 
 // Cache invalidation version for cross-computer synchronization
-const CURRENT_STORAGE_VERSION = 'v2026_10_28_prod_sync_v8';
+const CURRENT_STORAGE_VERSION = 'v2026_10_28_prod_sync_v9';
 try {
   if (typeof window !== 'undefined' && window.localStorage) {
     const savedVer = localStorage.getItem('keylogistics_storage_version');
@@ -58,32 +58,40 @@ export const healParadasWithPreloaded = (routeNumber, currentParadas, fecha = ''
 // Helper to format/normalize date string to DD-MM-YYYY
 export const normalizeDate = (rawDate) => {
   if (!rawDate) return '';
+  const str = String(rawDate).trim();
+
+  // Excel serial number as string or number (e.g. 46323 or "46323" -> 28-10-2026)
+  if (/^\d{5}(\.\d+)?$/.test(str) || (typeof rawDate === 'number' && rawDate > 30000 && rawDate < 65000)) {
+    const num = typeof rawDate === 'number' ? rawDate : parseFloat(str);
+    if (!isNaN(num) && num > 30000 && num < 65000) {
+      const dateObj = new Date(Math.round((num - 25569) * 86400 * 1000));
+      const day = String(dateObj.getUTCDate()).padStart(2, '0');
+      const month = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+      const year = dateObj.getUTCFullYear();
+      return `${day}-${month}-${year}`;
+    }
+  }
+
   if (typeof rawDate === 'string') {
-    const trimmed = rawDate.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
-      const parts = trimmed.split('T')[0].split(' ')[0].split('-');
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+      const parts = str.split('T')[0].split(' ')[0].split('-');
       return `${parts[2]}-${parts[1]}-${parts[0]}`;
     }
-    if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(trimmed)) {
-      const parts = trimmed.split(' ')[0].split(/[-/]/);
+    if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(str)) {
+      const parts = str.split(' ')[0].split(/[-/]/);
       return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
     }
-    return trimmed;
+    return str;
   }
-  if (typeof rawDate === 'number') {
-    const dateObj = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
-    const day = String(dateObj.getUTCDate()).padStart(2, '0');
-    const month = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
-    const year = dateObj.getUTCFullYear();
-    return `${day}-${month}-${year}`;
-  }
+
   if (rawDate instanceof Date) {
     const day = String(rawDate.getDate()).padStart(2, '0');
     const month = String(rawDate.getMonth() + 1).padStart(2, '0');
     const year = rawDate.getFullYear();
     return `${day}-${month}-${year}`;
   }
-  return String(rawDate);
+
+  return str;
 };
 
 // Paradas de muestra basadas en los datos reales del usuario (Consolidadas por Sec + Ambiente)
@@ -296,6 +304,21 @@ export const persistHistoryToDb = async (historyList) => {
   }
 };
 
+export const persistChangeHistoryToDb = async (changeList) => {
+  try {
+    if (!changeList) return;
+    await supabase
+      .from('planning_assignments')
+      .upsert({
+        fecha: '__change_history__',
+        assignments: changeList,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'fecha' });
+  } catch (e) {
+    console.warn('Error guardando change history en Supabase:', e);
+  }
+};
+
 export const fetchPlanningStateFromDb = async () => {
   try {
     const { data, error } = await supabase
@@ -309,6 +332,7 @@ export const fetchPlanningStateFromDb = async () => {
       const assignmentsMap = {};
       let ruteoOverridesFromDb = null;
       let historyListFromDb = null;
+      let changeHistoryListFromDb = null;
 
       data.forEach(item => {
         if (!item.fecha || !item.assignments) return;
@@ -317,6 +341,8 @@ export const fetchPlanningStateFromDb = async () => {
           ruteoOverridesFromDb = item.assignments;
         } else if (item.fecha === '__saved_history__') {
           historyListFromDb = item.assignments;
+        } else if (item.fecha === '__change_history__') {
+          changeHistoryListFromDb = item.assignments;
         } else if (item.fecha.startsWith('__')) {
           // Claves internas (ej: __user_permissions__)
         } else if (Array.isArray(item.assignments)) {
@@ -331,7 +357,8 @@ export const fetchPlanningStateFromDb = async () => {
       return {
         assignmentsMap,
         ruteoOverridesFromDb,
-        historyListFromDb
+        historyListFromDb,
+        changeHistoryListFromDb
       };
     }
   } catch (e) {
@@ -558,6 +585,7 @@ export const loadPersistedChangeHistory = () => {
 export const persistChangeHistory = (data) => {
   try {
     localStorage.setItem('keylogistics_change_history', JSON.stringify(data));
+    persistChangeHistoryToDb(data);
   } catch (e) {
     console.error('Error saving change history to localStorage:', e);
   }
@@ -1165,7 +1193,7 @@ export const usePlanningStore = create((set, get) => ({
     try {
       const dbState = await fetchPlanningStateFromDb();
       if (dbState) {
-        const { assignmentsMap, ruteoOverridesFromDb, historyListFromDb } = dbState;
+        const { assignmentsMap, ruteoOverridesFromDb, historyListFromDb, changeHistoryListFromDb } = dbState;
         set(state => {
           const mergedAssignments = { ...state.transmittedAssignments };
           Object.entries(assignmentsMap).forEach(([fecha, dbRows]) => {
@@ -1230,6 +1258,9 @@ export const usePlanningStore = create((set, get) => ({
           const mergedHistory = historyListFromDb && historyListFromDb.length > 0 
             ? historyListFromDb 
             : state.savedHistoryList;
+          const mergedChangeHistory = changeHistoryListFromDb && Array.isArray(changeHistoryListFromDb) && changeHistoryListFromDb.length > 0
+            ? changeHistoryListFromDb
+            : state.changeHistoryList;
 
           try {
             localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(mergedAssignments));
@@ -1241,6 +1272,9 @@ export const usePlanningStore = create((set, get) => ({
             if (historyListFromDb) {
               localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(mergedHistory));
             }
+            if (changeHistoryListFromDb) {
+              localStorage.setItem('keylogistics_change_history', JSON.stringify(mergedChangeHistory));
+            }
           } catch (e) {}
 
           return {
@@ -1248,7 +1282,8 @@ export const usePlanningStore = create((set, get) => ({
             savedRuteoByDate: mergedSaved,
             savedRuteoBaseline: mergedBaseline,
             ruteoOverrides: mergedOverrides,
-            savedHistoryList: mergedHistory
+            savedHistoryList: mergedHistory,
+            changeHistoryList: mergedChangeHistory
           };
         });
       } else {

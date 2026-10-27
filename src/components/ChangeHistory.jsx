@@ -1,13 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   History, Search, Filter, Download, Calendar, User, 
-  Truck, ArrowRight, RefreshCw, ExternalLink, FileSpreadsheet, 
-  FileText, Shield, Layers, CheckCircle2, ChevronDown, Trash2,
+  Truck, ArrowRight, Shield, Layers, CheckCircle2, ChevronDown, Trash2,
   AlertTriangle, Lock, CheckSquare, Square, X
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
-import { usePlanningStore } from '../store/planningStore';
+import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { useAuthStore, canUserDeleteHistory } from '../store/authStore';
 import { Button } from './ui/Button';
 
@@ -16,12 +15,22 @@ export default function ChangeHistory() {
     changeHistoryList = [], 
     deleteChangeHistoryRow, 
     deleteBatchChangeHistory, 
-    clearChangeHistory 
+    clearChangeHistory,
+    savedRuteoByDate,
+    transmittedAssignments,
+    savedHistoryList,
+    initPlanningFromDb
   } = usePlanningStore();
   const { user } = useAuthStore();
   const isAuthorized = useMemo(() => canUserDeleteHistory(user), [user]);
 
-  const [activeTab, setActiveTab] = useState('audit'); // 'audit' | 'asignaciones_cliente'
+  // Sincronizar automáticamente el histórico centralizado desde Supabase
+  useEffect(() => {
+    if (initPlanningFromDb) {
+      initPlanningFromDb();
+    }
+  }, [initPlanningFromDb]);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDate, setFilterDate] = useState('TODAS');
   const [filterUser, setFilterUser] = useState('TODOS');
@@ -40,17 +49,27 @@ export default function ChangeHistory() {
     count: 0
   });
 
-  // Iframe key for reload
-  const [iframeKey, setIframeKey] = useState(1);
-
   // Available unique filter options
   const availableDates = useMemo(() => {
     const s = new Set();
-    changeHistoryList.forEach(item => {
-      if (item.fechaPlanificacion) s.add(item.fechaPlanificacion);
-    });
+    const addDate = (d) => {
+      if (!d) return;
+      const normalized = normalizeDate(d);
+      if (normalized && normalized !== 'Sin Fecha' && normalized !== 'undefined' && normalized !== 'null') {
+        s.add(normalized);
+      }
+    };
+
+    changeHistoryList.forEach(item => addDate(item.fechaPlanificacion));
+    if (savedRuteoByDate) Object.keys(savedRuteoByDate).forEach(addDate);
+    if (transmittedAssignments) Object.keys(transmittedAssignments).forEach(addDate);
+    if (savedHistoryList) savedHistoryList.forEach(h => addDate(h.fecha));
+
+    // Garantizar que la fecha operativa 28-10-2026 esté siempre disponible
+    s.add('28-10-2026');
+
     return Array.from(s).sort();
-  }, [changeHistoryList]);
+  }, [changeHistoryList, savedRuteoByDate, transmittedAssignments, savedHistoryList]);
 
   const availableUsers = useMemo(() => {
     const s = new Set();
@@ -83,7 +102,7 @@ export default function ChangeHistory() {
   // Filtered change records
   const filteredRecords = useMemo(() => {
     return changeHistoryList.filter(item => {
-      if (filterDate !== 'TODAS' && item.fechaPlanificacion !== filterDate) return false;
+      if (filterDate !== 'TODAS' && normalizeDate(item.fechaPlanificacion) !== normalizeDate(filterDate)) return false;
       if (filterUser !== 'TODOS' && item.usuario !== filterUser) return false;
       if (filterConductor !== 'TODOS' && item.conductorModificado !== filterConductor) return false;
       if (filterCamion !== 'TODOS' && item.camionModificado !== filterCamion) return false;
@@ -97,7 +116,6 @@ export default function ChangeHistory() {
         const camMatch = String(item.camionModificado || '').toLowerCase().includes(q);
         if (!rMatch && !dMatch && !uMatch && !cMatch && !camMatch) return false;
       }
-
       return true;
     });
   }, [changeHistoryList, filterDate, filterUser, filterConductor, filterCamion, searchTerm]);
@@ -262,101 +280,43 @@ export default function ChangeHistory() {
           </p>
         </div>
 
-        {/* Tab switchers y Acciones de Cabecera */}
+        {/* Acciones de Cabecera */}
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex bg-slate-100 p-1 rounded-xl">
-            <button
-              onClick={() => setActiveTab('audit')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'audit'
-                  ? 'bg-white text-blue-700 shadow-sm font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+          {isAuthorized && selectedIds.length > 0 && (
+            <Button
+              onClick={promptDeleteBatch}
+              className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm px-3 py-1.5 rounded-xl animate-in fade-in"
             >
-              <History size={14} />
-              Registro de Auditoría
-              {changeHistoryList.length > 0 && (
-                <span className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                  {changeHistoryList.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('asignaciones_cliente')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'asignaciones_cliente'
-                  ? 'bg-white text-indigo-700 shadow-sm font-bold'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <FileSpreadsheet size={14} />
-              Asignaciones por Cliente
-              <span className="bg-indigo-100 text-indigo-700 text-[9px] px-1.5 py-0.2 rounded-full font-bold uppercase">
-                Tool
-              </span>
-            </button>
-          </div>
-
-          {activeTab === 'audit' && (
-            <div className="flex items-center gap-2">
-              {isAuthorized && selectedIds.length > 0 && (
-                <Button
-                  onClick={promptDeleteBatch}
-                  className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm px-3 py-1.5 rounded-xl animate-in fade-in"
-                >
-                  <Trash2 size={13} />
-                  Eliminar Seleccionados ({selectedIds.length})
-                </Button>
-              )}
-
-              {isAuthorized && changeHistoryList.length > 0 && (
-                <Button
-                  onClick={promptClearAll}
-                  variant="outline"
-                  className="text-xs text-red-600 hover:bg-red-50 border-red-200 flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
-                  title="Vaciar todo el historial de cambios (Solo usuarios autorizados)"
-                >
-                  <Trash2 size={13} />
-                  Vaciar Todo
-                </Button>
-              )}
-
-              <Button
-                onClick={handleExportExcel}
-                variant="outline"
-                className="flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border-emerald-200 rounded-xl"
-              >
-                <Download size={14} />
-                Exportar Excel
-              </Button>
-            </div>
+              <Trash2 size={13} />
+              Eliminar Seleccionados ({selectedIds.length})
+            </Button>
           )}
 
-          {activeTab === 'asignaciones_cliente' && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIframeKey(k => k + 1)}
-                className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
-                title="Recargar herramienta"
-              >
-                <RefreshCw size={14} />
-              </button>
-              <Button
-                onClick={() => window.open('/asignaciones-por-cliente.html', '_blank')}
-                className="flex items-center gap-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm rounded-xl"
-              >
-                <ExternalLink size={13} />
-                Abrir en Ventana Completa
-              </Button>
-            </div>
+          {isAuthorized && changeHistoryList.length > 0 && (
+            <Button
+              onClick={promptClearAll}
+              variant="outline"
+              className="text-xs text-red-600 hover:bg-red-50 border-red-200 flex items-center gap-1.5 px-3 py-1.5 rounded-xl"
+              title="Vaciar todo el historial de cambios (Solo usuarios autorizados)"
+            >
+              <Trash2 size={13} />
+              Vaciar Todo
+            </Button>
           )}
+
+          <Button
+            onClick={handleExportExcel}
+            variant="outline"
+            className="flex items-center gap-1.5 text-xs text-emerald-700 hover:text-emerald-800 hover:bg-emerald-50 border-emerald-200 rounded-xl"
+          >
+            <Download size={14} />
+            Exportar Excel
+          </Button>
         </div>
       </div>
 
       {/* Main Content */}
-      {activeTab === 'audit' ? (
-        <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
+      <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
           
           {/* Top KPI Stat Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
@@ -651,53 +611,7 @@ export default function ChangeHistory() {
               </table>
             </div>
           </div>
-
         </div>
-      ) : (
-        /* Asignaciones por Cliente View (Requisito 3) */
-        <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col min-h-0 overflow-hidden p-2">
-          <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 px-2 shrink-0">
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet className="text-indigo-600" size={18} />
-              <div>
-                <h3 className="font-bold text-xs text-slate-800">
-                  Asignaciones por Cliente (Reporte Dinámico Interactivo)
-                </h3>
-                <p className="text-[11px] text-slate-400">
-                  Herramienta interactiva de consolidación por cliente, transportista y métricas de carga.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIframeKey(k => k + 1)}
-                className="text-xs flex items-center gap-1 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition-colors"
-                title="Recargar herramienta"
-              >
-                <RefreshCw size={12} />
-                Recargar
-              </button>
-              <button
-                onClick={() => window.open('/asignaciones-por-cliente.html', '_blank')}
-                className="text-xs flex items-center gap-1 text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-lg font-bold transition-colors shadow-2xs"
-              >
-                <ExternalLink size={12} />
-                Pantalla Completa
-              </button>
-            </div>
-          </div>
-
-          <div className="flex-1 rounded-xl overflow-hidden border border-slate-100 relative bg-slate-50">
-            <iframe
-              key={iframeKey}
-              src="/asignaciones-por-cliente.html"
-              title="Asignaciones por Cliente"
-              className="w-full h-full border-0"
-            />
-          </div>
-        </div>
-      )}
 
       {/* POP-UP MODAL FLOTANTE DE CONFIRMACIÓN DE ELIMINACIÓN */}
       {confirmDeleteModal.isOpen && (

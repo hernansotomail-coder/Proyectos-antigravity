@@ -126,17 +126,40 @@ export default function Briefing() {
   // Fechas disponibles
   const availableDates = useMemo(() => {
     const dSet = new Set();
-    if (transmittedAssignments) Object.keys(transmittedAssignments).forEach(d => dSet.add(d));
-    if (savedRuteoByDate) Object.keys(savedRuteoByDate).forEach(d => dSet.add(d));
-    if (transformedRoutes) transformedRoutes.forEach(r => r.fecha && dSet.add(r.fecha));
-    if (selectedDisponibilizarDate) dSet.add(selectedDisponibilizarDate);
+    const addDate = (d) => {
+      if (!d) return;
+      const normalized = normalizeDate(d);
+      if (normalized && normalized !== 'Sin Fecha' && normalized !== 'undefined' && normalized !== 'null') {
+        dSet.add(normalized);
+      }
+    };
+    if (transmittedAssignments) Object.keys(transmittedAssignments).forEach(addDate);
+    if (savedRuteoByDate) Object.keys(savedRuteoByDate).forEach(addDate);
+    if (transformedRoutes) transformedRoutes.forEach(r => addDate(r.fecha));
+    if (selectedDisponibilizarDate) addDate(selectedDisponibilizarDate);
+    
+    // Asegurar que la fecha operativa 28-10-2026 esté siempre disponible
+    dSet.add('28-10-2026');
+
     const arr = Array.from(dSet).filter(Boolean);
-    return arr.length > 0 ? arr : ['22-10-2026'];
+    return arr.length > 0 ? arr.sort() : ['28-10-2026'];
   }, [transmittedAssignments, savedRuteoByDate, transformedRoutes, selectedDisponibilizarDate]);
 
   const [activeDate, setActiveDate] = useState(() => {
-    return availableDates.includes('22-10-2026') ? '22-10-2026' : (availableDates[0] || '14-10-2026');
+    if (availableDates.includes('28-10-2026')) return '28-10-2026';
+    if (availableDates.includes('22-10-2026')) return '22-10-2026';
+    return availableDates[availableDates.length - 1] || '28-10-2026';
   });
+
+  React.useEffect(() => {
+    if (availableDates.length > 0 && !availableDates.includes(activeDate)) {
+      if (availableDates.includes('28-10-2026')) {
+        setActiveDate('28-10-2026');
+      } else {
+        setActiveDate(availableDates[availableDates.length - 1]);
+      }
+    }
+  }, [availableDates, activeDate]);
 
   const [searchTerm, setSearchTerm] = useState('');
   // Multi-selección de Operaciones (Requisito 3)
@@ -161,13 +184,29 @@ export default function Briefing() {
   // Requisito 2: Excluir todo lo que dice "Traspaso" a excepción de lo que dice "Aramark"
   const currentAssignedRows = useMemo(() => {
     let rows = [];
-    if (savedRuteoByDate?.[activeDate] && savedRuteoByDate[activeDate].length > 0) {
-      rows = savedRuteoByDate[activeDate];
-    } else if (transmittedAssignments?.[activeDate] && transmittedAssignments[activeDate].length > 0) {
-      rows = transmittedAssignments[activeDate];
+    const normDate = normalizeDate(activeDate);
+
+    const findInObj = (obj) => {
+      if (!obj) return null;
+      if (obj[normDate] && obj[normDate].length > 0) return obj[normDate];
+      if (obj[activeDate] && obj[activeDate].length > 0) return obj[activeDate];
+      for (const k of Object.keys(obj)) {
+        if (normalizeDate(k) === normDate && obj[k]?.length > 0) return obj[k];
+      }
+      return null;
+    };
+
+    const saved = findInObj(savedRuteoByDate);
+    if (saved) {
+      rows = saved;
     } else {
-      const matchedTrans = (transformedRoutes || []).filter(r => r.fecha === activeDate);
-      rows = matchedTrans.length > 0 ? matchedTrans : (transformedRoutes || []);
+      const trans = findInObj(transmittedAssignments);
+      if (trans) {
+        rows = trans;
+      } else {
+        const matchedTrans = (transformedRoutes || []).filter(r => normalizeDate(r.fecha) === normDate);
+        rows = matchedTrans.length > 0 ? matchedTrans : (transformedRoutes || []);
+      }
     }
     return rows.filter(r => !isTraspasoExcluded(r));
   }, [savedRuteoByDate, transmittedAssignments, transformedRoutes, activeDate]);
@@ -565,8 +604,8 @@ export default function Briefing() {
                 Despacho
               </span>
               <select
-                value={activeDate}
-                onChange={(e) => setActiveDate(e.target.value)}
+                value={normalizeDate(activeDate)}
+                onChange={(e) => setActiveDate(normalizeDate(e.target.value))}
                 className="text-xs font-bold text-white bg-transparent outline-none cursor-pointer"
               >
                 {availableDates.map(d => (
