@@ -64,6 +64,10 @@ export const extractDataFromWorkbook = (wb) => {
     if (headerIdx >= 0) {
       const header = sheetData[headerIdx].map(h => String(h || '').trim());
       const parsedRows = [];
+      let currentRuta = '';
+      let currentNombreRuta = '';
+      let currentFecha = '';
+
       for (let i = headerIdx + 1; i < sheetData.length; i++) {
         const row = sheetData[i];
         if (!row || row.every(cell => cell === '' || cell === null || cell === undefined)) continue;
@@ -77,8 +81,38 @@ export const extractDataFromWorkbook = (wb) => {
           }
         });
 
-        const rVal = String(obj.Ruta || obj.ruta || obj['N° Ruta'] || obj.RutaId || '').trim();
+        let rVal = String(obj.Ruta || obj.ruta || obj['N° Ruta'] || obj.RutaId || '').trim();
+        const nrVal = String(obj['Nombre Ruta'] || obj.nombre_ruta || obj.NombreRuta || obj.Cliente || '').trim();
+        const fVal = String(obj.Fecha || obj.fecha || '').trim();
+
         if (rVal && !rVal.toLowerCase().startsWith('total')) {
+          currentRuta = rVal;
+          if (nrVal) currentNombreRuta = nrVal;
+          if (fVal) currentFecha = fVal;
+        } else if (!rVal && currentRuta) {
+          // Si rVal viene vacío pero la fila tiene detalle de parada/local (formato agrupado/esquema Excel), heredamos la ruta
+          const hasStopInfo = Boolean(
+            obj.Destino || obj.destino || 
+            obj.Secuencia || obj.secuencia || obj['Secuencia Parada'] || 
+            obj.Direccion || obj['Dirección'] || obj.direccion || 
+            obj.Comuna || obj.comuna || 
+            obj.Local || obj.local || 
+            obj.Peso || obj.peso || 
+            obj.Volumen || obj.volumen || 
+            obj.CantCJ || obj.cantCJ
+          );
+          if (hasStopInfo) {
+            obj.Ruta = currentRuta;
+            rVal = currentRuta;
+            if (!obj['Nombre Ruta'] && currentNombreRuta) obj['Nombre Ruta'] = currentNombreRuta;
+            if (!obj.Fecha && currentFecha) obj.Fecha = currentFecha;
+          }
+        }
+
+        if (rVal && !rVal.toLowerCase().startsWith('total')) {
+          if (!obj.Ruta && !obj.ruta && !obj['N° Ruta'] && !obj.RutaId) {
+            obj.Ruta = rVal;
+          }
           parsedRows.push(obj);
         }
       }

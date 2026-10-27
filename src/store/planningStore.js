@@ -9,37 +9,32 @@ const PRELOADED_ROUTES_MAP = new Map();
   PRELOADED_ROUTES_MAP.set(String(r.ruta).trim(), r);
 });
 
-export const healParadasWithPreloaded = (routeNumber, currentParadas) => {
-  const cleanRuta = String(routeNumber || '').trim();
-  const preloaded = PRELOADED_ROUTES_MAP.get(cleanRuta);
-
-  if (!preloaded || !preloaded.paradas || preloaded.paradas.length === 0) {
-    return (currentParadas || []).map(p => ({
+export const healParadasWithPreloaded = (routeNumber, currentParadas, fecha = '') => {
+  // Si ya existen paradas reales (por ejemplo cargadas de Excel o guardadas en BD),
+  // NUNCA deben sobrescribirse con las rutas de muestra predeterminadas.
+  if (currentParadas && Array.isArray(currentParadas) && currentParadas.length > 0) {
+    return currentParadas.map(p => ({
       ...p,
-      ambiente: String(p.ambiente || (cleanRuta === '1401' ? 'C' : 'S')).trim().toUpperCase()
+      ambiente: String(p.ambiente || 'S').trim().toUpperCase()
     }));
   }
 
-  const normalizedCurrent = (currentParadas || []).map(p => ({
-    ...p,
-    ambiente: String(p.ambiente || '').trim().toUpperCase()
-  }));
+  // Si no hay paradas pero la fecha no es la fecha demo '14-10-2026', devolver lista vacía o actual
+  if (fecha && fecha !== '14-10-2026') {
+    return currentParadas || [];
+  }
 
-  const currentAmbientes = new Set(normalizedCurrent.map(p => p.ambiente).filter(Boolean));
-  const preloadedAmbientes = new Set(preloaded.ambientes || []);
+  const cleanRuta = String(routeNumber || '').trim();
+  const preloaded = PRELOADED_ROUTES_MAP.get(cleanRuta);
 
-  const hasOnlySWhenPreloadedHasMultiple = 
-    currentAmbientes.size <= 1 && 
-    (currentAmbientes.has('S') || currentAmbientes.size === 0) && 
-    preloadedAmbientes.size > 1;
-
-  const hasUnconsolidated = normalizedCurrent.length > preloaded.paradas.length;
-
-  if (hasOnlySWhenPreloadedHasMultiple || hasUnconsolidated || normalizedCurrent.length === 0) {
+  if (preloaded && preloaded.paradas && preloaded.paradas.length > 0) {
     return JSON.parse(JSON.stringify(preloaded.paradas));
   }
 
-  return normalizedCurrent;
+  return (currentParadas || []).map(p => ({
+    ...p,
+    ambiente: String(p.ambiente || (cleanRuta === '1401' ? 'C' : 'S')).trim().toUpperCase()
+  }));
 };
 
 // Helper to format/normalize date string to DD-MM-YYYY
@@ -310,7 +305,7 @@ export const fetchPlanningStateFromDb = async () => {
           assignmentsMap[item.fecha] = item.assignments.map(r => ({
             ...r,
             transportista: ensureRowTransportista(r),
-            paradas: healParadasWithPreloaded(r.ruta, r.paradas)
+            paradas: healParadasWithPreloaded(r.ruta, r.paradas, item.fecha)
           }));
         }
       });
@@ -343,7 +338,7 @@ const loadPersistedAssignments = () => {
           parsed[dateKey] = parsed[dateKey].map(r => ({
             ...r,
             transportista: ensureRowTransportista(r),
-            paradas: healParadasWithPreloaded(r.ruta, r.paradas)
+            paradas: healParadasWithPreloaded(r.ruta, r.paradas, dateKey)
           }));
         });
         return parsed;
@@ -378,7 +373,7 @@ const loadPersistedSavedRuteo = () => {
         parsed[dateKey] = parsed[dateKey].map(r => ({
           ...r,
           transportista: ensureRowTransportista(r),
-          paradas: healParadasWithPreloaded(r.ruta, r.paradas)
+          paradas: healParadasWithPreloaded(r.ruta, r.paradas, dateKey)
         }));
       });
       return parsed;
@@ -478,7 +473,7 @@ const loadPersistedHistory = () => {
         rows: (h.rows || []).map(r => ({
           ...r,
           transportista: ensureRowTransportista(r),
-          paradas: healParadasWithPreloaded(r.ruta, r.paradas)
+          paradas: healParadasWithPreloaded(r.ruta, r.paradas, h.fecha)
         }))
       }));
     }
@@ -627,7 +622,7 @@ export const loadPersistedTransformedRoutes = () => {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed.map(r => {
-          const paradas = healParadasWithPreloaded(r.ruta, r.paradas);
+          const paradas = healParadasWithPreloaded(r.ruta, r.paradas, r.fecha);
           const distinctAmbientes = Array.from(new Set(paradas.map(p => p.ambiente))).sort();
           return {
             ...r,
@@ -727,7 +722,7 @@ export const usePlanningStore = create((set, get) => ({
         const horaFin = row.HoraFin || row.hora_fin || '';
 
         const transportista = String(row.Transportista || row.transportista || row.Transp || row.transport || '').trim();
-        const groupKey = `${ruta}:::${nombreRuta || 'Sin Nombre'}`;
+        const groupKey = String(ruta).trim();
 
         if (!groups.has(groupKey)) {
           groups.set(groupKey, {
@@ -744,6 +739,9 @@ export const usePlanningStore = create((set, get) => ({
         }
 
         const g = groups.get(groupKey);
+        if (nombreRuta && (!g.nombreRuta || g.nombreRuta === `Ruta ${ruta}`)) {
+          g.nombreRuta = nombreRuta;
+        }
         if (destino) g.destinosSet.add(destino);
         if (transportista) g.transportistasSet.add(transportista);
         g.sumaVolumen += volumen;
@@ -864,7 +862,7 @@ export const usePlanningStore = create((set, get) => ({
       }
 
       const existingIdx = newAssignmentsByDate[fecha].findIndex(
-        (a) => a.ruta === route.ruta && a.cliente === route.nombreRuta
+        (a) => String(a.ruta).trim() === String(route.ruta).trim()
       );
 
       const opName = route.operacion || getOperacionName(route.ruta, route.nombreRuta);
@@ -905,9 +903,11 @@ export const usePlanningStore = create((set, get) => ({
           m3: route.sumaVolumen,
           peso: route.sumaPeso || old.peso || 0,
           cantCJ: route.sumaCantCJ || old.cantCJ || 0,
-          cliente: route.nombreRuta,
+          cliente: opName,
+          operacion: opName,
+          denominacion: denomName,
           transportista: route.transportista || old.transportista || ensureRowTransportista(route),
-          paradas: route.paradas || old.paradas || []
+          paradas: (route.paradas && route.paradas.length > 0) ? route.paradas : (old.paradas || [])
         };
       } else {
         newAssignmentsByDate[fecha].push(assignmentRow);
@@ -921,6 +921,8 @@ export const usePlanningStore = create((set, get) => ({
     const dates = Object.keys(newAssignmentsByDate);
     const targetDate = transformedRoutes[0]?.fecha || dates[0] || '';
 
+    const synced = syncHistoryAndSavedForDate(get(), targetDate, newAssignmentsByDate[targetDate] || []);
+
     const currentBaseline = get().savedRuteoBaseline || {};
     const updatedBaseline = { ...currentBaseline };
     if (!updatedBaseline[targetDate] || updatedBaseline[targetDate].length === 0) {
@@ -931,7 +933,8 @@ export const usePlanningStore = create((set, get) => ({
     set({
       transmittedAssignments: newAssignmentsByDate,
       savedRuteoBaseline: updatedBaseline,
-      selectedDisponibilizarDate: targetDate
+      selectedDisponibilizarDate: targetDate,
+      ...synced
     });
 
     toast.success(`¡${totalTransmitted} rutas transmitidas a Disponibilización exitosamente!`);
@@ -1060,15 +1063,19 @@ export const usePlanningStore = create((set, get) => ({
       if (existingIdx >= 0) {
         // Actualizar SOLO métricas y paradas, preservando conductor, chofer, camión, rampla y vuelta ya asignados
         const old = newAssignmentsByDate[fecha][existingIdx];
+        const opName = route.operacion || getOperacionName(route.ruta, route.nombreRuta);
+        const denomName = route.denominacion || route.nombreRuta || `Ruta ${route.ruta}`;
         newAssignmentsByDate[fecha][existingIdx] = {
           ...old,
           locales: route.recuentoDestino,
           m3: route.sumaVolumen,
           peso: route.sumaPeso || old.peso || 0,
           cantCJ: route.sumaCantCJ || old.cantCJ || 0,
-          cliente: route.nombreRuta || old.cliente,
+          cliente: opName || old.cliente,
+          operacion: opName || old.operacion,
+          denominacion: denomName || old.denominacion,
           transportista: route.transportista || old.transportista || ensureRowTransportista(route),
-          paradas: route.paradas || old.paradas || []
+          paradas: (route.paradas && route.paradas.length > 0) ? route.paradas : (old.paradas || [])
         };
         totalUpdated++;
       } else {
@@ -1157,7 +1164,7 @@ export const usePlanningStore = create((set, get) => ({
               
               mergedAssignments[fecha] = localRows.map(lr => {
                 const k = `${lr.ruta || ''}:::${lr.id || ''}`;
-                const dbR = dbRowMap.get(k) || dbRows.find(dr => dr.ruta && dr.ruta === lr.ruta);
+                const dbR = dbRowMap.get(k) || dbRows.find(dr => dr.ruta && String(dr.ruta).trim() === String(lr.ruta).trim());
                 if (dbR) {
                   // Si el local tiene conductor y el de la DB está vacío, mantener local
                   return {
@@ -1175,7 +1182,12 @@ export const usePlanningStore = create((set, get) => ({
                     turno: lr.turno || dbR.turno || '',
                     hora_cita: lr.hora_cita || dbR.hora_cita || '',
                     prioridad: lr.prioridad || dbR.prioridad || 'Normal',
-                    destino_prioritario: lr.destino_prioritario || dbR.destino_prioritario || ''
+                    destino_prioritario: lr.destino_prioritario || dbR.destino_prioritario || '',
+                    paradas: (lr.paradas && lr.paradas.length > 0) ? lr.paradas : (dbR.paradas || []),
+                    locales: lr.locales || dbR.locales,
+                    m3: lr.m3 || dbR.m3,
+                    peso: lr.peso || dbR.peso,
+                    cantCJ: lr.cantCJ || dbR.cantCJ
                   };
                 }
                 return lr;
