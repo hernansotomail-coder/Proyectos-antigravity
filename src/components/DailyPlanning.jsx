@@ -72,7 +72,12 @@ export const extractDataFromWorkbook = (wb) => {
         const row = sheetData[i];
         if (!row || row.every(cell => cell === '' || cell === null || cell === undefined)) continue;
         const firstCell = String(row[0] || '').trim().toLowerCase();
-        if (firstCell.startsWith('total') || firstCell.startsWith('etiquetas de fila')) continue;
+        if (firstCell.startsWith('total') || firstCell.startsWith('etiquetas de fila')) {
+          currentRuta = '';
+          currentNombreRuta = '';
+          currentFecha = '';
+          continue;
+        }
 
         const obj = {};
         header.forEach((colName, colIdx) => {

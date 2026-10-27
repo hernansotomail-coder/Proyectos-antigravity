@@ -4,6 +4,23 @@ import { supabase } from '../lib/supabase';
 import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
 import { findOperationForRoute, getOperacionName } from '../data/operacionesMaster';
 
+// Cache invalidation version for cross-computer synchronization
+const CURRENT_STORAGE_VERSION = 'v2026_10_28_prod_sync_v6';
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const savedVer = localStorage.getItem('keylogistics_storage_version');
+    if (savedVer !== CURRENT_STORAGE_VERSION) {
+      console.warn(`[StorageSync] Storage version mismatch (${savedVer} vs ${CURRENT_STORAGE_VERSION}). Purging stale local cache.`);
+      localStorage.removeItem('keylogistics_transmitted_assignments');
+      localStorage.removeItem('keylogistics_saved_ruteo');
+      localStorage.removeItem('keylogistics_transformed_routes_v2');
+      localStorage.setItem('keylogistics_storage_version', CURRENT_STORAGE_VERSION);
+    }
+  }
+} catch (e) {
+  console.warn('[StorageSync] Storage version check error:', e);
+}
+
 const PRELOADED_ROUTES_MAP = new Map();
 (PRELOADED_EXCEL_ROUTES || []).forEach(r => {
   PRELOADED_ROUTES_MAP.set(String(r.ruta).trim(), r);
@@ -1155,42 +1172,51 @@ export const usePlanningStore = create((set, get) => ({
             if (!localRows || localRows.length === 0) {
               mergedAssignments[fecha] = dbRows;
             } else {
-              // Fusionar respetando filas ya asignadas localmente
-              const dbRowMap = new Map();
-              dbRows.forEach(r => {
-                const k = `${r.ruta || ''}:::${r.id || ''}`;
-                dbRowMap.set(k, r);
+              // Fusionar respetando filas ya asignadas localmente pero con DB autoritativa en rutas, métricas y paradas
+              const localRowMap = new Map();
+              localRows.forEach(lr => {
+                const k = `${lr.ruta || ''}:::${lr.id || ''}`;
+                localRowMap.set(k, lr);
               });
               
-              mergedAssignments[fecha] = localRows.map(lr => {
-                const k = `${lr.ruta || ''}:::${lr.id || ''}`;
-                const dbR = dbRowMap.get(k) || dbRows.find(dr => dr.ruta && String(dr.ruta).trim() === String(lr.ruta).trim());
-                if (dbR) {
-                  // Si el local tiene conductor y el de la DB está vacío, mantener local
+              mergedAssignments[fecha] = dbRows.map(dbR => {
+                const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
+                const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
+                if (lr) {
+                  // Si el local tiene conductor/camión y el de la DB está vacío, mantener local
                   return {
                     ...dbR,
-                    conductor_name: lr.conductor_name || dbR.conductor_name || '',
-                    conductor_rut: lr.conductor_rut || dbR.conductor_rut || '',
-                    camion: lr.camion || dbR.camion || '',
-                    tipo_equipo: lr.tipo_equipo || dbR.tipo_equipo || '',
-                    rampla: lr.rampla || dbR.rampla || '',
-                    n_vuelta: lr.n_vuelta || dbR.n_vuelta || '',
-                    aux1_name: lr.aux1_name || dbR.aux1_name || '',
-                    aux1_rut: lr.aux1_rut || dbR.aux1_rut || '',
-                    aux2_name: lr.aux2_name || dbR.aux2_name || '',
-                    aux2_rut: lr.aux2_rut || dbR.aux2_rut || '',
-                    turno: lr.turno || dbR.turno || '',
-                    hora_cita: lr.hora_cita || dbR.hora_cita || '',
-                    prioridad: lr.prioridad || dbR.prioridad || 'Normal',
-                    destino_prioritario: lr.destino_prioritario || dbR.destino_prioritario || '',
-                    paradas: (lr.paradas && lr.paradas.length > 0) ? lr.paradas : (dbR.paradas || []),
-                    locales: lr.locales || dbR.locales,
-                    m3: lr.m3 || dbR.m3,
-                    peso: lr.peso || dbR.peso,
-                    cantCJ: lr.cantCJ || dbR.cantCJ
+                    conductor_name: dbR.conductor_name || lr.conductor_name || '',
+                    conductor_rut: dbR.conductor_rut || lr.conductor_rut || '',
+                    camion: dbR.camion || lr.camion || '',
+                    tipo_equipo: dbR.tipo_equipo || lr.tipo_equipo || '',
+                    rampla: dbR.rampla || lr.rampla || '',
+                    n_vuelta: dbR.n_vuelta || lr.n_vuelta || '',
+                    aux1_name: dbR.aux1_name || lr.aux1_name || '',
+                    aux1_rut: dbR.aux1_rut || lr.aux1_rut || '',
+                    aux2_name: dbR.aux2_name || lr.aux2_name || '',
+                    aux2_rut: dbR.aux2_rut || lr.aux2_rut || '',
+                    turno: dbR.turno || lr.turno || '',
+                    hora_cita: dbR.hora_cita || lr.hora_cita || '',
+                    prioridad: dbR.prioridad || lr.prioridad || 'Normal',
+                    destino_prioritario: dbR.destino_prioritario || lr.destino_prioritario || '',
+                    // La DB es la autoridad absoluta de paradas, destinos y métricas
+                    paradas: (dbR.paradas && dbR.paradas.length > 0) ? dbR.paradas : (lr.paradas || []),
+                    locales: dbR.locales != null ? dbR.locales : lr.locales,
+                    m3: dbR.m3 != null ? dbR.m3 : lr.m3,
+                    peso: dbR.peso != null ? dbR.peso : lr.peso,
+                    cantCJ: dbR.cantCJ != null ? dbR.cantCJ : lr.cantCJ
                   };
                 }
-                return lr;
+                return dbR;
+              });
+
+              // Preservar rutas aperturadas localmente si aún no existen en DB
+              const dbRouteKeys = new Set(dbRows.map(dr => String(dr.ruta).trim()));
+              localRows.forEach(lr => {
+                if (lr.isAperturada && !dbRouteKeys.has(String(lr.ruta).trim())) {
+                  mergedAssignments[fecha].push(lr);
+                }
               });
             }
           });

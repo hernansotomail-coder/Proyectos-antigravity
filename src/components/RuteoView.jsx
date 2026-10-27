@@ -797,11 +797,11 @@ export default function RuteoView() {
   // CONSOLIDACIÓN DE VIAJES (TRIPS) EN MATRIZ
   // ==========================================
   const tripsList = useMemo(() => {
-    // 1. Coherencia por número de ruta: garantiza que todas las filas de una misma ruta compartan el mismo conductor y camión
+    // 1. Coherencia por número de ruta y vuelta: garantiza que todas las filas del mismo viaje compartan conductor y camión
     const rutaAssignMap = new Map();
     filteredRoutes.forEach(r => {
       if (r.ruta && r.conductor_name && r.conductor_name !== 'Sin Asignar') {
-        const k = String(r.ruta).trim();
+        const k = `${String(r.ruta).trim()}:::${String(r.n_vuelta || '1').trim()}`;
         if (!rutaAssignMap.has(k)) {
           rutaAssignMap.set(k, {
             conductor_name: r.conductor_name,
@@ -818,7 +818,7 @@ export default function RuteoView() {
     });
 
     const normalizedFilteredRoutes = filteredRoutes.map(row => {
-      const k = row.ruta ? String(row.ruta).trim() : null;
+      const k = row.ruta ? `${String(row.ruta).trim()}:::${String(row.n_vuelta || '1').trim()}` : null;
       if (k && rutaAssignMap.has(k)) {
         const assign = rutaAssignMap.get(k);
         return {
