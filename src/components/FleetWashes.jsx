@@ -77,7 +77,31 @@ export const parseExcelDateValue = (val) => {
     return `${d}/${m}/${y}${time}`;
   }
 
-  return str;
+  return null;
+};
+
+// Helper para validar si un string es una fecha válida
+export const isValidDateString = (val) => {
+  if (!val) return false;
+  return parseExcelDateValue(val) !== null;
+};
+
+// Helper para obtener la fecha de certificación válida de un camión (buscando en carnes_date o rt_date como fallback)
+export const getTruckCertDate = (truck) => {
+  if (!truck) return null;
+  // 1. Si tiene ultima_certificacion y es una fecha válida
+  if (truck.ultima_certificacion && isValidDateString(truck.ultima_certificacion)) {
+    return extractDateOnly(truck.ultima_certificacion);
+  }
+  // 2. Fallback a carnes_date (Resolución Sanitaria / Carnes) si es fecha válida
+  if (truck.carnes_date && isValidDateString(truck.carnes_date)) {
+    return extractDateOnly(truck.carnes_date);
+  }
+  // 3. Fallback a rt_date (Revisión Técnica) si es fecha válida
+  if (truck.rt_date && isValidDateString(truck.rt_date)) {
+    return extractDateOnly(truck.rt_date);
+  }
+  return null;
 };
 
 // Extraer únicamente la parte de fecha DD/MM/YYYY para agrupar y filtrar
@@ -479,8 +503,9 @@ export default function FleetWashes() {
       // Filtro por Región (Requisito 3)
       if (regionFilter !== 'Todas' && f.region !== regionFilter) return false;
 
-      if (certFilter === 'con_cert' && !f.ultima_certificacion) return false;
-      if (certFilter === 'sin_cert' && f.ultima_certificacion) return false;
+      const certDate = getTruckCertDate(f);
+      if (certFilter === 'con_cert' && !certDate) return false;
+      if (certFilter === 'sin_cert' && certDate) return false;
       if (certFilter === 'con_lavado' && !f.fecha_ultimo_lavado) return false;
       if (certFilter === 'sin_lavado' && f.fecha_ultimo_lavado) return false;
 
@@ -515,7 +540,12 @@ export default function FleetWashes() {
       if (emptyB) return -1;
 
       // Si es una fecha (como ultima_certificacion o fecha_ultimo_lavado)
-      if (key === 'ultima_certificacion' || key === 'fecha_ultimo_lavado') {
+      if (key === 'ultima_certificacion') {
+        const timeA = parseDateStrToTime(getTruckCertDate(a)) || 0;
+        const timeB = parseDateStrToTime(getTruckCertDate(b)) || 0;
+        return (timeA - timeB) * factor;
+      }
+      if (key === 'fecha_ultimo_lavado') {
         const timeA = parseDateStrToTime(valA) || 0;
         const timeB = parseDateStrToTime(valB) || 0;
         return (timeA - timeB) * factor;
@@ -1232,14 +1262,17 @@ export default function FleetWashes() {
 
                   {/* Ultima certificación */}
                   <td className="px-3.5 py-2.5 font-medium bg-blue-50/20">
-                    {truck.ultima_certificacion ? (
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
-                        <ShieldCheck size={12} className="text-blue-600" />
-                        {truck.ultima_certificacion}
-                      </span>
-                    ) : (
-                      <span className="text-slate-400 italic text-[11px]">— Sin certificación —</span>
-                    )}
+                    {(() => {
+                      const certDate = getTruckCertDate(truck);
+                      return certDate ? (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                          <ShieldCheck size={12} className="text-blue-600" />
+                          {certDate}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 italic text-[11px]">— Sin certificación —</span>
+                      );
+                    })()}
                   </td>
 
                   {/* Fecha Último Lavado */}

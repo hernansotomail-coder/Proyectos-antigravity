@@ -54,6 +54,12 @@ export const getBriefingOperation = (route) => {
   const rawClient = String(route.cliente || route.servicio || route.Operacion || '').trim();
   const rawRuta = String(route.ruta || '').trim();
 
+  // Requisito: Las rutas que parten con 1500 a 1549 son consideradas con el cliente "El Golfo"
+  const rutaNum = parseInt(rawRuta.replace(/\D/g, ''), 10);
+  if (!isNaN(rutaNum) && rutaNum >= 1500 && rutaNum <= 1549) {
+    return 'El Golfo';
+  }
+
   // Si es servicio SPID explícito (ej: desde Servicios Extras o ruta directa)
   if (rawClient.toUpperCase().includes('SPID') || rawRuta.toUpperCase().includes('SPID')) {
     return 'SPID';

@@ -17,7 +17,7 @@ import { downloadFleetBulkTemplate } from '../lib/excelTemplates';
 // Columnas editables y cargables de flota
 export const FLEET_COLUMNS = [
   { key: 'plate', label: 'Patente' },
-  { key: 'type', label: 'Tipo' },
+  { key: 'type', label: 'Tipo de vehiculo' },
   { key: 'tipo_flota', label: 'Tipo Flota' },
   { key: 'empresa_externa', label: 'Empresa Externa' },
   { key: 'brand', label: 'Marca' },
@@ -35,9 +35,9 @@ export const FLEET_COLUMNS = [
   { key: 'cc', label: 'CC' },
   { key: 'tank_capacity', label: 'Carga Estanque' },
   { key: 'payload', label: 'Carga/Peso' },
-  { key: 'state2', label: 'Estado 2' },
+  { key: 'state2', label: 'Estado' },
   { key: 'resolution', label: 'Resolución' },
-  { key: 'type2', label: 'Tipo 2' },
+  { key: 'type2', label: 'Sistema de frio' },
   { key: 'side_doors', label: 'P. Laterales' },
   { key: 'gps', label: 'GPS' },
   { key: 'operation', label: 'Operación' },
@@ -55,7 +55,7 @@ export const TABLE_COLUMNS = FLEET_COLUMNS.filter(c => !['plate', 'type', 'statu
 
 // Columnas específicas solicitadas para Flota Externa
 export const EXTERNAL_FLEET_COLUMNS = [
-  { key: 'type', label: 'Tipo' },
+  { key: 'type', label: 'Tipo de vehiculo' },
   { key: 'plate', label: 'Patente' },
   { key: 'internal_number', label: 'N*Interno' },
   { key: 'status', label: 'Estado' },
@@ -67,13 +67,13 @@ export const EXTERNAL_FLEET_COLUMNS = [
   { key: 'chassis_number', label: 'N° Chasis' },
   { key: 'cc', label: 'CC' },
   { key: 'payload', label: 'Carga -Peso' },
-  { key: 'state2', label: 'Estado2' },
+  { key: 'state2', label: 'Estado' },
   { key: 'rt_date', label: 'RT', type: 'date' },
   { key: 'gases_date', label: 'Gases', type: 'date' },
   { key: 'pc_date', label: 'PC', type: 'date' },
   { key: 'soap_date', label: 'SOAP', type: 'date' },
   { key: 'resolution', label: 'Resolucion' },
-  { key: 'type2', label: 'Tipo2' },
+  { key: 'type2', label: 'Sistema de frio' },
   { key: 'gps', label: 'GPS' },
   { key: 'operation', label: 'Operación' },
   { key: 'region', label: 'Region' }
@@ -376,16 +376,29 @@ export default function ManageFleet() {
     }) || cols[0] || '';
     setKeyInternalColumn(detectedKey);
 
-    // Auto-mapear columnas de flota que coincidan por nombre
+    // Auto-mapear columnas de flota que coincidan por nombre o alias comunes
     const autoSelected = {};
+    const columnAliases = {
+      type: ['tipodevehiculo', 'tipo', 'tipovehiculo'],
+      type2: ['sistemadefrio', 'tipo2', 'sistemafrigorifico', 'frio', 'tipofrio'],
+      state2: ['estado2', 'estadooperativo'],
+      status: ['estado', 'status'],
+      internal_number: ['interno', 'ninterno', 'codigocamion', 'codigo', 'unidad']
+    };
+
     FLEET_COLUMNS.forEach(fc => {
       const targetNorm = normalizeText(fc.label);
       const targetKeyNorm = normalizeText(fc.key);
+      const aliases = columnAliases[fc.key] || [];
 
       const matchedExcelCol = cols.find(ec => {
         const ecNorm = normalizeText(ec);
-        return ecNorm === targetNorm || ecNorm === targetKeyNorm || 
-               ecNorm.includes(targetNorm) || targetNorm.includes(ecNorm);
+        if (ecNorm === detectedKey) return false;
+        return ecNorm === targetNorm || 
+               ecNorm === targetKeyNorm || 
+               aliases.includes(ecNorm) ||
+               ecNorm.includes(targetNorm) || 
+               targetNorm.includes(ecNorm);
       });
 
       if (matchedExcelCol && matchedExcelCol !== detectedKey) {
@@ -706,7 +719,7 @@ export default function ManageFleet() {
                   { key: 'status', label: 'Estado' },
                   { key: 'plate', label: 'Patente' },
                   { key: 'internal_number', label: 'N° Interno' },
-                  { key: 'type', label: 'Tipo' }
+                  { key: 'type', label: 'Tipo de vehiculo' }
                 ].map(col => {
                   const isSorted = sortConfig.key === col.key;
                   return (

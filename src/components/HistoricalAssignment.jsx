@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { usePlanningStore } from '../store/planningStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
+import { findFarthestComunaForRoute } from './RuteoView';
 
 // COMPONENTE MULTI-SELECT DROPDOWN REUTILIZABLE
 function MultiSelectFilter({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
@@ -362,8 +363,8 @@ export default function HistoricalAssignment() {
   const totalPeso = filteredRecords.reduce((acc, r) => acc + (parseFloat(r.peso) || 0), 0).toFixed(2);
   const totalViajes = groupedHistory.length;
 
-  // Exportar Excel
-  const handleExport = () => {
+  // Exportar Excel Detallado (con desglose por parada)
+  const handleExportDetailed = () => {
     const recordsToExport = filteredRecords.length > 0 ? filteredRecords : activeRecords;
     if (recordsToExport.length === 0) {
       toast.error('No hay registros históricos para exportar.');
@@ -374,6 +375,9 @@ export default function HistoricalAssignment() {
       const rows = [];
       recordsToExport.forEach(r => {
         const paradas = r.paradas || [];
+        const auxStr = [r.aux1_name, r.aux2_name].filter(Boolean).join(' / ') || '-';
+        const referenciaDestino = findFarthestComunaForRoute(r);
+
         if (paradas.length > 0) {
           paradas.forEach(p => {
             rows.push({
@@ -397,7 +401,9 @@ export default function HistoricalAssignment() {
               'Horario': p.horaIni || p.horaFin ? `${p.horaIni} - ${p.horaFin}` : '',
               'm³': p.volumen,
               'Peso (kg)': p.peso,
-              'Cajas (CJ)': p.cantCJ
+              'Cajas (CJ)': p.cantCJ,
+              'Transportista': r.transportista || '-',
+              'Referencia': referenciaDestino
             });
           });
         } else {
@@ -417,19 +423,63 @@ export default function HistoricalAssignment() {
             'Rampla': r.rampla || '',
             'm³': r.m3,
             'Peso (kg)': r.peso || 0,
-            'Locales': r.locales
+            'Locales': r.locales,
+            'Transportista': r.transportista || '-',
+            'Referencia': referenciaDestino
           });
         }
       });
 
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Histórico Disponibilización');
-      XLSX.writeFile(wb, `Historico_Disponibilizacion_${selectedDate}.xlsx`);
-      toast.success(`Excel histórico generado correctamente (${rows.length} filas).`);
+      XLSX.utils.book_append_sheet(wb, ws, 'Histórico Detallado');
+      XLSX.writeFile(wb, `Historico_Detallado_${selectedDate}.xlsx`);
+      toast.success(`Excel histórico detallado generado correctamente (${rows.length} filas).`);
     } catch (err) {
       console.error(err);
-      toast.error('Error al generar Excel.');
+      toast.error('Error al generar Excel detallado.');
+    }
+  };
+
+  // Exportar Excel Consolidado (tal cual como está la matriz sin el detalle por destino)
+  const handleExportConsolidated = () => {
+    const recordsToExport = filteredRecords.length > 0 ? filteredRecords : activeRecords;
+    if (recordsToExport.length === 0) {
+      toast.error('No hay registros históricos para exportar.');
+      return;
+    }
+
+    try {
+      const rows = recordsToExport.map(r => {
+        const auxStr = [r.aux1_name, r.aux2_name].filter(Boolean).join(' / ') || '-';
+        const referenciaDestino = findFarthestComunaForRoute(r);
+        return {
+          'Fecha': r.fecha,
+          'Conductor': r.conductor_name || 'Sin asignar',
+          'RUT Conductor': r.conductor_rut || '',
+          'Auxiliar': auxStr,
+          'Camión': r.camion || '-',
+          'Rampla': r.rampla || '-',
+          'N° Vuelta': r.n_vuelta ? `Vuelta ${r.n_vuelta}` : 'Vuelta 1',
+          'N° Ruta': r.ruta,
+          'Cliente': r.cliente || '-',
+          'Locales': parseInt(r.locales, 10) || 0,
+          'm³': parseFloat(r.m3) || 0,
+          'Peso (kg)': parseFloat(r.peso) || 0,
+          'CJ': parseInt(r.cantCJ || r.cajas, 10) || 0,
+          'Transportista': r.transportista || '-',
+          'Referencia': referenciaDestino
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Histórico Consolidado');
+      XLSX.writeFile(wb, `Historico_Consolidado_${selectedDate}.xlsx`);
+      toast.success(`Excel histórico consolidado generado correctamente (${rows.length} rutas).`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al generar Excel consolidado.');
     }
   };
 
@@ -450,13 +500,22 @@ export default function HistoricalAssignment() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <Button 
-            onClick={handleExport}
-            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-sm"
+            onClick={handleExportDetailed}
+            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+            title="Descargar desglose completo de todas las paradas y destinos por ruta"
           >
             <Download size={15} />
-            Exportar Histórico
+            Historico detallado
+          </Button>
+          <Button 
+            onClick={handleExportConsolidated}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+            title="Descargar matriz consolidada tal cual se visualiza en pantalla (sin desglose por paradas)"
+          >
+            <Download size={15} />
+            Historico consolidado
           </Button>
         </div>
       </div>
@@ -606,7 +665,7 @@ export default function HistoricalAssignment() {
                 <th className="px-3 py-2.5 text-right font-mono">Peso (kg)</th>
                 <th className="px-2.5 py-2.5 text-right font-mono">CJ</th>
                 <th className="px-3 py-2.5 text-purple-700">Transportista</th>
-                <th className="px-2.5 py-2.5">Tipo Servicio</th>
+                <th className="px-2.5 py-2.5">Referencia</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
@@ -739,10 +798,11 @@ export default function HistoricalAssignment() {
                         )}
                       </td>
 
-                      {/* Tipo Servicio */}
+                      {/* Referencia (destino más lejano que viene del Ruteo) */}
                       <td className="px-2.5 py-2">
-                        <span className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-medium">
-                          {r.tipo_servicio || 'Centralizado'}
+                        <span className="text-[10px] bg-blue-50 text-blue-800 border border-blue-200 px-2 py-0.5 rounded-full font-bold flex items-center gap-1 w-fit" title={`Destino más lejano: ${findFarthestComunaForRoute(r)}`}>
+                          <MapPin size={10} className="text-blue-600 shrink-0" />
+                          {findFarthestComunaForRoute(r)}
                         </span>
                       </td>
                     </tr>

@@ -8331,12 +8331,96 @@ export const ALL_OPERACIONES = [
   "UM Puerto Montt"
 ];
 
+// Helper para normalizar y obtener el nombre canónico oficial de una operación / cliente
+export function canonicalizeOperation(name) {
+  if (!name || typeof name !== 'string') return '';
+  const trimmed = name.trim();
+  const upper = trimmed.toUpperCase();
+
+  // 1. El Golfo (incluye rutas de congelados)
+  if (upper.includes('GOLFO') || upper.includes('CONGELADO')) return 'El Golfo';
+  // 2. Streat Burguer (con o sin 'u')
+  if (upper.includes('STREAT') || upper.includes('BURGUER') || upper.includes('BURGER')) return 'Streat Burguer';
+  // 3. Petroleras (soporta Petrolera, Petroleras, Especiales Petrolera, Redespacho Petrolera)
+  if (upper.includes('PETROLER')) return 'Petroleras';
+  // 4. Carls Jr (soporta Carls, Carl's, Especiales Carls)
+  if (upper.includes('CARL')) return 'Carls Jr';
+  // 5. Oxxo (soporta Oxxo, Especiales Oxxo)
+  if (upper.includes('OXXO')) return 'Oxxo';
+  // 6. Subway (soporta Subway, SBW, SBW Redespacho)
+  if (upper.includes('SUBWAY') || upper.includes('SBW')) return 'Subway';
+  // 7. Juan Valdez
+  if (upper.includes('VALDEZ')) return 'Juan Valdez';
+  // 8. Aramark
+  if (upper.includes('ARAMARK')) return 'Aramark';
+  // 9. Cantabria
+  if (upper.includes('CANTABRIA')) return 'Cantabria';
+  // 10. Keyfoods
+  if (upper.includes('KEYFOOD')) return 'Keyfoods';
+  // 11. Newrest Centros Remotos vs Newrest ByI
+  if (upper.includes('CENTROS REMOTOS')) return 'Newrest Centros Remotos';
+  if (upper.includes('NEWREST')) return 'Newrest ByI';
+  // 12. Sbarro Copec
+  if (upper.includes('SBARRO')) return 'Sbarro Copec';
+  // 13. SPID
+  if (upper.includes('SPID')) return 'SPID';
+  // 14. Enex
+  if (upper.includes('ENEX')) return 'Enex Unitario';
+  // 15. Franquicia Copec
+  if (upper.includes('FRANQUICIA COPEC')) return 'Franquicia Copec';
+  // 16. Panstars
+  if (upper.includes('PANSTAR')) return 'Panstars';
+  // 17. Carga Consolidada
+  if (upper.includes('CONSOLIDADA')) return 'Carga Consolidada';
+  // 18. SODEXO
+  if (upper.includes('SODEXO')) return 'SODEXO';
+  // 19. Nutrisco
+  if (upper.includes('NUTRISCO')) return 'Nutrisco';
+  // 20. Nocturna
+  if (upper.includes('NOCTURNA')) return 'Nocturna';
+  // 21. Sea Garden
+  if (upper.includes('SEA GARDEN')) return 'Sea Garden';
+  // 22. UM Unidades Móviles
+  if (upper.includes('ANTOFAGASTA')) return 'UM Antofagasta';
+  if (upper.includes('CORONEL')) return 'UM Coronel';
+  if (upper.includes('LA SERENA')) return 'UM La Serena';
+  if (upper.includes('PUERTO MONTT')) return 'UM Puerto Montt';
+
+  // Buscar coincidencia exacta insensible a mayúsculas en ALL_OPERACIONES
+  const matched = ALL_OPERACIONES.find(o => o.toLowerCase() === trimmed.toLowerCase());
+  if (matched) return matched;
+
+  return trimmed;
+}
+
+// Helper para verificar si dos operaciones coinciden (soporta nombres canónicos y variantes como Petrolera / Petroleras)
+export function isOperationMatching(opA, opB) {
+  if (!opA || !opB) return false;
+  const cA = canonicalizeOperation(opA).toLowerCase();
+  const cB = canonicalizeOperation(opB).toLowerCase();
+  if (cA === cB) return true;
+  if (cA.includes(cB) || cB.includes(cA)) return true;
+  return false;
+}
+
 // Helper para buscar los datos de operación de una ruta
 export function findOperationForRoute(routeCode) {
   if (!routeCode) return null;
   const clean = String(routeCode).trim().replace(/^\D+/, '');
   const match = clean.match(/^\d+/);
   const key = match ? match[0] : clean;
+  
+  // Requisito 1: Las rutas que parten con 1500 a 1549 son consideradas con el cliente "El Golfo"
+  const num = parseInt(key, 10);
+  if (!isNaN(num) && num >= 1500 && num <= 1549) {
+    return {
+      ruta: String(num),
+      denominacion: 'RUTA CONGELADOS',
+      operacion: 'El Golfo',
+      transportista: 'T400'
+    };
+  }
+
   return ROUTE_OPERATIONS_MAP[key] || ROUTE_OPERATIONS_MAP[clean] || null;
 }
 
@@ -8344,10 +8428,10 @@ export function findOperationForRoute(routeCode) {
 export function getOperacionName(routeCode, fallbackClient = '') {
   const found = findOperationForRoute(routeCode);
   if (found && found.operacion && found.operacion !== 'Sin Operación') {
-    return found.operacion;
+    return canonicalizeOperation(found.operacion);
   }
   if (fallbackClient && String(fallbackClient).trim()) {
-    return String(fallbackClient).trim();
+    return canonicalizeOperation(String(fallbackClient).trim());
   }
   return 'Otros';
 }
@@ -8360,11 +8444,9 @@ export function splitOperationNames(raw) {
   parts.forEach(p => {
     const trimmed = p.trim();
     if (!trimmed) return;
-    const matched = ALL_OPERACIONES.find(o => o.toLowerCase() === trimmed.toLowerCase());
-    if (matched) {
-      if (!result.includes(matched)) result.push(matched);
-    } else {
-      if (!result.includes(trimmed)) result.push(trimmed);
+    const canon = canonicalizeOperation(trimmed);
+    if (canon && !result.includes(canon)) {
+      result.push(canon);
     }
   });
   return result;
@@ -8374,6 +8456,13 @@ export function splitOperationNames(raw) {
 export function getAllOperationsForRoute(r) {
   if (!r) return [];
   const ops = new Set();
+
+  // Requisito: Rutas 1500 a 1549 siempre "El Golfo"
+  const rawRuta = String(r.ruta || '').trim();
+  const num = parseInt(rawRuta.replace(/\D/g, ''), 10);
+  if (!isNaN(num) && num >= 1500 && num <= 1549) {
+    ops.add('El Golfo');
+  }
 
   // 1. Catálogo maestro por número de ruta
   const found = findOperationForRoute(r.ruta);
@@ -8386,9 +8475,12 @@ export function getAllOperationsForRoute(r) {
     splitOperationNames(r.operacion).forEach(o => ops.add(o));
   }
 
-  // 3. Campo r.cliente o r.nombreRuta
+  // 3. Campo r.cliente o r.denominacion o r.nombreRuta
   if (r.cliente && typeof r.cliente === 'string') {
     splitOperationNames(r.cliente).forEach(o => ops.add(o));
+  }
+  if (r.denominacion && typeof r.denominacion === 'string') {
+    splitOperationNames(r.denominacion).forEach(o => ops.add(o));
   }
   if (r.nombreRuta && typeof r.nombreRuta === 'string') {
     splitOperationNames(r.nombreRuta).forEach(o => ops.add(o));
@@ -8400,11 +8492,10 @@ export function getAllOperationsForRoute(r) {
       if (p.operacion) splitOperationNames(p.operacion).forEach(o => ops.add(o));
       if (p.cliente) splitOperationNames(p.cliente).forEach(o => ops.add(o));
       if (p.destino) {
-        ALL_OPERACIONES.forEach(knownOp => {
-          if (p.destino.toLowerCase().includes(knownOp.toLowerCase())) {
-            ops.add(knownOp);
-          }
-        });
+        const canonDest = canonicalizeOperation(p.destino);
+        if (canonDest && ALL_OPERACIONES.includes(canonDest)) {
+          ops.add(canonDest);
+        }
       }
     });
   }
@@ -8412,7 +8503,7 @@ export function getAllOperationsForRoute(r) {
   // 5. Fallback si no se encontró
   if (ops.size === 0) {
     const fallback = getOperacionName(r.ruta, r.operacion || r.cliente);
-    if (fallback) ops.add(fallback);
+    if (fallback) ops.add(canonicalizeOperation(fallback));
   }
 
   return Array.from(ops);

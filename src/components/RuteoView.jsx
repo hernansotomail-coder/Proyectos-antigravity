@@ -15,7 +15,7 @@ import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
-import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute } from '../data/operacionesMaster';
+import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute, canonicalizeOperation, isOperationMatching } from '../data/operacionesMaster';
 
 // ==========================================
 // 1. MAPA DE DISTANCIAS Y CÁLCULO DE COMUNA
@@ -567,6 +567,28 @@ export default function RuteoView() {
     return false;
   }, [activeDate, ruteoOverrides]);
 
+  // Mapa de operaciones por camión y vuelta (para preservar combinaciones de rutas de clientes compartidos)
+  const truckToOperationsMap = useMemo(() => {
+    const map = new Map();
+    currentRoutes.forEach(r => {
+      const camionKey = (r.camion || '').trim();
+      if (!camionKey || camionKey.toLowerCase() === 'sin camión' || camionKey.toLowerCase() === 'sin camion') {
+        return;
+      }
+      const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const key = `${camionKey}:::${vueltaKey}`;
+      if (!map.has(key)) {
+        map.set(key, new Set());
+      }
+      const ops = getAllOperationsForRoute(r);
+      ops.forEach(op => {
+        const canon = canonicalizeOperation(op);
+        if (canon) map.get(key).add(canon);
+      });
+    });
+    return map;
+  }, [currentRoutes]);
+
   // Función unificada para verificar si una ruta cumple los filtros (excluyendo un filtro para cálculo de opciones combinadas)
   const isRouteMatching = useCallback((r, excludeFilter = null) => {
     // 1. Filtro Rápido global
@@ -611,11 +633,19 @@ export default function RuteoView() {
       if (!selectedVueltas.includes(vLabel)) return false;
     }
 
-    // 8. Operación Multi-selección (Filtro por Operación / Cliente de Briefing, soporta multi-operación)
+    // 8. Operación Multi-selección (Filtro por Operación / Cliente de Briefing, soporta multi-operación y viajes combinados)
     if (excludeFilter !== 'operacion' && selectedOperations.length > 0) {
-      const routeOps = getAllOperationsForRoute(r);
+      const camionKey = (r.camion || '').trim();
+      const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const truckKey = `${camionKey}:::${vueltaKey}`;
+      
+      let routeOps = getAllOperationsForRoute(r).map(o => canonicalizeOperation(o)).filter(Boolean);
+      if (camionKey && truckToOperationsMap.has(truckKey)) {
+        routeOps = Array.from(new Set([...routeOps, ...truckToOperationsMap.get(truckKey)]));
+      }
+
       const matchesOp = selectedOperations.some(sel =>
-        routeOps.some(ro => ro.toLowerCase() === sel.toLowerCase())
+        routeOps.some(ro => isOperationMatching(ro, sel))
       );
       if (!matchesOp) return false;
     }
@@ -630,7 +660,8 @@ export default function RuteoView() {
     selectedConductores,
     selectedAuxiliares,
     selectedVueltas,
-    selectedOperations
+    selectedOperations,
+    truckToOperationsMap
   ]);
 
   // Listas de opciones dinámicas y combinadas (Requisito 2)
@@ -720,11 +751,10 @@ export default function RuteoView() {
     const map = new Map();
     currentRoutes.forEach(r => {
       const routeOps = getAllOperationsForRoute(r);
-      routeOps.forEach(opName => {
-        if (opName) {
-          const key = opName.toLowerCase();
-          map.set(key, (map.get(key) || 0) + 1);
-        }
+      const uniqueOps = new Set(routeOps.map(op => canonicalizeOperation(op)).filter(Boolean));
+      uniqueOps.forEach(opName => {
+        const key = opName.toLowerCase();
+        map.set(key, (map.get(key) || 0) + 1);
       });
     });
     return map;
@@ -734,9 +764,15 @@ export default function RuteoView() {
     const presentOps = new Set();
     currentRoutes.forEach(r => {
       const routeOps = getAllOperationsForRoute(r);
-      routeOps.forEach(opName => presentOps.add(opName));
+      routeOps.forEach(opName => {
+        const canon = canonicalizeOperation(opName);
+        if (canon) presentOps.add(canon);
+      });
     });
-    ALL_OPERACIONES.forEach(op => presentOps.add(op));
+    ALL_OPERACIONES.forEach(op => {
+      const canon = canonicalizeOperation(op);
+      if (canon) presentOps.add(canon);
+    });
 
     const opsArray = Array.from(presentOps);
     return opsArray.sort((a, b) => {
@@ -884,15 +920,15 @@ export default function RuteoView() {
     return Array.from(tripMap.values()).map(trip => {
       const rutasStr = trip.rutas.map(r => r.ruta).join('+');
       
-      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación)
-      const opsSet = new Set(trip.rutas.flatMap(r => getAllOperationsForRoute(r)).filter(Boolean));
+      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación y combinaciones)
+      const opsSet = new Set(trip.rutas.flatMap(r => getAllOperationsForRoute(r)).map(op => canonicalizeOperation(op)).filter(Boolean));
       const operacionStr = Array.from(opsSet).join(' + ') || 'FAST FOOD';
 
       // Zona detallada: [Ruta], [Operación/Cliente], [Comuna más lejana], [Locales] LC, [m³] m³
       const zonaItems = trip.rutas.map(r => {
         const farthest = findFarthestComunaForRoute(r);
         const m3Fmt = (parseFloat(r.m3) || 0).toFixed(4);
-        const opName = getOperacionName(r.ruta, r.operacion || r.cliente);
+        const opName = canonicalizeOperation(getOperacionName(r.ruta, r.operacion || r.cliente));
         return {
           ruta: r.ruta,
           cliente: opName,
