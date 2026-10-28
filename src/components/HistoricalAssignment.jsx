@@ -10,6 +10,7 @@ import { usePlanningStore, sortDatesDescending, getMostRecentDate } from '../sto
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { findFarthestComunaForRoute } from './RuteoView';
+import { getBriefingOperation } from './Briefing';
 
 // COMPONENTE MULTI-SELECT DROPDOWN REUTILIZABLE
 function MultiSelectFilter({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
@@ -761,8 +762,8 @@ export default function HistoricalAssignment() {
                       </td>
 
                       {/* Cliente */}
-                      <td className="px-3 py-2 font-medium text-slate-800 max-w-[180px] truncate" title={r.cliente}>
-                        {r.cliente}
+                      <td className="px-3 py-2 font-medium text-slate-800 max-w-[180px] truncate" title={getBriefingOperation(r) || r.cliente}>
+                        {getBriefingOperation(r) || r.cliente}
                       </td>
 
                       {/* Locales */}

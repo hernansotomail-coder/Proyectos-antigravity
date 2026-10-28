@@ -56,6 +56,20 @@ export const getBriefingOperation = (route) => {
   const rawDenom = String(route.denominacion || route.nombreRuta || '').trim();
   const rawOp = String(route.operacion || '').trim();
 
+  // Requisito 2: Todo lo que empiece con "RUTA FAST FOOD" deben ser de Petroleras
+  const anyFastFood = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+    const s = String(val || '').trim().toUpperCase();
+    return s.startsWith('RUTA FAST FOOD') || s.startsWith('FAST FOOD') || s.includes('FAST FOOD');
+  });
+  if (anyFastFood) return 'Petroleras';
+
+  // Requisito 3: Todo lo que dice "ARAMARK Ruta " considerarlo como "Aramark"
+  const anyAramark = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+    const s = String(val || '').trim().toUpperCase();
+    return s.includes('ARAMARK RUTA') || s.startsWith('ARAMARK') || s.includes('ARAMARK');
+  });
+  if (anyAramark) return 'Aramark';
+
   // Requisito 1: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
   const anyCarls = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
@@ -108,6 +122,8 @@ export const getBriefingOperation = (route) => {
 export const normalizeClientForBriefing = (rawName) => {
   if (!rawName) return 'OTROS';
   const upper = String(rawName).toUpperCase().trim();
+  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD')) return 'Petroleras';
+  if (upper.includes('ARAMARK RUTA') || upper.startsWith('ARAMARK') || upper.includes('ARAMARK')) return 'Aramark';
   if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
   if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
   if (upper.includes('SPID')) return 'SPID';

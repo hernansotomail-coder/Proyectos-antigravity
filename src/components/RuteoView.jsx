@@ -16,6 +16,7 @@ import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
 import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute, canonicalizeOperation, isOperationMatching } from '../data/operacionesMaster';
+import { getBriefingOperation } from './Briefing';
 
 // ==========================================
 // 1. MAPA DE DISTANCIAS Y CÁLCULO DE COMUNA
@@ -612,10 +613,18 @@ export default function RuteoView() {
       if (!selectedTransportistas.includes(tVal)) return false;
     }
 
-    // 3. Cliente
+    // 3. Cliente (Filtro por Operación / Cliente idéntico a Briefing)
     if (excludeFilter !== 'cliente' && selectedClientes.length > 0) {
-      const cVal = r.cliente || 'Sin Cliente';
-      if (!selectedClientes.includes(cVal)) return false;
+      const op = getBriefingOperation(r);
+      const allOps = getAllOperationsForRoute(r).map(o => canonicalizeOperation(o));
+      const matches = selectedClientes.some(sc => {
+        const scLower = sc.toLowerCase();
+        if (op && (op.toLowerCase() === scLower || op.toLowerCase().includes(scLower) || scLower.includes(op.toLowerCase()))) return true;
+        if (allOps.some(o => o.toLowerCase() === scLower || o.toLowerCase().includes(scLower) || scLower.includes(o.toLowerCase()))) return true;
+        if (r.cliente && r.cliente.toLowerCase().includes(scLower)) return true;
+        return false;
+      });
+      if (!matches) return false;
     }
 
     // 4. Ruta
@@ -691,7 +700,13 @@ export default function RuteoView() {
     selectedClientes.forEach(c => set.add(c));
     currentRoutes.forEach(r => {
       if (isRouteMatching(r, 'cliente')) {
-        set.add(r.cliente || 'Sin Cliente');
+        const op = getBriefingOperation(r);
+        if (op && op !== 'Otros') set.add(op);
+        const allOps = getAllOperationsForRoute(r);
+        allOps.forEach(o => {
+          const canon = canonicalizeOperation(o);
+          if (canon) set.add(canon);
+        });
       }
     });
     return Array.from(set).filter(Boolean).sort();
@@ -931,14 +946,17 @@ export default function RuteoView() {
       const rutasStr = trip.rutas.map(r => r.ruta).join('+');
       
       // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación y combinaciones)
-      const opsSet = new Set(trip.rutas.flatMap(r => getAllOperationsForRoute(r)).map(op => canonicalizeOperation(op)).filter(Boolean));
+      const opsSet = new Set([
+        ...trip.rutas.map(r => getBriefingOperation(r)),
+        ...trip.rutas.flatMap(r => getAllOperationsForRoute(r))
+      ].map(op => canonicalizeOperation(op)).filter(Boolean));
       const operacionStr = Array.from(opsSet).join(' + ') || 'FAST FOOD';
 
       // Zona detallada: [Ruta], [Operación/Cliente], [Comuna más lejana], [Locales] LC, [m³] m³
       const zonaItems = trip.rutas.map(r => {
         const farthest = findFarthestComunaForRoute(r);
         const m3Fmt = (parseFloat(r.m3) || 0).toFixed(4);
-        const opName = canonicalizeOperation(getOperacionName(r.ruta, r.operacion || r.cliente));
+        const opName = canonicalizeOperation(getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente));
         return {
           ruta: r.ruta,
           cliente: opName,

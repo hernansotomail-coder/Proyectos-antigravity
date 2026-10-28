@@ -8303,6 +8303,7 @@ export const ROUTE_OPERATIONS_MAP = {
 };
 
 export const ALL_OPERACIONES = [
+  "Aramark",
   "Cantabria",
   "Carga Consolidada",
   "Carls Jr",
@@ -8336,6 +8337,15 @@ export function canonicalizeOperation(name) {
   if (!name || typeof name !== 'string') return '';
   const trimmed = name.trim();
   const upper = trimmed.toUpperCase();
+
+  // Requisito 2: Todo lo que empiece con "RUTA FAST FOOD" deben ser de Petroleras
+  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD')) return 'Petroleras';
+  // Requisito 3: Todo lo que dice "ARAMARK Ruta " considerarlo como "Aramark"
+  if (upper.includes('ARAMARK RUTA') || upper.startsWith('ARAMARK') || upper.includes('ARAMARK')) return 'Aramark';
+  // Requisito: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
+  if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
+  // Requisito: Las rutas que parten con "SBW " dentro de "Subway"
+  if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
 
   // 1. El Golfo (incluye rutas de congelados)
   if (upper.includes('GOLFO') || upper.includes('CONGELADO')) return 'El Golfo';
@@ -8462,6 +8472,16 @@ export function getAllOperationsForRoute(r) {
   const num = parseInt(rawRuta.replace(/\D/g, ''), 10);
   if (!isNaN(num) && num >= 1500 && num <= 1549) {
     ops.add('El Golfo');
+  }
+
+  // Requisito 2: Todo lo que empiece con "RUTA FAST FOOD" deben ser de Petroleras
+  const combinedStr = [r.ruta, r.cliente, r.denominacion, r.nombreRuta, r.operacion].filter(Boolean).join(' ').toUpperCase();
+  if (combinedStr.includes('RUTA FAST FOOD') || combinedStr.includes('FAST FOOD')) {
+    ops.add('Petroleras');
+  }
+  // Requisito 3: Todo lo que dice "ARAMARK Ruta " considerarlo como "Aramark"
+  if (combinedStr.includes('ARAMARK')) {
+    ops.add('Aramark');
   }
 
   // 1. Catálogo maestro por número de ruta

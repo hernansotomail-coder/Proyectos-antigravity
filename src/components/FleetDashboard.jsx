@@ -13,6 +13,16 @@ export const parseDocDate = (val) => {
   const str = String(val).trim();
   if (!str || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'nan' || str.toLowerCase() === 'null') return null;
 
+  // Soporte para fechas seriales numéricas de Excel (ej: 47900, 48514)
+  const num = Number(str);
+  if (!isNaN(num) && num > 20000 && num < 80000) {
+    const dObj = new Date(Math.round((num - 25569) * 86400 * 1000));
+    const y = dObj.getUTCFullYear();
+    const m = String(dObj.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(dObj.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   // Formato YYYY-MM-DD
   const isoMatch = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (isoMatch) {

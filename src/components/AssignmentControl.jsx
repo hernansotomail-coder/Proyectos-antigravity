@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Filter, Search, RefreshCw, User, Truck, MapPin, 
+  Filter, Search, RefreshCw, User, Users, Truck, MapPin, 
   ChevronUp, ChevronDown, ChevronRight, CheckCircle2, Circle, Check,
   Calendar, Layers, Trash2, ArrowRight, UserCheck, Shield, Sparkles,
   Save, Eye, Download, Send, AlertTriangle, X, Scissors, History, CheckSquare, Plus
@@ -13,6 +13,7 @@ import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostR
 import { useAttendanceStore } from '../store/attendanceStore';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
+import { getBriefingOperation } from './Briefing';
 
 // Badge para columna Ambiente
 export function AmbienteBadge({ ambiente }) {
@@ -836,7 +837,13 @@ export default function AssignmentControl() {
         }
       }
 
-      if (matrixFilterCliente && !String(a.cliente).toLowerCase().includes(matrixFilterCliente.toLowerCase())) return false;
+      if (matrixFilterCliente) {
+        const opName = getBriefingOperation(a);
+        const search = matrixFilterCliente.toLowerCase();
+        if (!String(a.cliente || '').toLowerCase().includes(search) && !opName.toLowerCase().includes(search)) {
+          return false;
+        }
+      }
       if (matrixFilterEstado === 'Conductor asignado' && !a.conductor_name) return false;
       if (matrixFilterEstado === 'Sin conductor' && a.conductor_name) return false;
       if (matrixFilterEstado === 'Camion asignado' && !a.camion) return false;
@@ -877,8 +884,14 @@ export default function AssignmentControl() {
         if (!selectedTransportistas.includes(trans)) return;
       }
 
-      // Filtro Cliente
-      if (matrixFilterCliente && !String(row.cliente).toLowerCase().includes(matrixFilterCliente.toLowerCase())) return;
+      // Filtro Cliente (con compatibilidad de Operación Briefing)
+      if (matrixFilterCliente) {
+        const opName = getBriefingOperation(row);
+        const search = matrixFilterCliente.toLowerCase();
+        if (!String(row.cliente || '').toLowerCase().includes(search) && !opName.toLowerCase().includes(search)) {
+          return;
+        }
+      }
 
       const vueltaKey = row.n_vuelta ? `Vuelta ${row.n_vuelta}` : 'Sin Vuelta';
       const groupKey = `${row.conductor_name}:::${vueltaKey}`;
@@ -1337,6 +1350,78 @@ export default function AssignmentControl() {
   const totalPeso = filteredAssignments.reduce((acc, curr) => acc + (parseFloat(curr.peso) || 0), 0).toFixed(2);
   const totalVueltas = filteredAssignments.length;
 
+  // Tarjetas de dotaciones y camiones ocupados vs libres (Requisito 1)
+  const occupancyStats = useMemo(() => {
+    const activeStaff = (staffList || []).filter(s => s && (s.status === 'Activo' || !s.status));
+    const activeFleet = (fleetList || []).filter(f => f && f.status !== 'Baja' && f.status !== 'Dado de baja');
+
+    const totalDotPropia = activeStaff.filter(s => (s.tipo_dotacion || '').toLowerCase() !== 'externo' && !s.empresa_externa && !(s.rut && String(s.rut).startsWith('EXT-'))).length;
+    const totalDotExt = activeStaff.filter(s => (s.tipo_dotacion || '').toLowerCase() === 'externo' || s.empresa_externa || (s.rut && String(s.rut).startsWith('EXT-'))).length;
+
+    const totalCamionesPropios = activeFleet.filter(f => !isVehicleExternal(f)).length;
+    const totalCamionesExt = activeFleet.filter(f => isVehicleExternal(f)).length;
+
+    const occStaffPropiaSet = new Set();
+    const occStaffExtSet = new Set();
+    const occCamionPropioSet = new Set();
+    const occCamionExtSet = new Set();
+
+    (assignmentsForDate || []).forEach(r => {
+      // Camiones
+      if (r.camion && !r.camion.toLowerCase().includes('sin cami') && r.camion.trim() !== '') {
+        const rawCam = r.camion.trim();
+        const matchParen = rawCam.match(/^([^(]+)(?:\(([^)]+)\))?/);
+        const cCode = (matchParen ? matchParen[1] : rawCam).trim().toLowerCase();
+        const cPlate = (matchParen && matchParen[2] ? matchParen[2] : (r.patente || '')).trim().toLowerCase();
+        
+        const foundTruck = fleetList.find(f => {
+          const fCode = (f.internal_number || '').trim().toLowerCase();
+          const fPlate = (f.plate || '').trim().toLowerCase();
+          if (cCode && fCode && (fCode === cCode || cCode.startsWith(fCode) || fCode.startsWith(cCode))) return true;
+          if (cPlate && fPlate && fPlate === cPlate) return true;
+          return false;
+        });
+
+        const isExt = foundTruck 
+          ? isVehicleExternal(foundTruck)
+          : (r.tipo_flota === 'Externa' || !!r.empresa_externa || isVehicleExternal({ internal_number: cCode, plate: cPlate, transportista: r.transportista }));
+
+        if (isExt) {
+          occCamionExtSet.add(cPlate || cCode || rawCam);
+        } else {
+          occCamionPropioSet.add(cPlate || cCode || rawCam);
+        }
+      }
+
+      // Dotaciones (Conductores y Auxiliares)
+      [r.conductor_name, r.aux1_name, r.aux2_name].forEach(name => {
+        if (!name || name.toLowerCase().includes('sin ') || name.trim() === '') return;
+        const cleanName = name.trim();
+        const foundStaff = staffList.find(s => s.name && s.name.trim().toLowerCase() === cleanName.toLowerCase());
+        const isExt = foundStaff 
+          ? ((foundStaff.tipo_dotacion || '').toLowerCase() === 'externo' || !!foundStaff.empresa_externa || (foundStaff.rut && String(foundStaff.rut).startsWith('EXT-')))
+          : (cleanName.toUpperCase().startsWith('EXT-') || (r.tipo_flota === 'Externa'));
+
+        if (isExt) {
+          occStaffExtSet.add(cleanName.toLowerCase());
+        } else {
+          occStaffPropiaSet.add(cleanName.toLowerCase());
+        }
+      });
+    });
+
+    return {
+      dotPropiaOcupada: occStaffPropiaSet.size,
+      dotPropiaTotal: Math.max(occStaffPropiaSet.size, totalDotPropia),
+      dotExtOcupada: occStaffExtSet.size,
+      dotExtTotal: Math.max(occStaffExtSet.size, totalDotExt),
+      camionesPropiosOcupados: occCamionPropioSet.size,
+      camionesPropiosTotal: Math.max(occCamionPropioSet.size, totalCamionesPropios),
+      camionesExtOcupados: occCamionExtSet.size,
+      camionesExtTotal: Math.max(occCamionExtSet.size, totalCamionesExt)
+    };
+  }, [assignmentsForDate, staffList, fleetList]);
+
   return (
     <div className="flex flex-col h-full bg-slate-50 p-2 gap-2 overflow-hidden">
       
@@ -1344,7 +1429,7 @@ export default function AssignmentControl() {
       <header className="bg-white rounded-xl shadow-sm border border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
         
         {/* Selector "Fecha a disponibilizar" */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-xl">
             <Calendar size={16} className="text-blue-600 shrink-0" />
             <div className="flex flex-col">
@@ -1367,12 +1452,41 @@ export default function AssignmentControl() {
             </div>
           </div>
 
-          <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500">
-            <span className="bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-lg text-[11px]">
+          {/* Tarjetas resumen: Locales, m3, Dotaciones y Camiones (Requisito 1) */}
+          <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500 flex-wrap">
+            <span className="bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap">
               {totalLocales} locales
             </span>
-            <span className="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-lg text-[11px]">
+            <span className="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap">
               {totalM3} m³
+            </span>
+            <span 
+              className="bg-blue-50 text-blue-700 border border-blue-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
+              title={`Dotación Propia: ${occupancyStats.dotPropiaOcupada} ocupadas / ${occupancyStats.dotPropiaTotal} totales (${occupancyStats.dotPropiaTotal - occupancyStats.dotPropiaOcupada} libres)`}
+            >
+              <Users size={12} className="text-blue-600" />
+              {occupancyStats.dotPropiaOcupada}/{occupancyStats.dotPropiaTotal} dot. propia
+            </span>
+            <span 
+              className="bg-purple-50 text-purple-700 border border-purple-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
+              title={`Dotación Externa: ${occupancyStats.dotExtOcupada} ocupadas / ${occupancyStats.dotExtTotal} totales (${occupancyStats.dotExtTotal - occupancyStats.dotExtOcupada} libres)`}
+            >
+              <Users size={12} className="text-purple-600" />
+              {occupancyStats.dotExtOcupada}/{occupancyStats.dotExtTotal} dot. ext
+            </span>
+            <span 
+              className="bg-sky-50 text-sky-700 border border-sky-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
+              title={`Camiones Propios: ${occupancyStats.camionesPropiosOcupados} ocupados / ${occupancyStats.camionesPropiosTotal} totales (${occupancyStats.camionesPropiosTotal - occupancyStats.camionesPropiosOcupados} libres)`}
+            >
+              <Truck size={12} className="text-sky-600" />
+              {occupancyStats.camionesPropiosOcupados}/{occupancyStats.camionesPropiosTotal} C. propias
+            </span>
+            <span 
+              className="bg-amber-50 text-amber-800 border border-amber-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
+              title={`Camiones Externos: ${occupancyStats.camionesExtOcupados} ocupados / ${occupancyStats.camionesExtTotal} totales (${occupancyStats.camionesExtTotal - occupancyStats.camionesExtOcupados} libres)`}
+            >
+              <Truck size={12} className="text-amber-600" />
+              {occupancyStats.camionesExtOcupados}/{occupancyStats.camionesExtTotal} C. Ext
             </span>
           </div>
         </div>
@@ -2135,8 +2249,8 @@ export default function AssignmentControl() {
                         </td>
 
                         {/* 11. Cliente */}
-                        <td className="px-2.5 py-2 font-medium text-slate-700 max-w-[150px] truncate" title={row.cliente}>
-                          {row.cliente}
+                        <td className="px-2.5 py-2 font-medium text-slate-700 max-w-[150px] truncate" title={getBriefingOperation(row) || row.cliente}>
+                          {getBriefingOperation(row) || row.cliente}
                         </td>
 
                         {/* 12. Referencia */}

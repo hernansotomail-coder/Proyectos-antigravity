@@ -7,7 +7,7 @@ import {
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { useDropzone } from 'react-dropzone';
-import { useFleetStore } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal, isOperationalFleetStatus } from '../store/fleetStore';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { Button } from './ui/Button';
@@ -36,7 +36,7 @@ export const FLEET_COLUMNS = [
   { key: 'tank_capacity', label: 'Carga Estanque' },
   { key: 'payload', label: 'Carga/Peso' },
   { key: 'state2', label: 'Estado' },
-  { key: 'resolution', label: 'Resolución' },
+  { key: 'resolution', label: 'Resolución', type: 'date' },
   { key: 'type2', label: 'Sistema de frio' },
   { key: 'side_doors', label: 'P. Laterales' },
   { key: 'gps', label: 'GPS' },
@@ -48,7 +48,7 @@ export const FLEET_COLUMNS = [
   { key: 'neo_tac', label: 'NEO TAC' },
   { key: 'pallet_capacity', label: 'Cap. Pallet' },
   { key: 'ultima_certificacion', label: 'Última Certificación', type: 'date' },
-  { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado' }
+  { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado', type: 'date' }
 ];
 
 export const TABLE_COLUMNS = FLEET_COLUMNS.filter(c => !['plate', 'type', 'status'].includes(c.key));
@@ -72,7 +72,7 @@ export const EXTERNAL_FLEET_COLUMNS = [
   { key: 'gases_date', label: 'Gases', type: 'date' },
   { key: 'pc_date', label: 'PC', type: 'date' },
   { key: 'soap_date', label: 'SOAP', type: 'date' },
-  { key: 'resolution', label: 'Resolucion' },
+  { key: 'resolution', label: 'Resolución', type: 'date' },
   { key: 'type2', label: 'Sistema de frio' },
   { key: 'gps', label: 'GPS' },
   { key: 'operation', label: 'Operación' },
@@ -86,57 +86,45 @@ const normalizeText = (txt) => {
     .replace(/[._\-/\s]/g, "");
 };
 
+// Helper para formatear fechas de flota (soporta seriales numéricos de Excel como 47900 y fechas ISO)
+export const formatFleetDateDisplay = (val) => {
+  if (val === null || val === undefined || val === '') return '-';
+  if (val instanceof Date) {
+    const isUtcMidnight = val.getUTCHours() === 0 && val.getUTCMinutes() === 0 && val.getUTCSeconds() === 0;
+    const y = isUtcMidnight ? val.getUTCFullYear() : val.getFullYear();
+    const m = String((isUtcMidnight ? val.getUTCMonth() : val.getMonth()) + 1).padStart(2, '0');
+    const d = String(isUtcMidnight ? val.getUTCDate() : val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const num = Number(val);
+  // Soporte para fechas seriales de Excel (ej: 47900, 48514, 46504)
+  if (!isNaN(num) && num > 20000 && num < 80000) {
+    const dObj = new Date(Math.round((num - 25569) * 86400 * 1000));
+    const y = dObj.getUTCFullYear();
+    const m = String(dObj.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(dObj.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(val).trim();
+  const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (ymd) {
+    return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
+  }
+  const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmy) {
+    return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  }
+  return str || '-';
+};
+
 // Formatear fechas desde Excel
 const formatExcelCellValue = (val, colType) => {
   if (val === null || val === undefined || val === '') return '';
   if (colType === 'date') {
-    if (val instanceof Date) {
-      const isUtcMidnight = val.getUTCHours() === 0 && val.getUTCMinutes() === 0 && val.getUTCSeconds() === 0;
-      const y = isUtcMidnight ? val.getUTCFullYear() : val.getFullYear();
-      const m = String((isUtcMidnight ? val.getUTCMonth() : val.getMonth()) + 1).padStart(2, '0');
-      const d = String(isUtcMidnight ? val.getUTCDate() : val.getDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    }
-    if (typeof val === 'number') {
-      const dObj = new Date(Math.round((val - 25569) * 86400 * 1000));
-      const y = dObj.getUTCFullYear();
-      const m = String(dObj.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(dObj.getUTCDate()).padStart(2, '0');
-      return `${y}-${m}-${d}`;
-    }
-    const str = String(val).trim();
-    const dmy = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
-    if (dmy) {
-      let p1 = parseInt(dmy[1], 10);
-      let p2 = parseInt(dmy[2], 10);
-      let y = dmy[3];
-      if (p2 > 12 && p1 <= 12) {
-        return `${y}-${String(p1).padStart(2, '0')}-${String(p2).padStart(2, '0')}`;
-      }
-      return `${y}-${String(p2).padStart(2, '0')}-${String(p1).padStart(2, '0')}`;
-    }
-    const ymd = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-    if (ymd) {
-      return `${ymd[1]}-${ymd[2].padStart(2, '0')}-${ymd[3].padStart(2, '0')}`;
-    }
+    const formatted = formatFleetDateDisplay(val);
+    return formatted === '-' ? '' : formatted;
   }
   return String(val).trim();
-};
-
-export const isVehicleExternal = (f) => {
-  if (!f) return false;
-  if (f.tipo_flota === 'Externa') return true;
-  if (f.empresa_externa && String(f.empresa_externa).trim() !== '') return true;
-  const st = (f.status || '').trim();
-  const stLower = st.toLowerCase();
-  if (stLower.startsWith('externo_') || stLower.includes('externo') || stLower.startsWith('transportes')) {
-    return true;
-  }
-  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
-  if (st && !standardStatuses.includes(stLower)) {
-    return true;
-  }
-  return false;
 };
 
 export default function ManageFleet() {
@@ -257,10 +245,11 @@ export default function ManageFleet() {
   const startEdit = (truck) => {
     setEditingId(truck.id);
     const isExt = isVehicleExternal(truck);
+    const tipoFlota = truck.tipo_flota === 'Propia' ? 'Propia' : (isExt ? 'Externa' : (truck.tipo_flota || 'Propia'));
     setEditForm({
       ...truck,
-      tipo_flota: isExt ? 'Externa' : (truck.tipo_flota || 'Propia'),
-      empresa_externa: truck.empresa_externa || ''
+      tipo_flota: tipoFlota,
+      empresa_externa: tipoFlota === 'Propia' ? '' : (truck.empresa_externa || '')
     });
   };
 
@@ -274,13 +263,17 @@ export default function ManageFleet() {
       toast.error('La patente es obligatoria');
       return;
     }
-    if (editForm.tipo_flota === 'Externa' && (!editForm.empresa_externa || !editForm.empresa_externa.trim())) {
+    const dataToSave = { ...editForm };
+    if (fleetTab === 'propia' || editForm.tipo_flota === 'Propia') {
+      dataToSave.tipo_flota = 'Propia';
+      dataToSave.empresa_externa = '';
+    } else if (dataToSave.tipo_flota === 'Externa' && (!dataToSave.empresa_externa || !dataToSave.empresa_externa.trim())) {
       toast.error('Debe ingresar el nombre de la empresa externa para un vehículo externo');
       return;
     }
     
-    const { dashboardCategory, ...dataToSave } = editForm;
-    const success = await updateFleet(id, dataToSave);
+    const { dashboardCategory, ...cleanedToSave } = dataToSave;
+    const success = await updateFleet(id, cleanedToSave);
     if (success) {
       setEditingId(null);
     }
@@ -860,6 +853,13 @@ export default function ManageFleet() {
                               </td>
                             );
                           }
+                          if (col.type === 'date' || col.key === 'resolution') {
+                            return (
+                              <td key={col.key} className="px-3 py-2 text-slate-600 font-mono text-xs">
+                                {formatFleetDateDisplay(truck[col.key])}
+                              </td>
+                            );
+                          }
                           return (
                             <td key={col.key} className="px-3 py-2 text-slate-600">
                               {truck[col.key] || '-'}
@@ -1015,6 +1015,13 @@ export default function ManageFleet() {
                                 ) : (
                                   <span className="text-slate-300">-</span>
                                 )}
+                              </td>
+                            );
+                          }
+                          if (col.type === 'date' || col.key === 'resolution') {
+                            return (
+                              <td key={col.key} className="px-3 py-2 text-slate-600 font-mono text-xs">
+                                {formatFleetDateDisplay(truck[col.key])}
                               </td>
                             );
                           }

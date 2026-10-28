@@ -45,10 +45,23 @@ const loadPersistedFleetOverrides = () => {
     if (!saved) return {};
     const parsed = JSON.parse(saved);
     const cleaned = {};
+    let needsResave = false;
     for (const [k, v] of Object.entries(parsed)) {
       if (isValidVehicleKey(k) || (k && k.length > 20)) {
-        cleaned[k] = v;
+        const item = { ...v };
+        // Si empresa_externa es un estado operativo (ej. Baja, En Taller, Por documentación), limpiarlo
+        if (item.empresa_externa && isOperationalFleetStatus(item.empresa_externa)) {
+          item.empresa_externa = '';
+          if (item.tipo_flota === 'Externa') {
+            item.tipo_flota = 'Propia';
+          }
+          needsResave = true;
+        }
+        cleaned[k] = item;
       }
+    }
+    if (needsResave) {
+      persistFleetOverrides(cleaned);
     }
     return cleaned;
   } catch (e) {
@@ -64,30 +77,64 @@ const persistFleetOverrides = (map) => {
   }
 };
 
+// Estados estándar de operación de flota (Flota Propia)
+export const STANDARD_FLEET_STATUSES = [
+  'activo', 'inactivo', 'disponible', 'taller', 'en taller', 
+  'mantención', 'mantencion', 'baja', 'de baja', 'dado de baja', 
+  'desactivado', 'por documentación', 'por documentacion', 
+  'en pana', 'siniestro', 'reserva'
+];
+
+export const isOperationalFleetStatus = (val) => {
+  if (!val) return false;
+  const lower = String(val).trim().toLowerCase();
+  return STANDARD_FLEET_STATUSES.includes(lower);
+};
+
 export const inferTipoFlota = (f, overrideInfo = {}) => {
-  if (overrideInfo?.tipo_flota) return overrideInfo.tipo_flota;
-  if (f?.tipo_flota) return f.tipo_flota;
-  if (overrideInfo?.empresa_externa && String(overrideInfo.empresa_externa).trim() !== '') return 'Externa';
-  if (f?.empresa_externa && String(f.empresa_externa).trim() !== '') return 'Externa';
+  // Prioridad 1: Si está explícitamente fijado como Propia, NUNCA es Externa
+  if (overrideInfo?.tipo_flota === 'Propia') return 'Propia';
+  if (f?.tipo_flota === 'Propia') return 'Propia';
+
+  if (overrideInfo?.tipo_flota === 'Externa') return 'Externa';
+  if (f?.tipo_flota === 'Externa') return 'Externa';
+
+  // Si empresa_externa es un estado operativo (ej. Baja, En Taller), no es empresa externa
+  const overrideEmpresa = (overrideInfo?.empresa_externa || '').trim();
+  const fEmpresa = (f?.empresa_externa || '').trim();
+  if (overrideEmpresa && !isOperationalFleetStatus(overrideEmpresa)) return 'Externa';
+  if (fEmpresa && !isOperationalFleetStatus(fEmpresa)) return 'Externa';
   
   const st = (f?.status || '').trim();
   const stLower = st.toLowerCase();
   if (stLower.startsWith('externo_') || stLower.includes('externo') || stLower.startsWith('transportes')) {
     return 'Externa';
   }
-  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
-  if (st && !standardStatuses.includes(stLower)) {
+
+  // Si el estado es un estado operativo estándar de flota propia, es Propia
+  if (isOperationalFleetStatus(st)) {
+    return 'Propia';
+  }
+
+  if (st && !STANDARD_FLEET_STATUSES.includes(stLower)) {
     return 'Externa';
   }
   return 'Propia';
 };
 
 export const inferEmpresaExterna = (f, overrideInfo = {}) => {
-  if (overrideInfo?.empresa_externa && String(overrideInfo.empresa_externa).trim() !== '') {
-    return String(overrideInfo.empresa_externa).trim();
+  if (overrideInfo?.tipo_flota === 'Propia' || f?.tipo_flota === 'Propia') {
+    return '';
   }
-  if (f?.empresa_externa && String(f.empresa_externa).trim() !== '') {
-    return String(f.empresa_externa).trim();
+
+  const overrideEmpresa = (overrideInfo?.empresa_externa || '').trim();
+  if (overrideEmpresa && !isOperationalFleetStatus(overrideEmpresa)) {
+    return overrideEmpresa;
+  }
+  
+  const fEmpresa = (f?.empresa_externa || '').trim();
+  if (fEmpresa && !isOperationalFleetStatus(fEmpresa)) {
+    return fEmpresa;
   }
   
   const st = (f?.status || '').trim();
@@ -95,8 +142,7 @@ export const inferEmpresaExterna = (f, overrideInfo = {}) => {
   if (stLower.startsWith('externo_')) {
     return st.replace(/^externo_/i, '').trim();
   }
-  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
-  if (st && !standardStatuses.includes(stLower)) {
+  if (st && !isOperationalFleetStatus(st) && !STANDARD_FLEET_STATUSES.includes(stLower)) {
     return st;
   }
   return '';
@@ -104,15 +150,25 @@ export const inferEmpresaExterna = (f, overrideInfo = {}) => {
 
 export const isVehicleExternal = (f) => {
   if (!f) return false;
+  // Regla absoluta: si tipo_flota es 'Propia', jamás es externo independientemente de su estado (Baja, En Taller, Por documentación)
+  if (f.tipo_flota === 'Propia') return false;
   if (f.tipo_flota === 'Externa') return true;
-  if (f.empresa_externa && String(f.empresa_externa).trim() !== '') return true;
+
+  const emp = (f.empresa_externa || '').trim();
+  if (emp && !isOperationalFleetStatus(emp)) return true;
+
   const st = (f.status || '').trim();
   const stLower = st.toLowerCase();
   if (stLower.startsWith('externo_') || stLower.includes('externo') || stLower.startsWith('transportes')) {
     return true;
   }
-  const standardStatuses = ['activo', 'inactivo', 'taller', 'mantención', 'mantencion', 'disponible', 'de baja', 'dado de baja', 'desactivado'];
-  if (st && !standardStatuses.includes(stLower)) {
+
+  // Si es un estado operativo (Baja, En Taller, Por documentación, etc.), no es externo
+  if (isOperationalFleetStatus(st)) {
+    return false;
+  }
+
+  if (st && !STANDARD_FLEET_STATUSES.includes(stLower)) {
     return true;
   }
   return false;
@@ -553,9 +609,11 @@ export const useFleetStore = create((set, get) => ({
       });
       persistFleetOverrides(overridesMap);
 
-      // Ajuste para flota externa
+      // Ajuste para flota externa vs propia
       let dataToUpdate = { ...sanitizedData };
-      if (dataToUpdate.tipo_flota === 'Externa' && dataToUpdate.empresa_externa) {
+      if (dataToUpdate.tipo_flota === 'Propia') {
+        dataToUpdate.empresa_externa = '';
+      } else if (dataToUpdate.tipo_flota === 'Externa' && dataToUpdate.empresa_externa) {
         if (!dataToUpdate.status || dataToUpdate.status === 'Activo') {
           dataToUpdate.status = `Externo_${dataToUpdate.empresa_externa.trim()}`;
         }
