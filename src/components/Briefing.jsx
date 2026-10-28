@@ -7,9 +7,11 @@ import {
 import * as XLSX from 'xlsx';
 import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { useStaffStore } from '../store/staffStore';
 import { findOperationForRoute, getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
 import { Button } from './ui/Button';
 import { copyBriefingAsImage } from '../lib/matrixImageExporter';
+import PaseIngresoMatrix from './PaseIngresoMatrix';
 
 // Limpia de la operación la denominación "RUTA ENVÍOS" más el número y conectores sobrantes
 export const cleanBriefingOperationName = (name) => {
@@ -192,11 +194,23 @@ export default function Briefing() {
     }
   }, [availableDates, activeDate]);
 
+  const { staffList } = useStaffStore();
   const [searchTerm, setSearchTerm] = useState('');
   // Multi-selección de Operaciones (Requisito 3)
   const [selectedOperations, setSelectedOperations] = useState([]);
 
+  // Matriz de Pase de Ingreso para Juan Valdez y Newrest (Requisito 2)
+  const [activePaseClient, setActivePaseClient] = useState(null);
+
   const toggleOperation = (op) => {
+    const isJv = op.toLowerCase().includes('juan') || op.toLowerCase().includes('valdez');
+    const isNew = op.toLowerCase().includes('newrest');
+    if (isJv) {
+      setActivePaseClient(prev => prev === 'Juan Valdez' ? null : 'Juan Valdez');
+    } else if (isNew) {
+      setActivePaseClient(prev => prev === 'Newrest' ? null : 'Newrest');
+    }
+
     setSelectedOperations(prev => {
       const exists = prev.some(item => item.toLowerCase() === op.toLowerCase());
       if (exists) {
@@ -209,6 +223,7 @@ export default function Briefing() {
 
   const clearOperationFilter = () => {
     setSelectedOperations([]);
+    setActivePaseClient(null);
   };
 
   // Filas del día seleccionado (Disponibilización / Ruteo)
@@ -258,49 +273,7 @@ export default function Briefing() {
       clientsMap.get(clientName).routes.push(r);
     });
 
-    // 2. Mapeo preliminar de camiones por cliente para resolver el desempate de camiones compartidos
-    // "#Rutas: Cuenta la cantidad de camiones por clientes sin repetirlos, considera que si hay dos clientes con el mismo camión, visualizalo al que tiene menos camiones"
-    const truckToClientsMap = new Map();
-    clientsMap.forEach((cData, cName) => {
-      cData.routes.forEach(r => {
-        const camion = (r.camion || '').trim();
-        if (camion && camion.toLowerCase() !== 'sin camión' && camion.toLowerCase() !== 'sin camion') {
-          if (!truckToClientsMap.has(camion)) {
-            truckToClientsMap.set(camion, new Set());
-          }
-          truckToClientsMap.get(camion).add(cName);
-        }
-      });
-    });
-
-    // Cantidad bruta de camiones por cliente (para desempatar)
-    const clientTruckCounts = new Map();
-    clientsMap.forEach((cData, cName) => {
-      const distinctTrucks = new Set(
-        cData.routes.map(r => (r.camion || '').trim()).filter(c => c && !c.toLowerCase().includes('sin cami'))
-      );
-      clientTruckCounts.set(cName, distinctTrucks.size);
-    });
-
-    // Asignar cada camión a UN SOLO cliente (el que tenga menor cantidad de camiones brutos)
-    const truckOwnerMap = new Map();
-    truckToClientsMap.forEach((clientsSet, camion) => {
-      const clientArr = Array.from(clientsSet);
-      if (clientArr.length === 1) {
-        truckOwnerMap.set(camion, clientArr[0]);
-      } else {
-        // Encontrar cliente con menos camiones
-        clientArr.sort((a, b) => {
-          const countA = clientTruckCounts.get(a) || 0;
-          const countB = clientTruckCounts.get(b) || 0;
-          if (countA !== countB) return countA - countB;
-          return a.localeCompare(b);
-        });
-        truckOwnerMap.set(camion, clientArr[0]);
-      }
-    });
-
-    // 3. Procesar métricas por cliente
+    // 2. Procesar métricas por cliente (Requisito 4: Balance exacto de # Rutas)
     const rows = Array.from(clientsMap.values()).map(cData => {
       const { operacion, routes } = cData;
 
@@ -414,19 +387,9 @@ export default function Briefing() {
         }
       });
 
-      // Contar #Rutas deduplicadas asignadas exclusivamente a este cliente
-      let rutasDeduplicadas = 0;
-      truckOwnerMap.forEach((ownerClient, camion) => {
-        if (ownerClient === operacion) {
-          rutasDeduplicadas++;
-        }
-      });
-      // Si hay rutas sin camión asignado, se suman
-      rutasDeduplicadas += sinCoberturaCount;
-
-      // Si por alguna razón la suma de vueltas es mayor o no hubo camiones registrados, asegurar coherencia
-      const sumaVueltas = trucks1vPropia.size + trucks1vExterna.size + trucks2vPropia.size + trucks2vExterna.size + sinCoberturaCount;
-      const numRutasFinal = rutasDeduplicadas > 0 ? rutasDeduplicadas : sumaVueltas;
+      // # Rutas suma exactamente las vueltas y coberturas del cliente (Requisito 4):
+      // Real Key 1era V + Real Terceros 1era V + 2da V (Key) + 2da V (Terceros) + Sin Cobertura
+      const numRutasFinal = trucks1vPropia.size + trucks1vExterna.size + trucks2vPropia.size + trucks2vExterna.size + sinCoberturaCount;
 
       return {
         operacion,
@@ -654,6 +617,33 @@ export default function Briefing() {
             </div>
           </div>
 
+          {/* Botones Acceso Rápido Pase de Ingreso (Requisito 2) */}
+          <button
+            type="button"
+            onClick={() => setActivePaseClient(prev => prev === 'Juan Valdez' ? null : 'Juan Valdez')}
+            className={`flex items-center gap-1.5 text-xs font-bold h-9 px-3 rounded-xl transition-all cursor-pointer ${
+              activePaseClient === 'Juan Valdez'
+                ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
+                : 'bg-[#0f4a34] hover:bg-[#0a3827] text-emerald-100 border border-emerald-500/30'
+            }`}
+            title="Abrir / ocultar Matriz Pase de Ingreso Juan Valdez"
+          >
+            <span>🎫 Pase Juan Valdez</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActivePaseClient(prev => prev === 'Newrest' ? null : 'Newrest')}
+            className={`flex items-center gap-1.5 text-xs font-bold h-9 px-3 rounded-xl transition-all cursor-pointer ${
+              activePaseClient === 'Newrest'
+                ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
+                : 'bg-[#0f4a34] hover:bg-[#0a3827] text-emerald-100 border border-emerald-500/30'
+            }`}
+            title="Abrir / ocultar Matriz Pase de Ingreso Newrest"
+          >
+            <span>🎫 Pase Newrest</span>
+          </button>
+
           {/* Botón Copiar imagen para Excel (Requisito 4) */}
           <Button
             onClick={handleCopyBriefing}
@@ -804,6 +794,18 @@ export default function Briefing() {
         </div>
       </div>
 
+      {/* 3.1. Matriz Extra: Pases de Ingreso para Juan Valdez y Newrest (Requisito 2) */}
+      {activePaseClient && (
+        <PaseIngresoMatrix
+          clientName={activePaseClient}
+          activeDate={normalizeDate(activeDate)}
+          assignments={currentAssignedRows}
+          fleetList={fleetList}
+          staffList={staffList}
+          onClose={() => setActivePaseClient(null)}
+        />
+      )}
+
       {/* 4. Matriz Principal de Briefing */}
       <div ref={briefingContainerRef} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col shrink-0">
         <div className="overflow-x-auto">
@@ -842,11 +844,42 @@ export default function Briefing() {
                 displayedRows.map((r, idx) => {
                   const isZebra = idx % 2 === 1;
                   const rowBg = isZebra ? 'bg-[#f4f7fb]/70' : 'bg-white';
+                  const isJvOrNewrest = r.operacion.toLowerCase().includes('juan') || r.operacion.toLowerCase().includes('newrest');
                   return (
-                    <tr key={r.operacion} className={`${rowBg} hover:bg-blue-50/60 transition-colors`}>
+                    <tr 
+                      key={r.operacion} 
+                      onClick={() => {
+                        if (r.operacion.toLowerCase().includes('juan') || r.operacion.toLowerCase().includes('valdez')) {
+                          setActivePaseClient(prev => prev === 'Juan Valdez' ? null : 'Juan Valdez');
+                        } else if (r.operacion.toLowerCase().includes('newrest')) {
+                          setActivePaseClient(prev => prev === 'Newrest' ? null : 'Newrest');
+                        }
+                      }}
+                      className={`${rowBg} hover:bg-blue-50/60 transition-colors ${isJvOrNewrest ? 'cursor-pointer' : ''}`}
+                    >
                       {/* Operación */}
                       <td className="px-3.5 py-2.5 font-black uppercase text-slate-900 border-r border-slate-200/80 tracking-wide">
-                        {r.operacion}
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span>{r.operacion}</span>
+                          {isJvOrNewrest && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const client = r.operacion.toLowerCase().includes('juan') ? 'Juan Valdez' : 'Newrest';
+                                setActivePaseClient(prev => prev === client ? null : client);
+                              }}
+                              className={`text-[9px] font-black px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
+                                (activePaseClient === 'Juan Valdez' && r.operacion.toLowerCase().includes('juan')) || (activePaseClient === 'Newrest' && r.operacion.toLowerCase().includes('newrest'))
+                                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
+                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                              }`}
+                              title={`Abrir Pase de Ingreso para ${r.operacion}`}
+                            >
+                              🎫 Pase
+                            </button>
+                          )}
+                        </div>
                       </td>
 
                       {/* # Rutas */}

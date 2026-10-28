@@ -727,6 +727,11 @@ export default function AssignmentControl() {
       .filter(t => {
         if (!t) return false;
 
+        // Requisito 3: Para los camiones disponibles y métricas, solo considerar Región 'RM' en Gestión Flota
+        const rReg = String(t.region || '').trim().toUpperCase();
+        const isRM = rReg === 'RM' || rReg.includes('METROPOLITAN');
+        if (!isRM) return false;
+
         // Filtro por tipo de flota (Propia / Externa / Todos)
         if (truckTipoFilter !== 'todos') {
           const isExt = isVehicleExternal(t);
@@ -1350,24 +1355,52 @@ export default function AssignmentControl() {
   const totalPeso = filteredAssignments.reduce((acc, curr) => acc + (parseFloat(curr.peso) || 0), 0).toFixed(2);
   const totalVueltas = filteredAssignments.length;
 
-  // Tarjetas de dotaciones y camiones ocupados vs libres (Requisito 1)
+  // Tarjetas de dotaciones por Cargo y camiones por Tipo de Vehículo ocupados vs disponibles (Requisito 3)
   const occupancyStats = useMemo(() => {
+    const isRM = (t) => {
+      const r = String(t?.region || '').trim().toUpperCase();
+      return r === 'RM' || r.includes('METROPOLITAN');
+    };
+
+    const isStaffExt = (s) => (s?.tipo_dotacion || '').toLowerCase() === 'externo' || !!s?.empresa_externa || (s?.rut && String(s.rut).startsWith('EXT-'));
+
     const activeStaff = (staffList || []).filter(s => s && (s.status === 'Activo' || !s.status));
-    const activeFleet = (fleetList || []).filter(f => f && f.status !== 'Baja' && f.status !== 'Dado de baja');
+    const activeFleetRM = (fleetList || []).filter(f => f && f.status !== 'Baja' && f.status !== 'Dado de baja' && isRM(f));
 
-    const totalDotPropia = activeStaff.filter(s => (s.tipo_dotacion || '').toLowerCase() !== 'externo' && !s.empresa_externa && !(s.rut && String(s.rut).startsWith('EXT-'))).length;
-    const totalDotExt = activeStaff.filter(s => (s.tipo_dotacion || '').toLowerCase() === 'externo' || s.empresa_externa || (s.rut && String(s.rut).startsWith('EXT-'))).length;
+    // Totales de Dotación Propia por Cargo
+    const staffByRoleTotals = {};
+    let totalExtStaff = 0;
 
-    const totalCamionesPropios = activeFleet.filter(f => !isVehicleExternal(f)).length;
-    const totalCamionesExt = activeFleet.filter(f => isVehicleExternal(f)).length;
+    activeStaff.forEach(s => {
+      if (isStaffExt(s)) {
+        totalExtStaff++;
+      } else {
+        const role = (s.role || s.cargo || 'Sin Cargo').trim();
+        staffByRoleTotals[role] = (staffByRoleTotals[role] || 0) + 1;
+      }
+    });
 
-    const occStaffPropiaSet = new Set();
+    // Totales de Camiones Propios RM por Tipo de Vehículo
+    const fleetByTypeTotals = {};
+    let totalExtFleet = 0;
+
+    activeFleetRM.forEach(f => {
+      if (isVehicleExternal(f)) {
+        totalExtFleet++;
+      } else {
+        const type = (f.type || 'Camión').trim();
+        fleetByTypeTotals[type] = (fleetByTypeTotals[type] || 0) + 1;
+      }
+    });
+
+    // Ocupación a partir de assignmentsForDate
+    const occStaffByRoleSet = {};
     const occStaffExtSet = new Set();
-    const occCamionPropioSet = new Set();
+    const occCamionByTypeSet = {};
     const occCamionExtSet = new Set();
 
     (assignmentsForDate || []).forEach(r => {
-      // Camiones
+      // Camiones (solo RM)
       if (r.camion && !r.camion.toLowerCase().includes('sin cami') && r.camion.trim() !== '') {
         const rawCam = r.camion.trim();
         const matchParen = rawCam.match(/^([^(]+)(?:\(([^)]+)\))?/);
@@ -1382,43 +1415,95 @@ export default function AssignmentControl() {
           return false;
         });
 
+        // Solo considerar camiones de Región RM (Requisito 3)
+        if (foundTruck && !isRM(foundTruck)) {
+          return;
+        }
+
         const isExt = foundTruck 
           ? isVehicleExternal(foundTruck)
           : (r.tipo_flota === 'Externa' || !!r.empresa_externa || isVehicleExternal({ internal_number: cCode, plate: cPlate, transportista: r.transportista }));
 
+        const truckKey = cPlate || cCode || rawCam;
         if (isExt) {
-          occCamionExtSet.add(cPlate || cCode || rawCam);
+          occCamionExtSet.add(truckKey);
         } else {
-          occCamionPropioSet.add(cPlate || cCode || rawCam);
+          const type = (foundTruck?.type || r.tipo_equipo || 'Camión').trim();
+          if (!occCamionByTypeSet[type]) occCamionByTypeSet[type] = new Set();
+          occCamionByTypeSet[type].add(truckKey);
         }
       }
 
-      // Dotaciones (Conductores y Auxiliares)
+      // Dotaciones (Conductores y Auxiliares) por Cargo
       [r.conductor_name, r.aux1_name, r.aux2_name].forEach(name => {
         if (!name || name.toLowerCase().includes('sin ') || name.trim() === '') return;
         const cleanName = name.trim();
         const foundStaff = staffList.find(s => s.name && s.name.trim().toLowerCase() === cleanName.toLowerCase());
         const isExt = foundStaff 
-          ? ((foundStaff.tipo_dotacion || '').toLowerCase() === 'externo' || !!foundStaff.empresa_externa || (foundStaff.rut && String(foundStaff.rut).startsWith('EXT-')))
+          ? isStaffExt(foundStaff)
           : (cleanName.toUpperCase().startsWith('EXT-') || (r.tipo_flota === 'Externa'));
 
         if (isExt) {
           occStaffExtSet.add(cleanName.toLowerCase());
         } else {
-          occStaffPropiaSet.add(cleanName.toLowerCase());
+          const role = (foundStaff?.role || foundStaff?.cargo || 'Conductor').trim();
+          if (!occStaffByRoleSet[role]) occStaffByRoleSet[role] = new Set();
+          occStaffByRoleSet[role].add(cleanName.toLowerCase());
         }
       });
     });
 
+    // Desglose de dotación propia por cargo
+    const preferredRoleOrder = ['Conductor A4', 'Conductor B', 'Conductor A5', 'Auxiliar', 'Conductor / Auxiliar', 'Auxiliar Rampla'];
+    const otherRoles = Object.keys(staffByRoleTotals).filter(r => !preferredRoleOrder.includes(r));
+    const orderedRoles = [...preferredRoleOrder, ...otherRoles].filter(r => (staffByRoleTotals[r] || 0) > 0 || (occStaffByRoleSet[r]?.size || 0) > 0);
+
+    const staffRolesBreakdown = orderedRoles.map(role => {
+      const occ = occStaffByRoleSet[role]?.size || 0;
+      const tot = Math.max(occ, staffByRoleTotals[role] || 0);
+      return {
+        role,
+        occupied: occ,
+        total: tot,
+        free: Math.max(0, tot - occ)
+      };
+    });
+
+    // Desglose de camiones propios RM por tipo de vehículo
+    const preferredTruckTypes = ['Camión', 'Tracto', 'Camioneta', 'Semirremolque'];
+    const otherTypes = Object.keys(fleetByTypeTotals).filter(t => !preferredTruckTypes.includes(t));
+    const orderedTypes = [...preferredTruckTypes, ...otherTypes].filter(t => (fleetByTypeTotals[t] || 0) > 0 || (occCamionByTypeSet[t]?.size || 0) > 0);
+
+    const truckTypesBreakdown = orderedTypes.map(type => {
+      const occ = occCamionByTypeSet[type]?.size || 0;
+      const tot = Math.max(occ, fleetByTypeTotals[type] || 0);
+      return {
+        type,
+        occupied: occ,
+        total: tot,
+        free: Math.max(0, tot - occ)
+      };
+    });
+
+    const occExtTrucks = occCamionExtSet.size;
+    const totExtTrucks = Math.max(occExtTrucks, totalExtFleet);
+
+    const occExtStaff = occStaffExtSet.size;
+    const totExtStaff = Math.max(occExtStaff, totalExtStaff);
+
     return {
-      dotPropiaOcupada: occStaffPropiaSet.size,
-      dotPropiaTotal: Math.max(occStaffPropiaSet.size, totalDotPropia),
-      dotExtOcupada: occStaffExtSet.size,
-      dotExtTotal: Math.max(occStaffExtSet.size, totalDotExt),
-      camionesPropiosOcupados: occCamionPropioSet.size,
-      camionesPropiosTotal: Math.max(occCamionPropioSet.size, totalCamionesPropios),
-      camionesExtOcupados: occCamionExtSet.size,
-      camionesExtTotal: Math.max(occCamionExtSet.size, totalCamionesExt)
+      staffRolesBreakdown,
+      truckTypesBreakdown,
+      externosStaff: {
+        occupied: occExtStaff,
+        total: totExtStaff,
+        free: Math.max(0, totExtStaff - occExtStaff)
+      },
+      externosFleet: {
+        occupied: occExtTrucks,
+        total: totExtTrucks,
+        free: Math.max(0, totExtTrucks - occExtTrucks)
+      }
     };
   }, [assignmentsForDate, staffList, fleetList]);
 
@@ -1452,46 +1537,60 @@ export default function AssignmentControl() {
             </div>
           </div>
 
-          {/* Tarjetas resumen: Locales, m3, Dotaciones y Camiones (Requisito 1) */}
-          <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500 flex-wrap">
+          {/* Tarjetas resumen: Locales, m3, Dotaciones por Cargo y Camiones RM por Tipo de Vehículo (Requisito 3) */}
+          <div className="hidden xl:flex items-center gap-1.5 text-xs text-slate-500 flex-wrap max-w-[55vw]">
             <span className="bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap">
               {totalLocales} locales
             </span>
             <span className="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap">
               {totalM3} m³
             </span>
-            <span 
-              className="bg-blue-50 text-blue-700 border border-blue-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-              title={`Dotación Propia: ${occupancyStats.dotPropiaOcupada} ocupadas / ${occupancyStats.dotPropiaTotal} totales (${occupancyStats.dotPropiaTotal - occupancyStats.dotPropiaOcupada} libres)`}
-            >
-              <Users size={12} className="text-blue-600" />
-              {occupancyStats.dotPropiaOcupada}/{occupancyStats.dotPropiaTotal} dot. propia
-            </span>
+
+            {/* Separación de Dotación Propia por Cargo */}
+            {occupancyStats.staffRolesBreakdown.map(item => (
+              <span 
+                key={item.role}
+                className="bg-blue-50 text-blue-700 border border-blue-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
+                title={`${item.role}: ${item.occupied} ocupados / ${item.total} totales (${item.free} por ocupar)`}
+              >
+                <Users size={11} className="text-blue-600" />
+                {item.occupied}/{item.total} {item.role}
+              </span>
+            ))}
+
+            {/* Dotación Externa */}
             <span 
               className="bg-purple-50 text-purple-700 border border-purple-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-              title={`Dotación Externa: ${occupancyStats.dotExtOcupada} ocupadas / ${occupancyStats.dotExtTotal} totales (${occupancyStats.dotExtTotal - occupancyStats.dotExtOcupada} libres)`}
+              title={`Dotación Externa: ${occupancyStats.externosStaff.occupied} ocupados / ${occupancyStats.externosStaff.total} totales (${occupancyStats.externosStaff.free} por ocupar)`}
             >
-              <Users size={12} className="text-purple-600" />
-              {occupancyStats.dotExtOcupada}/{occupancyStats.dotExtTotal} dot. ext
+              <Users size={11} className="text-purple-600" />
+              {occupancyStats.externosStaff.occupied}/{occupancyStats.externosStaff.total} Externos
             </span>
-            <span 
-              className="bg-sky-50 text-sky-700 border border-sky-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-              title={`Camiones Propios: ${occupancyStats.camionesPropiosOcupados} ocupados / ${occupancyStats.camionesPropiosTotal} totales (${occupancyStats.camionesPropiosTotal - occupancyStats.camionesPropiosOcupados} libres)`}
-            >
-              <Truck size={12} className="text-sky-600" />
-              {occupancyStats.camionesPropiosOcupados}/{occupancyStats.camionesPropiosTotal} C. propias
-            </span>
+
+            {/* Separación de Camiones Propios RM por Tipo de Vehículo */}
+            {occupancyStats.truckTypesBreakdown.map(item => (
+              <span 
+                key={item.type}
+                className="bg-sky-50 text-sky-700 border border-sky-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
+                title={`${item.type} (RM): ${item.occupied} ocupados / ${item.total} totales (${item.free} disponibles)`}
+              >
+                <Truck size={11} className="text-sky-600" />
+                {item.occupied}/{item.total} {item.type}
+              </span>
+            ))}
+
+            {/* Camiones Flota Externa (RM) */}
             <span 
               className="bg-amber-50 text-amber-800 border border-amber-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-              title={`Camiones Externos: ${occupancyStats.camionesExtOcupados} ocupados / ${occupancyStats.camionesExtTotal} totales (${occupancyStats.camionesExtTotal - occupancyStats.camionesExtOcupados} libres)`}
+              title={`Flota Externa (RM): ${occupancyStats.externosFleet.occupied} ocupados / ${occupancyStats.externosFleet.total} totales (${occupancyStats.externosFleet.free} disponibles)`}
             >
-              <Truck size={12} className="text-amber-600" />
-              {occupancyStats.camionesExtOcupados}/{occupancyStats.camionesExtTotal} C. Ext
+              <Truck size={11} className="text-amber-600" />
+              {occupancyStats.externosFleet.occupied}/{occupancyStats.externosFleet.total} Flota Externa
             </span>
           </div>
         </div>
 
-        {/* Filtros rápidos + Botón Guardar Disponibilización */}
+        {/* Filtros rápidos */}
         <div className="flex items-center gap-1.5 flex-wrap">
           {/* Multi-Filtro Ruta (Requisito 2) */}
           <CompactMultiSelect 
@@ -1550,29 +1649,33 @@ export default function AssignmentControl() {
               × Limpiar
             </button>
           )}
+        </div>
 
+        {/* Botones de acción al extremo derecho (Requisito 1) */}
+        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
           <Button 
             onClick={() => handleOpenAperturarModal()}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl"
-            title="Aperturar / dividir una ruta quitando filas/paradas hacia una nueva numeración"
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+            title="Apertura / dividir una ruta quitando filas/paradas hacia una nueva numeración"
           >
             <Scissors size={13} />
-            Aperturar Ruta
+            Apertura Ruta
           </Button>
 
-          {/* Botón Registrar Servicio Extra (Requisito 5) */}
+          {/* Botón Registrar Servicio Extra */}
           <Button 
             onClick={() => handleOpenExtraServicesModal()}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl"
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
             title="Registrar servicios extras (Retiro camión, Taller, Vulcanización, Traspasos, Apoyo Centro, etc.)"
           >
             <Plus size={13} />
             Servicio Extra
           </Button>
 
+          {/* Botón Guardar Disponibilización */}
           <Button 
             onClick={handlePreSave}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
             title="Guarda la disponibilización y valida si faltan asignaciones"
           >
             <Save size={13} />
