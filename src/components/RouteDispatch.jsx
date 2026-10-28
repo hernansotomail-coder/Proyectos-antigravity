@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
-import { usePlanningStore } from '../store/planningStore';
+import { usePlanningStore, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore } from '../store/fleetStore';
 import { findFarthestComunaForRoute, getComunaDistance } from './RuteoView';
@@ -322,17 +322,23 @@ export default function RouteDispatch() {
     initPlanningFromDb?.();
   }, [fetchStaff, initPlanningFromDb]);
 
-  // Fechas disponibles
+  // Fechas disponibles (ordenadas cronológicamente de más reciente a más antigua)
   const availableDates = useMemo(() => {
     const set = new Set();
     (savedHistoryList || []).forEach(h => set.add(h.fecha));
     Object.keys(savedRuteoByDate || {}).forEach(f => set.add(f));
     Object.keys(transmittedAssignments || {}).forEach(f => set.add(f));
-    const arr = Array.from(set).sort().reverse();
-    return arr.length > 0 ? arr : ['14-10-2026'];
+    const sorted = sortDatesDescending(Array.from(set));
+    return sorted.length > 0 ? sorted : ['28-10-2026'];
   }, [savedHistoryList, savedRuteoByDate, transmittedAssignments]);
 
-  const [selectedDate, setSelectedDate] = useState(availableDates[0] || '14-10-2026');
+  const [selectedDate, setSelectedDate] = useState(() => availableDates[0] || '28-10-2026');
+
+  useEffect(() => {
+    if (availableDates.length > 0 && (!selectedDate || !availableDates.includes(selectedDate) || selectedDate === '14-10-2026')) {
+      setSelectedDate(availableDates[0]);
+    }
+  }, [availableDates, selectedDate]);
   const [searchTerm, setSearchTerm] = useState('');
   const [vueltaFilter, setVueltaFilter] = useState('Todas');
   const [selectedRowIds, setSelectedRowIds] = useState([]);

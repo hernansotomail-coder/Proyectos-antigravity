@@ -10,7 +10,7 @@ import {
 import { toast } from 'sonner';
 import { useTiendasCriticasStore } from '../store/tiendasCriticasStore';
 import MantenedorTiendasCriticasModal from './MantenedorTiendasCriticasModal';
-import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
+import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
@@ -438,16 +438,26 @@ export default function RuteoView() {
     horaModificada: ''
   });
 
-  // Fechas disponibles
+  // Fechas disponibles (ordenadas cronológicamente de más reciente a más antigua)
   const availableDates = useMemo(() => {
     const setDates = new Set([
       ...Object.keys(savedRuteoByDate || {}),
       ...Object.keys(transmittedAssignments || {})
     ]);
-    return Array.from(setDates).sort();
+    return sortDatesDescending(Array.from(setDates));
   }, [savedRuteoByDate, transmittedAssignments]);
 
-  const activeDate = selectedRuteoDate || availableDates[0] || '14-10-2026';
+  const activeDate = (selectedRuteoDate && availableDates.includes(selectedRuteoDate))
+    ? selectedRuteoDate
+    : (availableDates[0] || '28-10-2026');
+
+  useEffect(() => {
+    if (availableDates.length > 0) {
+      if (!selectedRuteoDate || !availableDates.includes(selectedRuteoDate) || selectedRuteoDate === '14-10-2026') {
+        setSelectedRuteoDate(availableDates[0]);
+      }
+    }
+  }, [availableDates, selectedRuteoDate, setSelectedRuteoDate]);
 
   // Ref para capturar imagen de la matriz para copiar/descargar (Requisito 5)
   const matrixContainerRef = useRef(null);

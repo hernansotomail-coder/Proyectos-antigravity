@@ -6,7 +6,7 @@ import {
   FileSpreadsheet, ArrowRight, History, X, Check, Filter
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { usePlanningStore } from '../store/planningStore';
+import { usePlanningStore, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { findFarthestComunaForRoute } from './RuteoView';
@@ -166,20 +166,20 @@ function MultiSelectFilter({ label, options, selectedValues, onChange, placehold
 export default function HistoricalAssignment() {
   const { savedHistoryList, savedRuteoByDate, transmittedAssignments } = usePlanningStore();
 
-  // Fechas disponibles en el historial
+  // Fechas disponibles en el historial (ordenadas cronológicamente de más reciente a más antigua)
   const historyDates = useMemo(() => {
     const set = new Set();
     (savedHistoryList || []).forEach(h => set.add(h.fecha));
     Object.keys(savedRuteoByDate || {}).forEach(f => set.add(f));
     Object.keys(transmittedAssignments || {}).forEach(f => set.add(f));
-    return Array.from(set).sort().reverse();
+    return sortDatesDescending(Array.from(set));
   }, [savedHistoryList, savedRuteoByDate, transmittedAssignments]);
 
-  const [selectedDate, setSelectedDate] = useState(historyDates[0] || '14-10-2026');
+  const [selectedDate, setSelectedDate] = useState(() => historyDates[0] || '28-10-2026');
 
   // Mantener fecha válida si cambian las fechas
   useEffect(() => {
-    if (historyDates.length > 0 && !historyDates.includes(selectedDate)) {
+    if (historyDates.length > 0 && (!selectedDate || !historyDates.includes(selectedDate) || selectedDate === '14-10-2026')) {
       setSelectedDate(historyDates[0]);
     }
   }, [historyDates, selectedDate]);

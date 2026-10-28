@@ -5,7 +5,7 @@ import {
   MapPin, AlertCircle, FileSpreadsheet, Building2, Copy
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { findOperationForRoute, getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
 import { Button } from './ui/Button';
@@ -53,6 +53,22 @@ export const getBriefingOperation = (route) => {
   if (!route) return 'Otros';
   const rawClient = String(route.cliente || route.servicio || route.Operacion || '').trim();
   const rawRuta = String(route.ruta || '').trim();
+  const rawDenom = String(route.denominacion || route.nombreRuta || '').trim();
+  const rawOp = String(route.operacion || '').trim();
+
+  // Requisito 1: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
+  const anyCarls = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+    const s = String(val || '').trim().toUpperCase();
+    return s.startsWith('ESPECIALES CARLS') || s.startsWith('ESPECIAL CARLS') || s.includes('ESPECIALES CARLS');
+  });
+  if (anyCarls) return 'Carls Jr';
+
+  // Requisito 1: Las rutas que parten con "SBW " dentro de "Subway"
+  const anySbw = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+    const s = String(val || '').trim().toUpperCase();
+    return s.startsWith('SBW') || s.includes('SBW REDESPACHO') || s.startsWith('SUBWAY');
+  });
+  if (anySbw) return 'Subway';
 
   // Requisito: Las rutas que parten con 1500 a 1549 son consideradas con el cliente "El Golfo"
   const rutaNum = parseInt(rawRuta.replace(/\D/g, ''), 10);
@@ -92,6 +108,8 @@ export const getBriefingOperation = (route) => {
 export const normalizeClientForBriefing = (rawName) => {
   if (!rawName) return 'OTROS';
   const upper = String(rawName).toUpperCase().trim();
+  if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
+  if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
   if (upper.includes('SPID')) return 'SPID';
   const cleaned = cleanBriefingOperationName(rawName);
   return getOperacionName('', cleaned || rawName);
@@ -147,23 +165,14 @@ export default function Briefing() {
     // Asegurar que la fecha operativa 28-10-2026 esté siempre disponible
     dSet.add('28-10-2026');
 
-    const arr = Array.from(dSet).filter(Boolean);
-    return arr.length > 0 ? arr.sort() : ['28-10-2026'];
+    return sortDatesDescending(Array.from(dSet));
   }, [transmittedAssignments, savedRuteoByDate, transformedRoutes, selectedDisponibilizarDate]);
 
-  const [activeDate, setActiveDate] = useState(() => {
-    if (availableDates.includes('28-10-2026')) return '28-10-2026';
-    if (availableDates.includes('22-10-2026')) return '22-10-2026';
-    return availableDates[availableDates.length - 1] || '28-10-2026';
-  });
+  const [activeDate, setActiveDate] = useState(() => availableDates[0] || '28-10-2026');
 
   React.useEffect(() => {
-    if (availableDates.length > 0 && !availableDates.includes(activeDate)) {
-      if (availableDates.includes('28-10-2026')) {
-        setActiveDate('28-10-2026');
-      } else {
-        setActiveDate(availableDates[availableDates.length - 1]);
-      }
+    if (availableDates.length > 0 && (!activeDate || !availableDates.includes(activeDate))) {
+      setActiveDate(availableDates[0]);
     }
   }, [availableDates, activeDate]);
 
@@ -312,16 +321,24 @@ export default function Briefing() {
         // Tipo de Flota (Propia vs Externa)
         let isExt = false;
         if (camion && !camion.toLowerCase().includes('sin cami')) {
-          const foundTruck = fleetList.find(f => 
-            (f.internal_number || '').trim().toLowerCase() === camion.toLowerCase() ||
-            (f.plate || '').trim().toLowerCase() === camion.toLowerCase()
-          );
+          const matchParen = camion.match(/^([^(]+)(?:\(([^)]+)\))?/);
+          const cCode = (matchParen ? matchParen[1] : camion).trim().toLowerCase();
+          const cPlate = (matchParen && matchParen[2] ? matchParen[2] : (r.patente || '')).trim().toLowerCase();
+
+          const foundTruck = fleetList.find(f => {
+            const fCode = (f.internal_number || '').trim().toLowerCase();
+            const fPlate = (f.plate || '').trim().toLowerCase();
+            if (cCode && fCode && (fCode === cCode || cCode.startsWith(fCode) || fCode.startsWith(cCode))) return true;
+            if (cPlate && fPlate && fPlate === cPlate) return true;
+            return false;
+          });
+
           if (foundTruck) {
             isExt = isVehicleExternal(foundTruck);
           } else {
             isExt = isVehicleExternal({
-              internal_number: camion,
-              plate: r.patente,
+              internal_number: cCode,
+              plate: cPlate,
               transportista: r.transportista,
               tipo_flota: r.tipo_flota,
               empresa_externa: r.empresa_externa

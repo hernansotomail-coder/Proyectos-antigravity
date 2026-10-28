@@ -94,6 +94,37 @@ export const normalizeDate = (rawDate) => {
   return str;
 };
 
+// Helper para convertir cualquier formato de fecha a timestamp numérico
+export const parseDateStrToTimestamp = (s) => {
+  if (!s) return 0;
+  const clean = String(s).trim().split(' ')[0].split('T')[0];
+  const parts = clean.split(/[-/]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      // YYYY-MM-DD
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getTime();
+    } else {
+      // DD-MM-YYYY
+      return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
+    }
+  }
+  const t = new Date(s).getTime();
+  return isNaN(t) ? 0 : t;
+};
+
+// Helper para ordenar fechas cronológicamente de más reciente a más antigua
+export const sortDatesDescending = (dates) => {
+  if (!dates) return [];
+  const valid = Array.from(new Set(dates)).filter(d => d && !String(d).startsWith('__') && d !== 'Sin Fecha' && d !== 'null' && d !== 'undefined');
+  return valid.sort((a, b) => parseDateStrToTimestamp(b) - parseDateStrToTimestamp(a));
+};
+
+// Helper para obtener la fecha más reciente como predeterminada (Requisito: siempre la más reciente como predeterminada)
+export const getMostRecentDate = (dates, fallback = '28-10-2026') => {
+  const sorted = sortDatesDescending(dates);
+  return sorted[0] || fallback;
+};
+
 // Paradas de muestra basadas en los datos reales del usuario (Consolidadas por Sec + Ambiente)
 const SAMPLE_PARADAS_1401 = [
   { secuencia: 1, ambiente: 'C', destino: '2653 - SBARRO MALL FLORIDA CENTER', direccion: 'AV. DEPARTAMENTAL 555', comuna: 'LA FLORIDA', horaIni: '800', horaFin: '1100', volumen: 0.32, peso: 140, cantCJ: 11 },
@@ -695,6 +726,9 @@ export const persistTransformedRoutes = (data) => {
   }
 };
 
+const _initialAssignments = loadPersistedAssignments();
+const _initialSavedRuteo = loadPersistedSavedRuteo();
+
 export const usePlanningStore = create((set, get) => ({
   // Raw data from Sheet1
   rawRows: [],
@@ -706,14 +740,14 @@ export const usePlanningStore = create((set, get) => ({
   isTransformed: true,
 
   // Transmitted data into Disponibilización: { [fecha]: Array<AssignmentRow> }
-  transmittedAssignments: loadPersistedAssignments(),
-  selectedDisponibilizarDate: '14-10-2026',
+  transmittedAssignments: _initialAssignments,
+  selectedDisponibilizarDate: getMostRecentDate(Object.keys(_initialAssignments || {}), '28-10-2026'),
 
   // Guardados definitivos de Disponibilización transmitidos a Ruteo: { [fecha]: Array<AssignmentRow> }
-  savedRuteoByDate: loadPersistedSavedRuteo(),
+  savedRuteoByDate: _initialSavedRuteo,
   // Snapshot base para comparar modificaciones antes de guardar: { [fecha]: Array<AssignmentRow> }
   savedRuteoBaseline: loadPersistedSavedBaseline(),
-  selectedRuteoDate: '14-10-2026',
+  selectedRuteoDate: getMostRecentDate(Object.keys(_initialSavedRuteo || {}), '28-10-2026'),
 
   // Historial de guardados para "Histórico Disponibilización"
   savedHistoryList: loadPersistedHistory(),
@@ -1277,13 +1311,22 @@ export const usePlanningStore = create((set, get) => ({
             }
           } catch (e) {}
 
+          const mostRecentDispDate = getMostRecentDate(Object.keys(mergedAssignments || {}));
+          const mostRecentRuteoDate = getMostRecentDate(Object.keys(mergedSaved || {}));
+
           return {
             transmittedAssignments: mergedAssignments,
             savedRuteoByDate: mergedSaved,
             savedRuteoBaseline: mergedBaseline,
             ruteoOverrides: mergedOverrides,
             savedHistoryList: mergedHistory,
-            changeHistoryList: mergedChangeHistory
+            changeHistoryList: mergedChangeHistory,
+            selectedDisponibilizarDate: (state.selectedDisponibilizarDate && state.selectedDisponibilizarDate !== '14-10-2026' && mergedAssignments[state.selectedDisponibilizarDate])
+              ? state.selectedDisponibilizarDate
+              : mostRecentDispDate,
+            selectedRuteoDate: (state.selectedRuteoDate && state.selectedRuteoDate !== '14-10-2026' && mergedSaved[state.selectedRuteoDate])
+              ? state.selectedRuteoDate
+              : mostRecentRuteoDate
           };
         });
       } else {

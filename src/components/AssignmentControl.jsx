@@ -9,7 +9,7 @@ import {
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
-import { usePlanningStore, ensureRowTransportista } from '../store/planningStore';
+import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
@@ -324,11 +324,13 @@ export default function AssignmentControl() {
   }, [initPlanningFromDb]);
 
   const availableDates = useMemo(() => {
-    const dates = Object.keys(transmittedAssignments);
-    return dates.sort();
+    const dates = Object.keys(transmittedAssignments || {});
+    return sortDatesDescending(dates);
   }, [transmittedAssignments]);
 
-  const activeDate = selectedDisponibilizarDate || availableDates[0] || '14-10-2026';
+  const activeDate = (selectedDisponibilizarDate && availableDates.includes(selectedDisponibilizarDate))
+    ? selectedDisponibilizarDate
+    : (availableDates[0] || '28-10-2026');
 
   // Fecha en formato YYYY-MM-DD para consultar en tabla attendance
   const isoActiveDate = useMemo(() => {
@@ -357,8 +359,10 @@ export default function AssignmentControl() {
   }, [isoActiveDate, fetchAttendanceByDateRange]);
 
   useEffect(() => {
-    if (!selectedDisponibilizarDate && availableDates.length > 0) {
-      setSelectedDisponibilizarDate(availableDates[0]);
+    if (availableDates.length > 0) {
+      if (!selectedDisponibilizarDate || !availableDates.includes(selectedDisponibilizarDate) || selectedDisponibilizarDate === '14-10-2026') {
+        setSelectedDisponibilizarDate(availableDates[0]);
+      }
     }
   }, [availableDates, selectedDisponibilizarDate, setSelectedDisponibilizarDate]);
 
@@ -486,7 +490,7 @@ export default function AssignmentControl() {
   const [extraServiceRows, setExtraServiceRows] = useState([
     {
       id: 1,
-      fecha: activeDate || '14-10-2026',
+      fecha: activeDate || '28-10-2026',
       conductor_name: '',
       conductor_rut: '',
       aux1_name: '',
@@ -503,7 +507,7 @@ export default function AssignmentControl() {
     setExtraServiceRows([
       {
         id: Date.now(),
-        fecha: activeDate || '14-10-2026',
+        fecha: activeDate || '28-10-2026',
         conductor_name: '',
         conductor_rut: '',
         aux1_name: '',
@@ -523,7 +527,7 @@ export default function AssignmentControl() {
       ...prev,
       {
         id: Date.now() + Math.random(),
-        fecha: activeDate || '14-10-2026',
+        fecha: activeDate || '28-10-2026',
         conductor_name: '',
         conductor_rut: '',
         aux1_name: '',

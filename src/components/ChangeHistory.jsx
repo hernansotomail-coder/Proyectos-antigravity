@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
-import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useAuthStore, canUserDeleteHistory } from '../store/authStore';
 import { Button } from './ui/Button';
 
@@ -32,7 +32,6 @@ export default function ChangeHistory() {
   }, [initPlanningFromDb]);
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterDate, setFilterDate] = useState('TODAS');
   const [filterUser, setFilterUser] = useState('TODOS');
   const [filterConductor, setFilterConductor] = useState('TODOS');
   const [filterCamion, setFilterCamion] = useState('TODOS');
@@ -49,7 +48,7 @@ export default function ChangeHistory() {
     count: 0
   });
 
-  // Available unique filter options
+  // Available unique filter options (ordenadas cronológicamente de más reciente a más antigua)
   const availableDates = useMemo(() => {
     const s = new Set();
     const addDate = (d) => {
@@ -68,8 +67,17 @@ export default function ChangeHistory() {
     // Garantizar que la fecha operativa 28-10-2026 esté siempre disponible
     s.add('28-10-2026');
 
-    return Array.from(s).sort();
+    return sortDatesDescending(Array.from(s));
   }, [changeHistoryList, savedRuteoByDate, transmittedAssignments, savedHistoryList]);
+
+  // Predeterminado: siempre la fecha más reciente
+  const [filterDate, setFilterDate] = useState(() => availableDates[0] || '28-10-2026');
+
+  useEffect(() => {
+    if (availableDates.length > 0 && filterDate !== 'TODAS' && (!filterDate || !availableDates.includes(filterDate))) {
+      setFilterDate(availableDates[0]);
+    }
+  }, [availableDates, filterDate]);
 
   const availableUsers = useMemo(() => {
     const s = new Set();

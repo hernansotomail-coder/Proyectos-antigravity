@@ -167,7 +167,7 @@ export default function DailyPlanning() {
 
   // Estados para Modal de Rutas Especiales
   const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
-  const [specialDate, setSpecialDate] = useState(selectedDisponibilizarDate || '14-10-2026');
+  const [specialDate, setSpecialDate] = useState(selectedDisponibilizarDate || '28-10-2026');
   const [specialCompareDate, setSpecialCompareDate] = useState('auto'); // 'auto' | 'specialDate' | specific date | 'all'
   const [detectedFileDate, setDetectedFileDate] = useState('');
   const [specialRawRows, setSpecialRawRows] = useState([]);
@@ -541,7 +541,7 @@ export default function DailyPlanning() {
       type: idsToTransmit.length === transformedRoutes.length ? 'all' : 'specific',
       routeIds: idsToTransmit,
       routes: targetRoutes,
-      fecha: targetRoutes[0]?.fecha || '14-10-2026'
+      fecha: targetRoutes[0]?.fecha || '28-10-2026'
     });
     setIsTransmitModalOpen(true);
   };
@@ -556,7 +556,7 @@ export default function DailyPlanning() {
       type: 'all',
       routeIds: transformedRoutes.map(r => r.id),
       routes: transformedRoutes,
-      fecha: transformedRoutes[0]?.fecha || '14-10-2026'
+      fecha: transformedRoutes[0]?.fecha || '28-10-2026'
     });
     setIsTransmitModalOpen(true);
   };
@@ -572,7 +572,7 @@ export default function DailyPlanning() {
       type: 'modified',
       routeIds: modified.map(r => r.id),
       routes: modified,
-      fecha: modified[0]?.fecha || '14-10-2026'
+      fecha: modified[0]?.fecha || '28-10-2026'
     });
     setIsTransmitModalOpen(true);
   };
@@ -588,7 +588,7 @@ export default function DailyPlanning() {
       type: 'specific',
       routeIds,
       routes: targetRoutes,
-      fecha: targetRoutes[0]?.fecha || '14-10-2026'
+      fecha: targetRoutes[0]?.fecha || '28-10-2026'
     });
     setIsTransmitModalOpen(true);
   };
@@ -739,7 +739,7 @@ export default function DailyPlanning() {
           {/* Botón Rutas Especiales (Requisito 3) */}
           <Button
             onClick={() => {
-              setSpecialDate(selectedDisponibilizarDate || '14-10-2026');
+              setSpecialDate(selectedDisponibilizarDate || '28-10-2026');
               setIsSpecialModalOpen(true);
             }}
             className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-sm transition-all"
@@ -1242,7 +1242,7 @@ export default function DailyPlanning() {
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Fecha Planif.</span>
                 <span className="text-xs font-black text-blue-700 flex items-center gap-1 mt-0.5">
                   <Calendar size={13} className="shrink-0" />
-                  {transmitModalData.fecha || '14-10-2026'}
+                  {transmitModalData.fecha || '28-10-2026'}
                 </span>
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
