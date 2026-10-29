@@ -169,9 +169,10 @@ export const isAssignmentExternal = (r, fleetList = [], staffList = []) => {
   if (aux2Name && /\[EXT-|\(EXT-|EXTERNO/i.test(aux2Name)) return true;
 
   // 3. Conductor / Auxiliar en catálogo de staffList
+  let foundStaffCond = null;
   if (condName && staffList && staffList.length > 0) {
-    const foundStaff = staffList.find(s => s.name && s.name.trim().toLowerCase() === condName.toLowerCase());
-    if (foundStaff && isStaffExternal(foundStaff)) return true;
+    foundStaffCond = staffList.find(s => s.name && s.name.trim().toLowerCase() === condName.toLowerCase());
+    if (foundStaffCond && isStaffExternal(foundStaffCond)) return true;
   }
   if (aux1Name && staffList && staffList.length > 0) {
     const foundAux1 = staffList.find(s => s.name && s.name.trim().toLowerCase() === aux1Name.toLowerCase());
@@ -196,18 +197,32 @@ export const isAssignmentExternal = (r, fleetList = [], staffList = []) => {
       if (cPlate && fPlate && fPlate === cPlate) return true;
       return false;
     });
-    if (foundTruck && isVehicleExternal(foundTruck)) return true;
+    if (foundTruck) {
+      if (isVehicleExternal(foundTruck)) return true;
+      // Si el camión está en catálogo y es confirmadamente flota PROPIA:
+      // Si el conductor tampoco es externo, entonces es flota propia
+      if (!isVehicleExternal(foundTruck)) {
+        if (!condRut.startsWith('EXT-') && (!foundStaffCond || !isStaffExternal(foundStaffCond))) {
+          return false;
+        }
+      }
+    }
   }
 
-  // 5. Prefijos de patentes o códigos de vehículos externos conocidos
-  // TL: Transportes Lazcano, FG: Fabian Gonzalez, TF: Afca, TC: Karen Gonzalez, VL: Valencia, CS: SyC, EM: Leftraru, EXT: genérico
-  if (/^(TL|FG|TF|TC|VL|CS|EM|EXT)/i.test(cCode) || /^(TL|FG|TF|TC|VL|CS|EM|EXT)/i.test(cPlate)) {
+  // 5. Prefijos de códigos internos de vehículos externos conocidos (TL, FG, TF, TC, VL, CS, EM, EXT)
+  // NOTA: Se evalúa únicamente sobre el código interno (cCode como TL01, FG01), NUNCA sobre la patente para evitar
+  // falsos positivos con patentes vehiculares chilenas estándar que inician con TF, TC, etc.
+  if (/^(TL|FG|TF|TC|VL|CS|EM|EXT)\d+/i.test(cCode)) {
     return true;
   }
 
   // 6. Transportista externo (no código interno T100..T604 ni Sin Transportista ni Key)
   const transp = (r.transportista || '').trim();
   if (transp && !/^T\d+$/i.test(transp) && transp.toLowerCase() !== 'sin transportista' && transp.toLowerCase() !== 'key') {
+    // Si el conductor es un conductor propio confirmado en staffList, el transportista no lo convierte en externo
+    if (foundStaffCond && !isStaffExternal(foundStaffCond)) {
+      return false;
+    }
     return true;
   }
 
@@ -572,14 +587,48 @@ export default function Briefing() {
   }, [briefingData.rows, selectedOperations, searchTerm]);
 
   // Totales dinámicos calculados sobre las filas mostradas (para tarjetas y pie de tabla)
+  // Deduplica camiones únicos de primera y segunda vuelta a nivel global (Requisito: exactamente 13 Terceros en primeras vueltas)
   const displayedTotals = useMemo(() => {
+    const activeOpSet = new Set(displayedRows.map(r => r.operacion.toLowerCase()));
+    const uniqueExt1v = new Set();
+    const uniqueProp1v = new Set();
+    const uniqueExt2v = new Set();
+    const uniqueProp2v = new Set();
+
+    currentAssignedRows.forEach(r => {
+      const op = getBriefingOperation(r);
+      if (!activeOpSet.has(op.toLowerCase())) return;
+
+      const camion = (r.camion || '').trim();
+      const conductor = (r.conductor_name || '').trim();
+      const aux = (r.aux1_name || '').trim();
+      const isCovered = (camion && !camion.toLowerCase().includes('sin cami') && camion !== '-') ||
+                        (conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-') ||
+                        (aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
+      if (!isCovered) return;
+
+      const isExt = isAssignmentExternal(r, fleetList, staffList);
+      const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
+      const matchVuelta = rawVuelta.match(/\d+/);
+      const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
+      const identifier = camion || conductor || (aux || `ruta-${r.ruta}`);
+
+      if (vueltaNum === 1) {
+        if (isExt) uniqueExt1v.add(identifier);
+        else uniqueProp1v.add(identifier);
+      } else {
+        if (isExt) uniqueExt2v.add(identifier);
+        else uniqueProp2v.add(identifier);
+      }
+    });
+
     return {
       operacion: selectedOperations.length > 0 ? `Subtotal (${selectedOperations.length} ops)` : 'Total general',
       numRutas: displayedRows.reduce((acc, r) => acc + r.numRutas, 0),
-      propia1v: displayedRows.reduce((acc, r) => acc + r.propia1v, 0),
-      externa1v: displayedRows.reduce((acc, r) => acc + r.externa1v, 0),
-      propia2v: displayedRows.reduce((acc, r) => acc + r.propia2v, 0),
-      externa2v: displayedRows.reduce((acc, r) => acc + r.externa2v, 0),
+      propia1v: uniqueProp1v.size,
+      externa1v: uniqueExt1v.size,
+      propia2v: uniqueProp2v.size,
+      externa2v: uniqueExt2v.size,
       sinCobertura: displayedRows.reduce((acc, r) => acc + r.sinCobertura, 0),
       cajas: displayedRows.reduce((acc, r) => acc + r.cajas, 0),
       kilos: Number(displayedRows.reduce((acc, r) => acc + r.kilos, 0).toFixed(2)),
@@ -589,7 +638,7 @@ export default function Briefing() {
       volumenM3: Number(displayedRows.reduce((acc, r) => acc + r.volumenM3, 0).toFixed(2)),
       numDestinos: displayedRows.reduce((acc, r) => acc + r.numDestinos, 0)
     };
-  }, [displayedRows, selectedOperations]);
+  }, [displayedRows, selectedOperations, currentAssignedRows, fleetList, staffList]);
 
   // Exportar a Excel exactamente con las columnas solicitadas
   const handleExportExcel = () => {

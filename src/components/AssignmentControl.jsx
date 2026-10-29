@@ -1337,19 +1337,25 @@ export default function AssignmentControl() {
     });
   };
 
-  // Drag and drop handlers
+  // Drag and drop handlers compatibles con cualquier navegador y sistema operativo
   const handleDragStartStaff = (e, staff) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'staff', data: staff }));
+    e.dataTransfer.effectAllowed = 'copyMove';
+    const payload = JSON.stringify({ type: 'staff', data: staff });
+    e.dataTransfer.setData('application/json', payload);
+    e.dataTransfer.setData('text/plain', payload);
   };
 
   const handleDragStartTruck = (e, truck, isRampla = false) => {
-    e.dataTransfer.setData('application/json', JSON.stringify({ type: isRampla ? 'rampla' : 'truck', data: truck }));
+    e.dataTransfer.effectAllowed = 'copyMove';
+    const payload = JSON.stringify({ type: isRampla ? 'rampla' : 'truck', data: truck });
+    e.dataTransfer.setData('application/json', payload);
+    e.dataTransfer.setData('text/plain', payload);
   };
 
   const handleDropOnRow = (e, rowId, slotPreference = 'auto') => {
     e.preventDefault();
     try {
-      const raw = e.dataTransfer.getData('application/json');
+      const raw = e.dataTransfer.getData('application/json') || e.dataTransfer.getData('text/plain');
       if (!raw) return;
       const parsed = JSON.parse(raw);
       
@@ -1361,17 +1367,14 @@ export default function AssignmentControl() {
         const staff = parsed.data;
         let targetSlot = slotPreference;
         if (targetSlot === 'auto' || !targetSlot) {
-          // Si se soltó sobre la fila en general, inferir por el rol o pestaña activa
-          const staffRole = (staff.role || '').toLowerCase();
-          if (staffRole.includes('auxiliar') || staffRole.includes('movilizador') || activeTabStaff === 'auxiliares') {
-            const currentRow = assignmentsForDate.find(r => r.id === rowId);
-            if (currentRow && currentRow.aux1_name && !currentRow.aux2_name) {
-              targetSlot = 'auxiliar2';
-            } else {
-              targetSlot = 'auxiliar';
-            }
-          } else {
+          // Si se soltó sobre la fila en general, inferir según los campos vacíos de la fila
+          const currentRow = assignmentsForDate.find(r => r.id === rowId);
+          if (!currentRow?.conductor_name) {
             targetSlot = 'conductor';
+          } else if (!currentRow?.aux1_name) {
+            targetSlot = 'auxiliar';
+          } else {
+            targetSlot = 'auxiliar2';
           }
         }
         handleRequestAssignStaff(staff, targetSlot, targetIds);
@@ -2005,17 +2008,32 @@ export default function AssignmentControl() {
                   </div>
 
                   {selectedRowIds.length > 0 && (
-                    <div className="mt-1 pt-1 border-t border-slate-100 flex items-center justify-end">
+                    <div className="mt-1 pt-1 border-t border-slate-100 flex items-center justify-end gap-1">
                       <button
+                        type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleRequestAssignStaff(staff, activeTabStaff === 'conductores' ? 'conductor' : 'auxiliar');
+                          handleRequestAssignStaff(staff, 'conductor');
                         }}
-                        className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded shadow-xs ${
+                        className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded shadow-xs cursor-pointer ${
                           attStyle?.isAlert ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
                         }`}
+                        title={`Asignar como CONDUCTOR a ${selectedRowIds.length} fila(s) seleccionada(s)`}
                       >
-                        + Asignar ({selectedRowIds.length})
+                        + Conductor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRequestAssignStaff(staff, 'auxiliar');
+                        }}
+                        className={`text-[9px] font-bold text-white px-1.5 py-0.5 rounded shadow-xs cursor-pointer ${
+                          attStyle?.isAlert ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-indigo-600 hover:bg-indigo-700'
+                        }`}
+                        title={`Asignar como AUXILIAR a ${selectedRowIds.length} fila(s) seleccionada(s)`}
+                      >
+                        + Auxiliar
                       </button>
                     </div>
                   )}
@@ -2387,14 +2405,19 @@ export default function AssignmentControl() {
                         <td 
                           className="px-2.5 py-2 font-bold text-slate-800 max-w-[130px] truncate bg-blue-50/20 transition-colors hover:bg-blue-100/40"
                           title={row.conductor_name}
-                          onDragOver={(e) => e.preventDefault()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'copy';
+                          }}
                           onDrop={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             handleDropOnRow(e, row.id, 'conductor');
                           }}
                         >
                           {row.conductor_name ? (
-                            <span className="flex items-center justify-between gap-1">
+                            <span className="flex items-center justify-between gap-1 pointer-events-auto">
                               <span className="truncate flex items-center gap-1">
                                 <span className="truncate">{row.conductor_name}</span>
                                 {staffList.find(s => s.name === row.conductor_name)?.tipo_dotacion === 'Externo' && (
@@ -2420,14 +2443,19 @@ export default function AssignmentControl() {
                         <td 
                           className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20 transition-colors hover:bg-indigo-100/40"
                           title={row.aux1_name}
-                          onDragOver={(e) => e.preventDefault()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'copy';
+                          }}
                           onDrop={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             handleDropOnRow(e, row.id, 'auxiliar');
                           }}
                         >
                           {row.aux1_name ? (
-                            <span className="flex items-center justify-between gap-1">
+                            <span className="flex items-center justify-between gap-1 pointer-events-auto">
                               <span className="truncate font-medium flex items-center gap-1">
                                 <span className="truncate">{row.aux1_name}</span>
                                 {staffList.find(s => s.name === row.aux1_name)?.tipo_dotacion === 'Externo' && (
@@ -2453,14 +2481,19 @@ export default function AssignmentControl() {
                         <td 
                           className="px-2.5 py-2 text-slate-700 max-w-[120px] truncate bg-indigo-50/20 transition-colors hover:bg-indigo-100/40"
                           title={row.aux2_name}
-                          onDragOver={(e) => e.preventDefault()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'copy';
+                          }}
                           onDrop={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             handleDropOnRow(e, row.id, 'auxiliar2');
                           }}
                         >
                           {row.aux2_name ? (
-                            <span className="flex items-center justify-between gap-1">
+                            <span className="flex items-center justify-between gap-1 pointer-events-auto">
                               <span className="truncate font-medium">{row.aux2_name}</span>
                               <button 
                                 onClick={() => updateAssignmentField(activeDate, row.id, 'aux2_name', '')}
@@ -2478,8 +2511,13 @@ export default function AssignmentControl() {
                         {/* 7. Camión (Con Tipo de equipo en hover - Requisito 5) */}
                         <td 
                           className="px-2.5 py-2 font-bold text-slate-800 bg-emerald-50/20 relative group/truck transition-colors hover:bg-emerald-100/40"
-                          onDragOver={(e) => e.preventDefault()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'copy';
+                          }}
                           onDrop={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             handleDropOnRow(e, row.id, 'camion');
                           }}
@@ -2516,8 +2554,13 @@ export default function AssignmentControl() {
                         {/* 9. Rampla (Asignable por arrastrar camión, semirremolque o texto - Requisito 5) */}
                         <td 
                           className="px-2.5 py-2 bg-teal-50/20 transition-colors hover:bg-teal-100/40"
-                          onDragOver={(e) => e.preventDefault()}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            e.dataTransfer.dropEffect = 'copy';
+                          }}
                           onDrop={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             handleDropOnRow(e, row.id, 'rampla');
                           }}

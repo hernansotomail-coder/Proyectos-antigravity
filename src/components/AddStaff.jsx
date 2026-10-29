@@ -43,6 +43,21 @@ const formatRutOrSynthetic = (rawRut, name, empresa, idx = 0, usedRuts = null) =
   return formatted;
 };
 
+// Formateador interactivo de RUT para escritura manual en formulario (permite escribir normalmente RUT chileno o EXT-)
+export const formatRut = (raw) => {
+  if (!raw) return '';
+  const str = String(raw).trim();
+  if (str.toUpperCase().startsWith('EXT')) {
+    return str.toUpperCase();
+  }
+  const clean = str.replace(/[^0-9kK]/g, '').toUpperCase();
+  if (clean.length === 0) return '';
+  if (clean.length === 1) return clean;
+  const dv = clean.slice(-1);
+  const body = clean.slice(0, -1);
+  return `${body.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}-${dv}`;
+};
+
 export default function AddStaff() {
   const [activeTab, setActiveTab] = useState('manual');
   
