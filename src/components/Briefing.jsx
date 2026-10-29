@@ -11,7 +11,7 @@ import { useStaffStore } from '../store/staffStore';
 import { findOperationForRoute, getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
 import { Button } from './ui/Button';
 import { copyBriefingAsImage } from '../lib/matrixImageExporter';
-import PaseIngresoMatrix from './PaseIngresoMatrix';
+import PaseIngresoMatrix, { NEWREST_PASE_ROUTES, JUAN_VALDEZ_PASE_ROUTES } from './PaseIngresoMatrix';
 
 // Limpia de la operación la denominación "RUTA ENVÍOS" más el número y conectores sobrantes
 export const cleanBriefingOperationName = (name) => {
@@ -95,6 +95,17 @@ export const getBriefingOperation = (route) => {
   // Si es servicio SPID explícito (ej: desde Servicios Extras o ruta directa)
   if (rawClient.toUpperCase().includes('SPID') || rawRuta.toUpperCase().includes('SPID')) {
     return 'SPID';
+  }
+
+  // Rutas explícitas de Newrest para Pase de Ingreso y Briefing
+  const cleanRutaStr = rawRuta.replace(/^0+/, '');
+  if (NEWREST_PASE_ROUTES.has(rawRuta) || (cleanRutaStr && NEWREST_PASE_ROUTES.has(cleanRutaStr))) {
+    return 'Newrest ByI';
+  }
+
+  // Rutas explícitas de Juan Valdez para Pase de Ingreso y Briefing
+  if (JUAN_VALDEZ_PASE_ROUTES.has(rawRuta) || (cleanRutaStr && JUAN_VALDEZ_PASE_ROUTES.has(cleanRutaStr))) {
+    return 'Juan Valdez';
   }
 
   let op = '';
