@@ -171,10 +171,15 @@ export default function Briefing() {
     savedRuteoByDate, 
     selectedDisponibilizarDate, 
     transformedRoutes,
-    rawRows
+    rawRows,
+    initPlanningFromDb
   } = usePlanningStore();
   
   const { fleetList } = useFleetStore();
+
+  React.useEffect(() => {
+    initPlanningFromDb?.();
+  }, [initPlanningFromDb]);
 
   // Fechas disponibles
   const availableDates = useMemo(() => {

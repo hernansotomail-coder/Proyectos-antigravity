@@ -519,19 +519,13 @@ export default function PaseIngresoMatrix({
       >
         {/* ENCABEZADO OFICIAL VERDE OSCURO (#0a5c43) */}
         <div className="bg-[#0a5c43] text-white px-5 py-3.5 flex items-center justify-between gap-4 select-none">
-          {/* Logo Key Logistics Blanco a la izquierda */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Logo Key Logistics oficial del menú a la izquierda */}
+          <div className="flex items-center shrink-0">
             <img 
-              src="/logos/keylogistics-white.png" 
+              src="/keylogistics-logo.jpg" 
               alt="Key Logistics" 
-              className="h-9 w-auto object-contain filter drop-shadow-xs"
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-              }}
+              className="h-10 w-auto object-contain rounded-lg shadow-xs bg-white border border-white/20 p-1 shrink-0 filter drop-shadow-xs"
             />
-            <span className="text-lg font-black tracking-wider text-white">
-              Key <span className="font-light text-xs block -mt-1 tracking-widest text-emerald-200">logistics</span>
-            </span>
           </div>
 
           {/* Título Central */}

@@ -292,61 +292,113 @@ export const ensureRowTransportista = (row) => {
 
 export const persistAssignmentsToDb = async (fecha, assignments) => {
   try {
-    if (!fecha || !assignments) return;
-    await supabase
+    if (!fecha || !assignments) return false;
+    const { error } = await supabase
       .from('planning_assignments')
       .upsert({
         fecha,
         assignments,
         updated_at: new Date().toISOString()
       }, { onConflict: 'fecha' });
+    if (error) {
+      console.warn(`[Supabase] Error guardando asignaciones para fecha ${fecha}:`, error);
+      return false;
+    }
+    return true;
   } catch (e) {
-    console.warn('Error guardando asignaciones en Supabase:', e);
+    console.warn('[Supabase] Excepción guardando asignaciones:', e);
+    return false;
   }
 };
 
 export const persistRuteoOverridesToDb = async (overrides) => {
   try {
-    if (!overrides) return;
-    await supabase
+    if (!overrides) return false;
+    const { error } = await supabase
       .from('planning_assignments')
       .upsert({
         fecha: '__ruteo_overrides__',
         assignments: overrides,
         updated_at: new Date().toISOString()
       }, { onConflict: 'fecha' });
+    if (error) {
+      console.warn('[Supabase] Error guardando overrides de ruteo:', error);
+      return false;
+    }
+    return true;
   } catch (e) {
-    console.warn('Error guardando overrides de ruteo en Supabase:', e);
+    console.warn('[Supabase] Excepción guardando overrides de ruteo:', e);
+    return false;
   }
 };
 
 export const persistHistoryToDb = async (historyList) => {
   try {
-    if (!historyList) return;
-    await supabase
+    if (!historyList) return false;
+    const { error } = await supabase
       .from('planning_assignments')
       .upsert({
         fecha: '__saved_history__',
         assignments: historyList,
         updated_at: new Date().toISOString()
       }, { onConflict: 'fecha' });
+    if (error) {
+      console.warn('[Supabase] Error guardando histórico:', error);
+      return false;
+    }
+    return true;
   } catch (e) {
-    console.warn('Error guardando histórico en Supabase:', e);
+    console.warn('[Supabase] Excepción guardando histórico:', e);
+    return false;
   }
 };
 
 export const persistChangeHistoryToDb = async (changeList) => {
   try {
-    if (!changeList) return;
-    await supabase
+    if (!changeList) return false;
+    const { error } = await supabase
       .from('planning_assignments')
       .upsert({
         fecha: '__change_history__',
         assignments: changeList,
         updated_at: new Date().toISOString()
       }, { onConflict: 'fecha' });
+    if (error) {
+      console.warn('[Supabase] Error guardando change history:', error);
+      return false;
+    }
+    return true;
   } catch (e) {
-    console.warn('Error guardando change history en Supabase:', e);
+    console.warn('[Supabase] Excepción guardando change history:', e);
+    return false;
+  }
+};
+
+export const persistTransformedRoutesToDb = async (transformedRoutes, meta = {}) => {
+  try {
+    if (!transformedRoutes || !Array.isArray(transformedRoutes)) return false;
+    const payload = {
+      routes: transformedRoutes,
+      meta: {
+        ...meta,
+        updated_at: new Date().toISOString()
+      }
+    };
+    const { error } = await supabase
+      .from('planning_assignments')
+      .upsert({
+        fecha: '__transformed_routes__',
+        assignments: payload,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'fecha' });
+    if (error) {
+      console.warn('[Supabase] Error guardando transformedRoutes:', error);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.warn('[Supabase] Excepción guardando transformedRoutes:', e);
+    return false;
   }
 };
 
@@ -364,6 +416,8 @@ export const fetchPlanningStateFromDb = async () => {
       let ruteoOverridesFromDb = null;
       let historyListFromDb = null;
       let changeHistoryListFromDb = null;
+      let transformedRoutesFromDb = null;
+      let transformedRoutesMeta = null;
 
       data.forEach(item => {
         if (!item.fecha || !item.assignments) return;
@@ -374,6 +428,13 @@ export const fetchPlanningStateFromDb = async () => {
           historyListFromDb = item.assignments;
         } else if (item.fecha === '__change_history__') {
           changeHistoryListFromDb = item.assignments;
+        } else if (item.fecha === '__transformed_routes__') {
+          if (Array.isArray(item.assignments)) {
+            transformedRoutesFromDb = item.assignments;
+          } else if (item.assignments && Array.isArray(item.assignments.routes)) {
+            transformedRoutesFromDb = item.assignments.routes;
+            transformedRoutesMeta = item.assignments.meta || null;
+          }
         } else if (item.fecha.startsWith('__')) {
           // Claves internas (ej: __user_permissions__)
         } else if (Array.isArray(item.assignments)) {
@@ -389,7 +450,9 @@ export const fetchPlanningStateFromDb = async () => {
         assignmentsMap,
         ruteoOverridesFromDb,
         historyListFromDb,
-        changeHistoryListFromDb
+        changeHistoryListFromDb,
+        transformedRoutesFromDb,
+        transformedRoutesMeta
       };
     }
   } catch (e) {
@@ -427,16 +490,22 @@ const loadPersistedAssignments = () => {
   }
 };
 
-const persistAssignments = (data) => {
+export const persistAssignments = async (data) => {
   try {
     localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(data));
     if (data && typeof data === 'object') {
-      Object.entries(data).forEach(([fecha, rows]) => {
-        persistAssignmentsToDb(fecha, rows);
+      const promises = Object.entries(data).map(([fecha, rows]) => {
+        if (fecha && !fecha.startsWith('__')) {
+          return persistAssignmentsToDb(fecha, rows);
+        }
+        return Promise.resolve(true);
       });
+      await Promise.all(promises);
     }
+    return true;
   } catch (e) {
-    console.error('Error saving transmitted assignments to localStorage:', e);
+    console.error('Error saving transmitted assignments to localStorage/DB:', e);
+    return false;
   }
 };
 
@@ -718,9 +787,11 @@ export const loadPersistedTransformedRoutes = () => {
   }
 };
 
-export const persistTransformedRoutes = (data) => {
+export const persistTransformedRoutes = (data, meta = {}) => {
   try {
     localStorage.setItem('keylogistics_transformed_routes_v2', JSON.stringify(data));
+    // Sincronizar asíncronamente con Supabase bajo la clave __transformed_routes__
+    persistTransformedRoutesToDb(data, meta);
   } catch (e) {
     console.error('Error saving transformed routes to localStorage:', e);
   }
@@ -924,8 +995,8 @@ export const usePlanningStore = create((set, get) => ({
   },
 
   // Transmit from Ruteo to Disponibilización
-  transmitToDisponibilizacion: () => {
-    const { transformedRoutes, transmittedAssignments } = get();
+  transmitToDisponibilizacion: async () => {
+    const { transformedRoutes, transmittedAssignments, fileName } = get();
 
     if (!transformedRoutes || transformedRoutes.length === 0) {
       toast.error('No hay rutas transformadas para transmitir.');
@@ -996,7 +1067,9 @@ export const usePlanningStore = create((set, get) => ({
       totalTransmitted++;
     });
 
-    persistAssignments(newAssignmentsByDate);
+    // Guardar en localStorage y Supabase (esperar a que la BD confirme)
+    await persistAssignments(newAssignmentsByDate);
+    await persistTransformedRoutesToDb(transformedRoutes, { fileName, date: transformedRoutes[0]?.fecha });
 
     const dates = Object.keys(newAssignmentsByDate);
     const targetDate = transformedRoutes[0]?.fecha || dates[0] || '';
@@ -1017,7 +1090,7 @@ export const usePlanningStore = create((set, get) => ({
       ...synced
     });
 
-    toast.success(`¡${totalTransmitted} rutas transmitidas a Disponibilización exitosamente!`);
+    toast.success(`¡${totalTransmitted} rutas transmitidas a Disponibilización y guardadas en la nube exitosamente!`);
     return true;
   },
 
@@ -1111,8 +1184,8 @@ export const usePlanningStore = create((set, get) => ({
 
   // TRANSMITIR SOLO RUTAS ESPECÍFICAS O MODIFICADAS A DISPONIBILIZACIÓN
   // Mantiene intacto todo lo que ya fue asignado o modificado en las otras rutas de Disponibilización
-  transmitSpecificRoutesToDisponibilizacion: (routeIdsToTransmit) => {
-    const { transformedRoutes, transmittedAssignments } = get();
+  transmitSpecificRoutesToDisponibilizacion: async (routeIdsToTransmit) => {
+    const { transformedRoutes, transmittedAssignments, fileName } = get();
     if (!routeIdsToTransmit || routeIdsToTransmit.length === 0) {
       toast.warning('No se indicaron rutas para transmitir.');
       return false;
@@ -1197,8 +1270,8 @@ export const usePlanningStore = create((set, get) => ({
       return r;
     });
 
-    persistTransformedRoutes(nextTransformed);
-    persistAssignments(newAssignmentsByDate);
+    persistTransformedRoutes(nextTransformed, { fileName, date: nextTransformed[0]?.fecha });
+    await persistAssignments(newAssignmentsByDate);
 
     const targetDate = targetRoutes[0]?.fecha || Object.keys(newAssignmentsByDate)[0] || '14-10-2026';
     const synced = syncHistoryAndSavedForDate(get(), targetDate, newAssignmentsByDate[targetDate] || []);
@@ -1218,7 +1291,7 @@ export const usePlanningStore = create((set, get) => ({
       ...synced
     });
 
-    toast.success(`Transmitido a Disponibilización: ${totalAdded} ruta(s) nueva(s), ${totalUpdated} actualizada(s). El resto se mantuvo intacto.`);
+    toast.success(`Transmitido a Disponibilización: ${totalAdded} ruta(s) nueva(s), ${totalUpdated} actualizada(s). Guardado en servidor.`);
     return true;
   },
 
@@ -1226,130 +1299,253 @@ export const usePlanningStore = create((set, get) => ({
   initPlanningFromDb: async () => {
     try {
       const dbState = await fetchPlanningStateFromDb();
-      if (dbState) {
-        const { assignmentsMap, ruteoOverridesFromDb, historyListFromDb, changeHistoryListFromDb } = dbState;
-        set(state => {
-          const mergedAssignments = { ...state.transmittedAssignments };
-          Object.entries(assignmentsMap).forEach(([fecha, dbRows]) => {
-            const localRows = state.transmittedAssignments?.[fecha] || [];
-            if (!localRows || localRows.length === 0) {
-              mergedAssignments[fecha] = dbRows;
-            } else {
-              // Fusionar respetando filas ya asignadas localmente pero con DB autoritativa en rutas, métricas y paradas
-              const localRowMap = new Map();
-              localRows.forEach(lr => {
-                const k = `${lr.ruta || ''}:::${lr.id || ''}`;
-                localRowMap.set(k, lr);
-              });
-              
-              mergedAssignments[fecha] = dbRows.map(dbR => {
-                const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
-                const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
-                if (lr) {
-                  // Si el local tiene conductor/camión y el de la DB está vacío, mantener local
-                  return {
-                    ...dbR,
-                    conductor_name: dbR.conductor_name || lr.conductor_name || '',
-                    conductor_rut: dbR.conductor_rut || lr.conductor_rut || '',
-                    camion: dbR.camion || lr.camion || '',
-                    tipo_equipo: dbR.tipo_equipo || lr.tipo_equipo || '',
-                    rampla: dbR.rampla || lr.rampla || '',
-                    n_vuelta: dbR.n_vuelta || lr.n_vuelta || '',
-                    aux1_name: dbR.aux1_name || lr.aux1_name || '',
-                    aux1_rut: dbR.aux1_rut || lr.aux1_rut || '',
-                    aux2_name: dbR.aux2_name || lr.aux2_name || '',
-                    aux2_rut: dbR.aux2_rut || lr.aux2_rut || '',
-                    turno: dbR.turno || lr.turno || '',
-                    hora_cita: dbR.hora_cita || lr.hora_cita || '',
-                    prioridad: dbR.prioridad || lr.prioridad || 'Normal',
-                    destino_prioritario: dbR.destino_prioritario || lr.destino_prioritario || '',
-                    // La DB es la autoridad absoluta de paradas, destinos y métricas
-                    paradas: (dbR.paradas && dbR.paradas.length > 0) ? dbR.paradas : (lr.paradas || []),
-                    locales: dbR.locales != null ? dbR.locales : lr.locales,
-                    m3: dbR.m3 != null ? dbR.m3 : lr.m3,
-                    peso: dbR.peso != null ? dbR.peso : lr.peso,
-                    cantCJ: dbR.cantCJ != null ? dbR.cantCJ : lr.cantCJ
-                  };
-                }
-                return dbR;
-              });
+      if (!dbState) return;
 
-              // Preservar rutas aperturadas localmente si aún no existen en DB
-              const dbRouteKeys = new Set(dbRows.map(dr => String(dr.ruta).trim()));
-              localRows.forEach(lr => {
-                if (lr.isAperturada && !dbRouteKeys.has(String(lr.ruta).trim())) {
-                  mergedAssignments[fecha].push(lr);
-                }
-              });
-            }
-          });
+      const { 
+        assignmentsMap, 
+        ruteoOverridesFromDb, 
+        historyListFromDb, 
+        changeHistoryListFromDb,
+        transformedRoutesFromDb,
+        transformedRoutesMeta 
+      } = dbState;
 
-          const mergedSaved = { ...state.savedRuteoByDate, ...mergedAssignments };
-          const mergedBaseline = { ...(state.savedRuteoBaseline || {}), ...mergedAssignments };
-          const mergedOverrides = ruteoOverridesFromDb 
-            ? { ...state.ruteoOverrides, ...ruteoOverridesFromDb } 
-            : state.ruteoOverrides;
-          const mergedHistory = historyListFromDb && historyListFromDb.length > 0 
-            ? historyListFromDb 
-            : state.savedHistoryList;
-          const mergedChangeHistory = changeHistoryListFromDb && Array.isArray(changeHistoryListFromDb) && changeHistoryListFromDb.length > 0
-            ? changeHistoryListFromDb
-            : state.changeHistoryList;
+      const currentState = get();
 
-          try {
-            localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(mergedAssignments));
-            localStorage.setItem('keylogistics_saved_ruteo', JSON.stringify(mergedSaved));
-            localStorage.setItem('keylogistics_saved_baseline', JSON.stringify(mergedBaseline));
-            if (ruteoOverridesFromDb) {
-              localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(mergedOverrides));
-            }
-            if (historyListFromDb) {
-              localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(mergedHistory));
-            }
-            if (changeHistoryListFromDb) {
-              localStorage.setItem('keylogistics_change_history', JSON.stringify(mergedChangeHistory));
-            }
-          } catch (e) {}
+      // 1. Detección y migración automática de fechas locales no presentes en BD (ej: 30-10-2026 cargada en otro notebook)
+      const localTransmitted = currentState.transmittedAssignments || {};
+      const datesToPushToDb = [];
 
-          const mostRecentDispDate = getMostRecentDate(Object.keys(mergedAssignments || {}));
-          const mostRecentRuteoDate = getMostRecentDate(Object.keys(mergedSaved || {}));
+      Object.entries(localTransmitted).forEach(([localFecha, localRows]) => {
+        if (localFecha && !localFecha.startsWith('__') && Array.isArray(localRows) && localRows.length > 0) {
+          if (!assignmentsMap[localFecha]) {
+            console.log(`[Sync] Detectada fecha local ${localFecha} no presente en BD. Subiendo a Supabase...`);
+            datesToPushToDb.push({ fecha: localFecha, rows: localRows });
+            assignmentsMap[localFecha] = localRows;
+          }
+        }
+      });
 
+      // También verificar si en transformedRoutes locales hay fechas no presentes en assignmentsMap
+      const localTransformed = currentState.transformedRoutes || [];
+      const transformedDates = Array.from(new Set(localTransformed.map(r => r.fecha).filter(Boolean)));
+      transformedDates.forEach(tFecha => {
+        if (tFecha && !tFecha.startsWith('__') && !assignmentsMap[tFecha]) {
+          console.log(`[Sync] Creando asignaciones automáticas para fecha ${tFecha} desde transformedRoutes...`);
+          const autoRows = localTransformed
+            .filter(r => r.fecha === tFecha)
+            .map((route, idx) => ({
+              id: `disp-${tFecha}-${route.ruta}-${Date.now()}-${idx}`,
+              fecha: tFecha,
+              conductor_name: '',
+              conductor_rut: '',
+              aux1_name: '',
+              aux1_rut: '',
+              aux2_name: '',
+              aux2_rut: '',
+              camion: '',
+              tipo_equipo: '',
+              rampla: '',
+              n_vuelta: '',
+              tipo_servicio: 'Centralizado',
+              ruta: route.ruta,
+              cliente: route.operacion || route.cliente || route.nombreRuta,
+              operacion: route.operacion || route.cliente || route.nombreRuta,
+              denominacion: route.denominacion || route.nombreRuta,
+              transportista: route.transportista || ensureRowTransportista(route),
+              referencia: '',
+              locales: route.recuentoDestino || 1,
+              m3: route.sumaVolumen || 0,
+              peso: route.sumaPeso || 0,
+              cantCJ: route.sumaCantCJ || 0,
+              paradas: route.paradas || []
+            }));
+          if (autoRows.length > 0) {
+            datesToPushToDb.push({ fecha: tFecha, rows: autoRows });
+            assignmentsMap[tFecha] = autoRows;
+          }
+        }
+      });
+
+      if (datesToPushToDb.length > 0) {
+        Promise.all(datesToPushToDb.map(item => persistAssignmentsToDb(item.fecha, item.rows)))
+          .then(() => console.log(`[Sync] Fechas locales subidas a Supabase exitosamente:`, datesToPushToDb.map(d => d.fecha)))
+          .catch(err => console.warn('[Sync] Error subiendo fechas locales a Supabase:', err));
+      }
+
+      // 2. Transformed Routes (Ruteo / Asignación Diaria):
+      let effectiveTransformed = currentState.transformedRoutes;
+      if (transformedRoutesFromDb && Array.isArray(transformedRoutesFromDb) && transformedRoutesFromDb.length > 0) {
+        effectiveTransformed = transformedRoutesFromDb.map(r => {
+          const paradas = healParadasWithPreloaded(r.ruta, r.paradas, r.fecha);
+          const distinctAmbientes = Array.from(new Set(paradas.map(p => p.ambiente))).sort();
           return {
-            transmittedAssignments: mergedAssignments,
-            savedRuteoByDate: mergedSaved,
-            savedRuteoBaseline: mergedBaseline,
-            ruteoOverrides: mergedOverrides,
-            savedHistoryList: mergedHistory,
-            changeHistoryList: mergedChangeHistory,
-            selectedDisponibilizarDate: (state.selectedDisponibilizarDate && state.selectedDisponibilizarDate !== '14-10-2026' && mergedAssignments[state.selectedDisponibilizarDate])
-              ? state.selectedDisponibilizarDate
-              : mostRecentDispDate,
-            selectedRuteoDate: (state.selectedRuteoDate && state.selectedRuteoDate !== '14-10-2026' && mergedSaved[state.selectedRuteoDate])
-              ? state.selectedRuteoDate
-              : mostRecentRuteoDate
+            ...r,
+            ambientes: distinctAmbientes.length > 0 ? distinctAmbientes : (r.ambientes || ['S']),
+            paradas
           };
         });
-      } else {
-        // Si Supabase no tiene asignaciones pero localmente sí tenemos, sincronizar a Supabase
-        const current = get().transmittedAssignments;
-        if (current && typeof current === 'object') {
-          Object.entries(current).forEach(([f, rows]) => {
-            if (rows && rows.length > 0) {
-              persistAssignmentsToDb(f, rows);
-            }
-          });
-        }
-        const overrides = get().ruteoOverrides;
-        if (overrides && Object.keys(overrides).length > 0) {
-          persistRuteoOverridesToDb(overrides);
-        }
-        const history = get().savedHistoryList;
-        if (history && history.length > 0) {
-          persistHistoryToDb(history);
-        }
+        try {
+          localStorage.setItem('keylogistics_transformed_routes_v2', JSON.stringify(effectiveTransformed));
+        } catch (e) {}
+      } else if (effectiveTransformed && effectiveTransformed.length > 0) {
+        persistTransformedRoutesToDb(effectiveTransformed, { 
+          fileName: currentState.fileName || 'Planificación Diaria',
+          date: effectiveTransformed[0]?.fecha || ''
+        });
       }
+
+      set(state => {
+        const mergedAssignments = { ...state.transmittedAssignments };
+        Object.entries(assignmentsMap).forEach(([fecha, dbRows]) => {
+          const localRows = state.transmittedAssignments?.[fecha] || [];
+          if (!localRows || localRows.length === 0) {
+            mergedAssignments[fecha] = dbRows;
+          } else {
+            // Fusionar respetando filas ya asignadas localmente pero con DB autoritativa en rutas, métricas y paradas
+            const localRowMap = new Map();
+            localRows.forEach(lr => {
+              const k = `${lr.ruta || ''}:::${lr.id || ''}`;
+              localRowMap.set(k, lr);
+            });
+            
+            mergedAssignments[fecha] = dbRows.map(dbR => {
+              const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
+              const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
+              if (lr) {
+                // Si el local tiene conductor/camión y el de la DB está vacío, mantener local
+                return {
+                  ...dbR,
+                  conductor_name: dbR.conductor_name || lr.conductor_name || '',
+                  conductor_rut: dbR.conductor_rut || lr.conductor_rut || '',
+                  camion: dbR.camion || lr.camion || '',
+                  tipo_equipo: dbR.tipo_equipo || lr.tipo_equipo || '',
+                  rampla: dbR.rampla || lr.rampla || '',
+                  n_vuelta: dbR.n_vuelta || lr.n_vuelta || '',
+                  aux1_name: dbR.aux1_name || lr.aux1_name || '',
+                  aux1_rut: dbR.aux1_rut || lr.aux1_rut || '',
+                  aux2_name: dbR.aux2_name || lr.aux2_name || '',
+                  aux2_rut: dbR.aux2_rut || lr.aux2_rut || '',
+                  turno: dbR.turno || lr.turno || '',
+                  hora_cita: dbR.hora_cita || lr.hora_cita || '',
+                  prioridad: dbR.prioridad || lr.prioridad || 'Normal',
+                  destino_prioritario: dbR.destino_prioritario || lr.destino_prioritario || '',
+                  // La DB es la autoridad absoluta de paradas, destinos y métricas
+                  paradas: (dbR.paradas && dbR.paradas.length > 0) ? dbR.paradas : (lr.paradas || []),
+                  locales: dbR.locales != null ? dbR.locales : lr.locales,
+                  m3: dbR.m3 != null ? dbR.m3 : lr.m3,
+                  peso: dbR.peso != null ? dbR.peso : lr.peso,
+                  cantCJ: dbR.cantCJ != null ? dbR.cantCJ : lr.cantCJ
+                };
+              }
+              return dbR;
+            });
+
+            // Preservar rutas aperturadas localmente si aún no existen en DB
+            const dbRouteKeys = new Set(dbRows.map(dr => String(dr.ruta).trim()));
+            localRows.forEach(lr => {
+              if (lr.isAperturada && !dbRouteKeys.has(String(lr.ruta).trim())) {
+                mergedAssignments[fecha].push(lr);
+              }
+            });
+          }
+        });
+
+        const mergedSaved = { ...state.savedRuteoByDate, ...mergedAssignments };
+        const mergedBaseline = { ...(state.savedRuteoBaseline || {}), ...mergedAssignments };
+        const mergedOverrides = ruteoOverridesFromDb 
+          ? { ...state.ruteoOverrides, ...ruteoOverridesFromDb } 
+          : state.ruteoOverrides;
+        const mergedHistory = historyListFromDb && historyListFromDb.length > 0 
+          ? historyListFromDb 
+          : state.savedHistoryList;
+        const mergedChangeHistory = changeHistoryListFromDb && Array.isArray(changeHistoryListFromDb) && changeHistoryListFromDb.length > 0
+          ? changeHistoryListFromDb
+          : state.changeHistoryList;
+
+        try {
+          localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(mergedAssignments));
+          localStorage.setItem('keylogistics_saved_ruteo', JSON.stringify(mergedSaved));
+          localStorage.setItem('keylogistics_saved_baseline', JSON.stringify(mergedBaseline));
+          if (ruteoOverridesFromDb) {
+            localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(mergedOverrides));
+          }
+          if (historyListFromDb) {
+            localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(mergedHistory));
+          }
+          if (changeHistoryListFromDb) {
+            localStorage.setItem('keylogistics_change_history', JSON.stringify(mergedChangeHistory));
+          }
+        } catch (e) {}
+
+        const allDispDates = Object.keys(mergedAssignments || {});
+        const mostRecentDispDate = getMostRecentDate(allDispDates, '28-10-2026');
+        const mostRecentRuteoDate = getMostRecentDate(Object.keys(mergedSaved || {}), '28-10-2026');
+
+        return {
+          transformedRoutes: effectiveTransformed,
+          isTransformed: effectiveTransformed && effectiveTransformed.length > 0,
+          fileName: transformedRoutesMeta?.fileName || state.fileName,
+          transmittedAssignments: mergedAssignments,
+          savedRuteoByDate: mergedSaved,
+          savedRuteoBaseline: mergedBaseline,
+          ruteoOverrides: mergedOverrides,
+          savedHistoryList: mergedHistory,
+          changeHistoryList: mergedChangeHistory,
+          selectedDisponibilizarDate: (state.selectedDisponibilizarDate && state.selectedDisponibilizarDate !== '14-10-2026' && mergedAssignments[state.selectedDisponibilizarDate])
+            ? state.selectedDisponibilizarDate
+            : mostRecentDispDate,
+          selectedRuteoDate: (state.selectedRuteoDate && state.selectedRuteoDate !== '14-10-2026' && mergedSaved[state.selectedRuteoDate])
+            ? state.selectedRuteoDate
+            : mostRecentRuteoDate
+        };
+      });
     } catch (e) {
       console.warn('Error inicializando planning desde DB:', e);
+    }
+  },
+
+  // Sincronizar todos los datos locales con la nube Supabase bajo demanda
+  syncAllToCloud: async () => {
+    try {
+      const state = get();
+      const promises = [];
+
+      // 1. Subir transformedRoutes
+      if (state.transformedRoutes && state.transformedRoutes.length > 0) {
+        promises.push(persistTransformedRoutesToDb(state.transformedRoutes, {
+          fileName: state.fileName || 'Planificación Diaria',
+          date: state.transformedRoutes[0]?.fecha || ''
+        }));
+      }
+
+      // 2. Subir asignaciones por cada fecha disponible
+      if (state.transmittedAssignments && typeof state.transmittedAssignments === 'object') {
+        Object.entries(state.transmittedAssignments).forEach(([fecha, rows]) => {
+          if (fecha && !fecha.startsWith('__') && Array.isArray(rows) && rows.length > 0) {
+            promises.push(persistAssignmentsToDb(fecha, rows));
+          }
+        });
+      }
+
+      // 3. Subir overrides e histórico
+      if (state.ruteoOverrides) {
+        promises.push(persistRuteoOverridesToDb(state.ruteoOverrides));
+      }
+      if (state.savedHistoryList && state.savedHistoryList.length > 0) {
+        promises.push(persistHistoryToDb(state.savedHistoryList));
+      }
+      if (state.changeHistoryList && state.changeHistoryList.length > 0) {
+        promises.push(persistChangeHistoryToDb(state.changeHistoryList));
+      }
+
+      await Promise.all(promises);
+      toast.success('¡Todos los datos locales se sincronizaron con la nube exitosamente!');
+      return true;
+    } catch (e) {
+      console.error('Error sincronizando todo con la nube:', e);
+      toast.error('Error al sincronizar con el servidor');
+      return false;
     }
   },
 
@@ -1513,13 +1709,13 @@ export const usePlanningStore = create((set, get) => ({
   },
 
   // TRANSMITIR RUTAS ESPECIALES A DISPONIBILIZACIÓN
-  transmitSpecialRoutes: (fecha, specialRoutes) => {
+  transmitSpecialRoutes: async (fecha, specialRoutes) => {
     if (!specialRoutes || !Array.isArray(specialRoutes) || specialRoutes.length === 0) {
       toast.warning('No hay rutas especiales seleccionadas para transmitir.');
       return false;
     }
 
-    const { transmittedAssignments, transformedRoutes } = get();
+    const { transmittedAssignments, transformedRoutes, fileName } = get();
     const targetFecha = normalizeDate(fecha) || '14-10-2026';
     const nextAssignments = { ...transmittedAssignments };
     if (!nextAssignments[targetFecha]) {
@@ -1593,11 +1789,11 @@ export const usePlanningStore = create((set, get) => ({
     });
 
     nextAssignments[targetFecha] = currentRows;
-    persistAssignments(nextAssignments);
+    await persistAssignments(nextAssignments);
 
     // Sincronizar con savedRuteo, savedHistory y Supabase
     const synced = syncHistoryAndSavedForDate(get(), targetFecha, currentRows);
-    persistAssignmentsToDb(targetFecha, currentRows);
+    await persistAssignmentsToDb(targetFecha, currentRows);
 
     // Sincronizar también con transformedRoutes para que aparezcan en Ruteo
     const nextTransformed = [...transformedRoutes];
@@ -1609,7 +1805,7 @@ export const usePlanningStore = create((set, get) => ({
         nextTransformed.push({ ...sr, isSpecialRoute: true });
       }
     });
-    persistTransformedRoutes(nextTransformed);
+    persistTransformedRoutes(nextTransformed, { fileName, date: targetFecha });
 
     set({
       transmittedAssignments: nextAssignments,
@@ -1618,7 +1814,7 @@ export const usePlanningStore = create((set, get) => ({
       ...synced
     });
 
-    toast.success(`¡${addedCount} ruta(s) nueva(s) y ${updatedCount} actualizada(s) como Especiales en Disponibilización!`);
+    toast.success(`¡${addedCount} ruta(s) nueva(s) y ${updatedCount} actualizada(s) como Especiales guardadas en servidor!`);
     return true;
   },
 

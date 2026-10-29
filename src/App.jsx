@@ -22,12 +22,32 @@ import Briefing from './components/Briefing';
 import ChangeHistory from './components/ChangeHistory';
 import ManualDeUso from './components/ManualDeUso';
 import { usePlanningStore } from './store/planningStore';
+import { supabase } from './lib/supabase';
 
 function App() {
   const { initPlanningFromDb } = usePlanningStore();
 
   useEffect(() => {
     initPlanningFromDb?.();
+
+    // Suscripción Realtime a Supabase: sincroniza automáticamente entre notebooks cuando cualquiera guarde o transmita
+    try {
+      const channel = supabase
+        .channel('realtime:planning_assignments')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'planning_assignments' }, (payload) => {
+          console.log('[Realtime] Notificación de actualización en planning_assignments:', payload);
+          initPlanningFromDb?.();
+        })
+        .subscribe();
+
+      return () => {
+        try {
+          supabase.removeChannel(channel);
+        } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('[Realtime] Error iniciando suscripción:', err);
+    }
   }, [initPlanningFromDb]);
 
   return (

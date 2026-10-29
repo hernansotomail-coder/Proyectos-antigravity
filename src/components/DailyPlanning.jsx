@@ -1,11 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { 
   Upload, FileSpreadsheet, Sparkles, Send, CheckCircle2, 
   ChevronRight, ChevronDown, Search, ArrowRight, Table, 
   Layers, Package, MapPin, Calendar, Clock, AlertCircle,
-  GitFork, Scissors, Plus, X, CheckSquare, Square, CornerDownRight, User, Filter
+  GitFork, Scissors, Plus, X, CheckSquare, Square, CornerDownRight, User, Filter,
+  Cloud, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
@@ -154,7 +155,9 @@ export default function DailyPlanning() {
     transmitSpecificRoutesToDisponibilizacion,
     transmittedAssignments,
     transmitSpecialRoutes,
-    selectedDisponibilizarDate
+    selectedDisponibilizarDate,
+    initPlanningFromDb,
+    syncAllToCloud
   } = usePlanningStore();
   const { user } = useAuthStore();
 
@@ -162,8 +165,27 @@ export default function DailyPlanning() {
   const [expandedRoute, setExpandedRoute] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [routeTypeFilter, setRouteTypeFilter] = useState('all'); // 'all' | 'standard' | 'special'
   const [selectedRouteIds, setSelectedRouteIds] = useState([]);
+
+  // Cargar datos centralizados de Supabase al ingresar a la pantalla
+  useEffect(() => {
+    initPlanningFromDb?.();
+  }, [initPlanningFromDb]);
+
+  const handleManualSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      await syncAllToCloud?.();
+      await initPlanningFromDb?.();
+      toast.success('Sincronización con el servidor central completada.');
+    } catch (e) {
+      toast.error('Error al sincronizar con el servidor.');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
 
   // Estados para Modal de Rutas Especiales
   const [isSpecialModalOpen, setIsSpecialModalOpen] = useState(false);
@@ -513,10 +535,15 @@ export default function DailyPlanning() {
   };
 
   // Run transformation
-  const handleTransform = () => {
-    const ok = transformRawRows();
-    if (ok) {
-      setActiveTab('ruteo');
+  const handleTransform = async () => {
+    setIsLoading(true);
+    try {
+      const ok = await transformRawRows();
+      if (ok) {
+        setActiveTab('ruteo');
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -620,28 +647,33 @@ export default function DailyPlanning() {
   };
 
   // Acción confirmada dentro de la ventana flotante
-  const confirmTransmitAction = () => {
+  const confirmTransmitAction = async () => {
     setIsTransmitModalOpen(false);
-    if (transmitModalData.type === 'all') {
-      const ok = transmitToDisponibilizacion();
-      if (ok) {
-        toast.success('Rutas transmitidas a Disponibilización exitosamente.', {
-          action: {
-            label: 'Ver Disponibilización',
-            onClick: () => navigate('/assignment')
-          }
-        });
+    setIsLoading(true);
+    try {
+      if (transmitModalData.type === 'all') {
+        const ok = await transmitToDisponibilizacion();
+        if (ok) {
+          toast.success('Rutas transmitidas a Disponibilización y guardadas en el servidor.', {
+            action: {
+              label: 'Ver Disponibilización',
+              onClick: () => navigate('/assignment')
+            }
+          });
+        }
+      } else {
+        const ok = await transmitSpecificRoutesToDisponibilizacion(transmitModalData.routeIds);
+        if (ok) {
+          toast.success(`Transmitido a Disponibilización: ${transmitModalData.routes.length} ruta(s). Guardado en servidor.`, {
+            action: {
+              label: 'Ver Disponibilización',
+              onClick: () => navigate('/assignment')
+            }
+          });
+        }
       }
-    } else {
-      const ok = transmitSpecificRoutesToDisponibilizacion(transmitModalData.routeIds);
-      if (ok) {
-        toast.success(`Transmitido a Disponibilización: ${transmitModalData.routes.length} ruta(s). El resto se mantuvo intacto.`, {
-          action: {
-            label: 'Ver Disponibilización',
-            onClick: () => navigate('/assignment')
-          }
-        });
-      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -773,6 +805,18 @@ export default function DailyPlanning() {
           >
             <Sparkles size={14} />
             Rutas Especiales
+          </Button>
+
+          {/* Botón Sincronizar Servidor */}
+          <Button
+            variant="outline"
+            onClick={handleManualSync}
+            disabled={isSyncingCloud}
+            className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-700 border-slate-200 hover:border-blue-300 bg-white shadow-2xs py-2 px-3 rounded-xl transition-all"
+            title="Sincronizar y actualizar rutas y asignaciones con la base de datos central para todos los equipos"
+          >
+            <Cloud className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
+            {isSyncingCloud ? 'Sincronizando...' : 'Sincronizar Servidor'}
           </Button>
         </div>
       </div>
