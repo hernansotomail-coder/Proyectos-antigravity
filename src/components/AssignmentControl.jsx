@@ -410,6 +410,19 @@ export default function AssignmentControl() {
   const [matrixFilterCliente, setMatrixFilterCliente] = useState('');
   const [matrixFilterEstado, setMatrixFilterEstado] = useState('Todos');
 
+  // Ordenamiento de columnas en Disponibilización General (Requisito 4)
+  const [matrixSortCol, setMatrixSortCol] = useState(null);
+  const [matrixSortDir, setMatrixSortDir] = useState('asc'); // 'asc' | 'desc'
+
+  const handleSortMatrix = (colKey) => {
+    if (matrixSortCol === colKey) {
+      setMatrixSortDir(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setMatrixSortCol(colKey);
+      setMatrixSortDir('asc');
+    }
+  };
+
   // Opciones únicas para Multi-selects (Requisito 2)
   const availableRutas = useMemo(() => {
     const setR = new Set();
@@ -856,6 +869,37 @@ export default function AssignmentControl() {
       return true;
     });
   }, [assignmentsForDate, selectedRutas, selectedTransportistas, matrixFilterCliente, matrixFilterEstado, focusedEntity]);
+
+  // Ordenamiento de columnas en Disponibilización General (Requisito 4)
+  const sortedFilteredAssignments = useMemo(() => {
+    if (!matrixSortCol) return filteredAssignments;
+
+    return [...filteredAssignments].sort((a, b) => {
+      let valA = a[matrixSortCol];
+      let valB = b[matrixSortCol];
+
+      let cmp = 0;
+      if (matrixSortCol === 'locales' || matrixSortCol === 'n_vuelta') {
+        const numA = parseInt(valA, 10) || 0;
+        const numB = parseInt(valB, 10) || 0;
+        cmp = numA - numB;
+      } else if (matrixSortCol === 'm3' || matrixSortCol === 'peso') {
+        const numA = parseFloat(valA) || 0;
+        const numB = parseFloat(valB) || 0;
+        cmp = numA - numB;
+      } else if (matrixSortCol === 'ruta') {
+        cmp = String(valA || '').localeCompare(String(valB || ''), undefined, { numeric: true, sensitivity: 'base' });
+      } else if (matrixSortCol === 'cliente') {
+        const cliA = getBriefingOperation(a) || a.cliente || '';
+        const cliB = getBriefingOperation(b) || b.cliente || '';
+        cmp = cliA.localeCompare(cliB, undefined, { sensitivity: 'base' });
+      } else {
+        cmp = String(valA || '').localeCompare(String(valB || ''), undefined, { sensitivity: 'base' });
+      }
+
+      return matrixSortDir === 'desc' ? -cmp : cmp;
+    });
+  }, [filteredAssignments, matrixSortCol, matrixSortDir]);
 
   // RESUMEN AGRUPADO POR CONDUCTOR + N° DE VUELTA
   // "lo que no tienen 'Conductor' no debería aparecer en esta tabla resumen hasta que tenga"
@@ -1364,6 +1408,17 @@ export default function AssignmentControl() {
 
     const isStaffExt = (s) => (s?.tipo_dotacion || '').toLowerCase() === 'externo' || !!s?.empresa_externa || (s?.rut && String(s.rut).startsWith('EXT-'));
 
+    // Normalización de roles (Requisito 1: Auxiliar Rampla dentro de Auxiliar, Movilizadores unificados, Conductor a Conductor B)
+    const normalizeRole = (rawRole) => {
+      if (!rawRole) return 'Sin Cargo';
+      const r = String(rawRole).trim();
+      const lower = r.toLowerCase();
+      if (lower.includes('moviliz') || lower.includes('movilidad')) return 'Movilizador';
+      if (lower.includes('auxiliar rampla')) return 'Auxiliar';
+      if (lower === 'conductor' || lower.includes('conductor 1/1')) return 'Conductor B';
+      return r;
+    };
+
     const activeStaff = (staffList || []).filter(s => s && (s.status === 'Activo' || !s.status));
     const activeFleetRM = (fleetList || []).filter(f => f && f.status !== 'Baja' && f.status !== 'Dado de baja' && isRM(f));
 
@@ -1375,7 +1430,8 @@ export default function AssignmentControl() {
       if (isStaffExt(s)) {
         totalExtStaff++;
       } else {
-        const role = (s.role || s.cargo || 'Sin Cargo').trim();
+        const rawRole = (s.role || s.cargo || 'Sin Cargo').trim();
+        const role = normalizeRole(rawRole);
         staffByRoleTotals[role] = (staffByRoleTotals[role] || 0) + 1;
       }
     });
@@ -1446,7 +1502,8 @@ export default function AssignmentControl() {
         if (isExt) {
           occStaffExtSet.add(cleanName.toLowerCase());
         } else {
-          const role = (foundStaff?.role || foundStaff?.cargo || 'Conductor').trim();
+          const rawRole = (foundStaff?.role || foundStaff?.cargo || 'Conductor B').trim();
+          const role = normalizeRole(rawRole);
           if (!occStaffByRoleSet[role]) occStaffByRoleSet[role] = new Set();
           occStaffByRoleSet[role].add(cleanName.toLowerCase());
         }
@@ -1454,7 +1511,7 @@ export default function AssignmentControl() {
     });
 
     // Desglose de dotación propia por cargo
-    const preferredRoleOrder = ['Conductor A4', 'Conductor B', 'Conductor A5', 'Auxiliar', 'Conductor / Auxiliar', 'Auxiliar Rampla'];
+    const preferredRoleOrder = ['Conductor A4', 'Conductor B', 'Conductor A5', 'Auxiliar', 'Movilizador', 'Conductor / Auxiliar'];
     const otherRoles = Object.keys(staffByRoleTotals).filter(r => !preferredRoleOrder.includes(r));
     const orderedRoles = [...preferredRoleOrder, ...otherRoles].filter(r => (staffByRoleTotals[r] || 0) > 0 || (occStaffByRoleSet[r]?.size || 0) > 0);
 
@@ -1511,176 +1568,177 @@ export default function AssignmentControl() {
     <div className="flex flex-col h-full bg-slate-50 p-2 gap-2 overflow-hidden">
       
       {/* 1. BARRA SUPERIOR DE CONTROL */}
-      <header className="bg-white rounded-xl shadow-sm border border-slate-200 p-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
+      <header className="bg-white rounded-xl shadow-sm border border-slate-200 p-2.5 flex flex-col gap-2 shrink-0">
         
-        {/* Selector "Fecha a disponibilizar" */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-xl">
-            <Calendar size={16} className="text-blue-600 shrink-0" />
-            <div className="flex flex-col">
-              <span className="text-[9px] font-bold text-blue-800 uppercase tracking-wide">
-                Fecha a disponibilizar
-              </span>
-              <select 
-                value={activeDate}
-                onChange={e => setSelectedDisponibilizarDate(e.target.value)}
-                className="text-xs font-black text-slate-800 bg-transparent focus:outline-none cursor-pointer"
-              >
-                {availableDates.length > 0 ? (
-                  availableDates.map(d => (
-                    <option key={d} value={d}>{d}</option>
-                  ))
-                ) : (
-                  <option value={activeDate}>{activeDate}</option>
-                )}
-              </select>
+        {/* Fila Superior: Controles a la izquierda y Botones de acción al extremo derecho */}
+        <div className="flex flex-wrap items-center justify-between gap-2 w-full">
+          {/* Controles: Fecha a disponibilizar + Filtros Rápidos */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Selector "Fecha a disponibilizar" */}
+            <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-xl">
+              <Calendar size={16} className="text-blue-600 shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold text-blue-800 uppercase tracking-wide">
+                  Fecha a disponibilizar
+                </span>
+                <select 
+                  value={activeDate}
+                  onChange={e => setSelectedDisponibilizarDate(e.target.value)}
+                  className="text-xs font-black text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                >
+                  {availableDates.length > 0 ? (
+                    availableDates.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))
+                  ) : (
+                    <option value={activeDate}>{activeDate}</option>
+                  )}
+                </select>
+              </div>
             </div>
-          </div>
 
-          {/* Tarjetas resumen: Locales, m3, Dotaciones por Cargo y Camiones RM por Tipo de Vehículo (Requisito 3) */}
-          <div className="hidden xl:flex items-center gap-1.5 text-xs text-slate-500 flex-wrap max-w-[55vw]">
-            <span className="bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap">
-              {totalLocales} locales
-            </span>
-            <span className="bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap">
-              {totalM3} m³
-            </span>
-
-            {/* Separación de Dotación Propia por Cargo */}
-            {occupancyStats.staffRolesBreakdown.map(item => (
-              <span 
-                key={item.role}
-                className="bg-blue-50 text-blue-700 border border-blue-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-                title={`${item.role}: ${item.occupied} ocupados / ${item.total} totales (${item.free} por ocupar)`}
-              >
-                <Users size={11} className="text-blue-600" />
-                {item.occupied}/{item.total} {item.role}
-              </span>
-            ))}
-
-            {/* Dotación Externa */}
-            <span 
-              className="bg-purple-50 text-purple-700 border border-purple-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-              title={`Dotación Externa: ${occupancyStats.externosStaff.occupied} ocupados / ${occupancyStats.externosStaff.total} totales (${occupancyStats.externosStaff.free} por ocupar)`}
-            >
-              <Users size={11} className="text-purple-600" />
-              {occupancyStats.externosStaff.occupied}/{occupancyStats.externosStaff.total} Externos
-            </span>
-
-            {/* Separación de Camiones Propios RM por Tipo de Vehículo */}
-            {occupancyStats.truckTypesBreakdown.map(item => (
-              <span 
-                key={item.type}
-                className="bg-sky-50 text-sky-700 border border-sky-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-                title={`${item.type} (RM): ${item.occupied} ocupados / ${item.total} totales (${item.free} disponibles)`}
-              >
-                <Truck size={11} className="text-sky-600" />
-                {item.occupied}/{item.total} {item.type}
-              </span>
-            ))}
-
-            {/* Camiones Flota Externa (RM) */}
-            <span 
-              className="bg-amber-50 text-amber-800 border border-amber-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help" 
-              title={`Flota Externa (RM): ${occupancyStats.externosFleet.occupied} ocupados / ${occupancyStats.externosFleet.total} totales (${occupancyStats.externosFleet.free} disponibles)`}
-            >
-              <Truck size={11} className="text-amber-600" />
-              {occupancyStats.externosFleet.occupied}/{occupancyStats.externosFleet.total} Flota Externa
-            </span>
-          </div>
-        </div>
-
-        {/* Filtros rápidos */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {/* Multi-Filtro Ruta (Requisito 2) */}
-          <CompactMultiSelect 
-            label="Ruta"
-            options={availableRutas}
-            selectedValues={selectedRutas}
-            onChange={setSelectedRutas}
-            placeholder="Todas"
-          />
-
-          {/* Multi-Filtro Transportista (Requisito 2) */}
-          <CompactMultiSelect 
-            label="Transp."
-            options={availableTransportistas}
-            selectedValues={selectedTransportistas}
-            onChange={setSelectedTransportistas}
-            placeholder="Todos"
-          />
-
-          <div className="relative">
-            <Search className="absolute left-2 top-2 text-slate-400" size={12} />
-            <input 
-              type="text" 
-              placeholder="Cliente..." 
-              value={matrixFilterCliente}
-              onChange={e => setMatrixFilterCliente(e.target.value)}
-              className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-24 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 h-7.5"
+            {/* Multi-Filtro Ruta (Requisito 2) */}
+            <CompactMultiSelect 
+              label="Ruta"
+              options={availableRutas}
+              selectedValues={selectedRutas}
+              onChange={setSelectedRutas}
+              placeholder="Todas"
             />
+
+            {/* Multi-Filtro Transportista (Requisito 2) */}
+            <CompactMultiSelect 
+              label="Transp."
+              options={availableTransportistas}
+              selectedValues={selectedTransportistas}
+              onChange={setSelectedTransportistas}
+              placeholder="Todos"
+            />
+
+            <div className="relative">
+              <Search className="absolute left-2 top-2 text-slate-400" size={12} />
+              <input 
+                type="text" 
+                placeholder="Cliente..." 
+                value={matrixFilterCliente}
+                onChange={e => setMatrixFilterCliente(e.target.value)}
+                className="pl-6 pr-2 py-1 text-xs border border-slate-200 rounded-lg w-24 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 h-7.5"
+              />
+            </div>
+
+            {/* Filtro Asignación */}
+            <select
+              value={matrixFilterEstado}
+              onChange={e => setMatrixFilterEstado(e.target.value)}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 text-slate-700 focus:outline-none h-7.5 font-medium"
+              title="Filtrar por estado de asignación"
+            >
+              <option value="Todos">Asignación</option>
+              <option value="Conductor asignado">Con Chofer</option>
+              <option value="Sin conductor">Sin Chofer</option>
+              <option value="Camion asignado">Con Camión</option>
+              <option value="Sin camion">Sin Camión</option>
+            </select>
+
+            {(selectedRutas.length > 0 || selectedTransportistas.length > 0 || matrixFilterCliente || matrixFilterEstado !== 'Todos') && (
+              <button
+                onClick={() => {
+                  setSelectedRutas([]);
+                  setSelectedTransportistas([]);
+                  setMatrixFilterCliente('');
+                  setMatrixFilterEstado('Todos');
+                }}
+                className="text-[10px] text-red-600 hover:text-red-800 font-bold px-1.5 py-1 hover:bg-red-50 rounded"
+                title="Limpiar todos los filtros"
+              >
+                × Limpiar
+              </button>
+            )}
           </div>
 
-          {/* Filtro Asignación (Requisito 3: dice 'Asignación' en lugar de 'Todos') */}
-          <select
-            value={matrixFilterEstado}
-            onChange={e => setMatrixFilterEstado(e.target.value)}
-            className="text-xs border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 text-slate-700 focus:outline-none h-7.5 font-medium"
-            title="Filtrar por estado de asignación"
-          >
-            <option value="Todos">Asignación</option>
-            <option value="Conductor asignado">Con Chofer</option>
-            <option value="Sin conductor">Sin Chofer</option>
-            <option value="Camion asignado">Con Camión</option>
-            <option value="Sin camion">Sin Camión</option>
-          </select>
-
-          {(selectedRutas.length > 0 || selectedTransportistas.length > 0 || matrixFilterCliente || matrixFilterEstado !== 'Todos') && (
-            <button
-              onClick={() => {
-                setSelectedRutas([]);
-                setSelectedTransportistas([]);
-                setMatrixFilterCliente('');
-                setMatrixFilterEstado('Todos');
-              }}
-              className="text-[10px] text-red-600 hover:text-red-800 font-bold px-1.5 py-1 hover:bg-red-50 rounded"
-              title="Limpiar todos los filtros"
+          {/* Botones de acción al extremo derecho (Requisito 1) */}
+          <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+            <Button 
+              onClick={() => handleOpenAperturarModal()}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+              title="Apertura / dividir una ruta quitando filas/paradas hacia una nueva numeración"
             >
-              × Limpiar
-            </button>
-          )}
+              <Scissors size={13} />
+              Apertura Ruta
+            </Button>
+
+            {/* Botón Registrar Servicio Extra */}
+            <Button 
+              onClick={() => handleOpenExtraServicesModal()}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+              title="Registrar servicios extras (Retiro camión, Taller, Vulcanización, Traspasos, Apoyo Centro, etc.)"
+            >
+              <Plus size={13} />
+              Servicio Extra
+            </Button>
+
+            {/* Botón Guardar Disponibilización */}
+            <Button 
+              onClick={handlePreSave}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+              title="Guarda la disponibilización y valida si faltan asignaciones"
+            >
+              <Save size={13} />
+              Guardar Disponibilización
+            </Button>
+          </div>
         </div>
 
-        {/* Botones de acción al extremo derecho (Requisito 1) */}
-        <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-          <Button 
-            onClick={() => handleOpenAperturarModal()}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
-            title="Apertura / dividir una ruta quitando filas/paradas hacia una nueva numeración"
-          >
-            <Scissors size={13} />
-            Apertura Ruta
-          </Button>
+        {/* Fila Inferior: Tarjetas resumen extendidas en el extremo completo (Requisito 1) */}
+        <div className="w-full flex items-center gap-1.5 text-xs text-slate-500 overflow-x-auto pt-1.5 border-t border-slate-100 scrollbar-thin">
+          <span className="bg-indigo-50 text-indigo-700 font-bold px-2.5 py-0.5 rounded-lg text-[11px] whitespace-nowrap shrink-0">
+            {totalLocales} locales
+          </span>
+          <span className="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-0.5 rounded-lg text-[11px] whitespace-nowrap shrink-0">
+            {totalM3} m³
+          </span>
 
-          {/* Botón Registrar Servicio Extra */}
-          <Button 
-            onClick={() => handleOpenExtraServicesModal()}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
-            title="Registrar servicios extras (Retiro camión, Taller, Vulcanización, Traspasos, Apoyo Centro, etc.)"
-          >
-            <Plus size={13} />
-            Servicio Extra
-          </Button>
+          {/* Separación de Dotación Propia por Cargo */}
+          {occupancyStats.staffRolesBreakdown.map(item => (
+            <span 
+              key={item.role}
+              className="bg-blue-50 text-blue-700 border border-blue-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help shrink-0" 
+              title={`${item.role}: ${item.occupied} ocupados / ${item.total} totales (${item.free} por ocupar)`}
+            >
+              <Users size={11} className="text-blue-600" />
+              {item.occupied}/{item.total} {item.role}
+            </span>
+          ))}
 
-          {/* Botón Guardar Disponibilización */}
-          <Button 
-            onClick={handlePreSave}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
-            title="Guarda la disponibilización y valida si faltan asignaciones"
+          {/* Dotación Externa */}
+          <span 
+            className="bg-purple-50 text-purple-700 border border-purple-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help shrink-0" 
+            title={`Dotación Externa: ${occupancyStats.externosStaff.occupied} ocupados / ${occupancyStats.externosStaff.total} totales (${occupancyStats.externosStaff.free} por ocupar)`}
           >
-            <Save size={13} />
-            Guardar Disponibilización
-          </Button>
+            <Users size={11} className="text-purple-600" />
+            {occupancyStats.externosStaff.occupied}/{occupancyStats.externosStaff.total} Externos
+          </span>
+
+          {/* Separación de Camiones Propios RM por Tipo de Vehículo */}
+          {occupancyStats.truckTypesBreakdown.map(item => (
+            <span 
+              key={item.type}
+              className="bg-sky-50 text-sky-700 border border-sky-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help shrink-0" 
+              title={`${item.type} (RM): ${item.occupied} ocupados / ${item.total} totales (${item.free} disponibles)`}
+            >
+              <Truck size={11} className="text-sky-600" />
+              {item.occupied}/{item.total} {item.type}
+            </span>
+          ))}
+
+          {/* Camiones Flota Externa (RM) */}
+          <span 
+            className="bg-amber-50 text-amber-800 border border-amber-200/60 font-bold px-2 py-0.5 rounded-lg text-[11px] whitespace-nowrap flex items-center gap-1 cursor-help shrink-0" 
+            title={`Flota Externa (RM): ${occupancyStats.externosFleet.occupied} ocupados / ${occupancyStats.externosFleet.total} totales (${occupancyStats.externosFleet.free} disponibles)`}
+          >
+            <Truck size={11} className="text-amber-600" />
+            {occupancyStats.externosFleet.occupied}/{occupancyStats.externosFleet.total} Flota Externa
+          </span>
         </div>
       </header>
 
@@ -2011,29 +2069,155 @@ export default function AssignmentControl() {
                       />
                     </th>
                     {/* N° de vuelta, vacía inicialmente con lista 1 al 8 */}
-                    <th className="px-2.5 py-2 text-center bg-amber-50/70 text-amber-900 border-r border-amber-200">
-                      N° de vuelta
+                    <th 
+                      onClick={() => handleSortMatrix('n_vuelta')}
+                      className="px-2.5 py-2 text-center bg-amber-50/70 text-amber-900 border-r border-amber-200 cursor-pointer select-none hover:bg-amber-100 transition-colors"
+                      title="Clic para ordenar por N° de vuelta"
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>N° de vuelta</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'n_vuelta' ? 'text-amber-800 font-bold' : 'text-amber-400 opacity-60'}`}>
+                          {matrixSortCol === 'n_vuelta' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
                     </th>
 
                     {/* N° de Ruta al lado de N° de vuelta */}
-                    <th className="px-2.5 py-2 font-black text-slate-800 bg-slate-200/60 border-r border-slate-300">
-                      N° de Ruta
+                    <th 
+                      onClick={() => handleSortMatrix('ruta')}
+                      className="px-2.5 py-2 font-black text-slate-800 bg-slate-200/60 border-r border-slate-300 cursor-pointer select-none hover:bg-slate-300/70 transition-colors"
+                      title="Clic para ordenar por N° de Ruta"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>N° de Ruta</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'ruta' ? 'text-blue-700 font-bold' : 'text-slate-400 opacity-60'}`}>
+                          {matrixSortCol === 'ruta' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
                     </th>
 
-                    <th className="px-2.5 py-2 text-blue-700 bg-blue-50/50">Conductor</th>
-                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar</th>
-                    <th className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50">Auxiliar 2</th>
-                    <th className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50">Camión</th>
-                    <th className="px-2.5 py-2 text-teal-700 bg-teal-50/40">Rampla</th>
-                    <th className="px-2.5 py-2">Cliente</th>
-                    <th className="px-2.5 py-2">Referencia</th>
-                    <th className="px-2.5 py-2 text-center">Cantidad de Locales</th>
-                    <th className="px-2.5 py-2 text-right">Metros cúbicos</th>
+                    <th 
+                      onClick={() => handleSortMatrix('conductor_name')}
+                      className="px-2.5 py-2 text-blue-700 bg-blue-50/50 cursor-pointer select-none hover:bg-blue-100/70 transition-colors"
+                      title="Clic para ordenar por Conductor"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Conductor</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'conductor_name' ? 'text-blue-800 font-bold' : 'text-blue-400 opacity-60'}`}>
+                          {matrixSortCol === 'conductor_name' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('aux1_name')}
+                      className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50 cursor-pointer select-none hover:bg-indigo-100/70 transition-colors"
+                      title="Clic para ordenar por Auxiliar"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Auxiliar</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'aux1_name' ? 'text-indigo-800 font-bold' : 'text-indigo-400 opacity-60'}`}>
+                          {matrixSortCol === 'aux1_name' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('aux2_name')}
+                      className="px-2.5 py-2 text-indigo-700 bg-indigo-50/50 cursor-pointer select-none hover:bg-indigo-100/70 transition-colors"
+                      title="Clic para ordenar por Auxiliar 2"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Auxiliar 2</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'aux2_name' ? 'text-indigo-800 font-bold' : 'text-indigo-400 opacity-60'}`}>
+                          {matrixSortCol === 'aux2_name' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('camion')}
+                      className="px-2.5 py-2 text-emerald-700 bg-emerald-50/50 cursor-pointer select-none hover:bg-emerald-100/70 transition-colors"
+                      title="Clic para ordenar por Camión"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Camión</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'camion' ? 'text-emerald-800 font-bold' : 'text-emerald-400 opacity-60'}`}>
+                          {matrixSortCol === 'camion' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('rampla')}
+                      className="px-2.5 py-2 text-teal-700 bg-teal-50/40 cursor-pointer select-none hover:bg-teal-100/70 transition-colors"
+                      title="Clic para ordenar por Rampla"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Rampla</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'rampla' ? 'text-teal-800 font-bold' : 'text-teal-400 opacity-60'}`}>
+                          {matrixSortCol === 'rampla' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('cliente')}
+                      className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60 transition-colors"
+                      title="Clic para ordenar por Cliente"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Cliente</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'cliente' ? 'text-blue-600 font-bold' : 'text-slate-400 opacity-60'}`}>
+                          {matrixSortCol === 'cliente' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('referencia')}
+                      className="px-2.5 py-2 cursor-pointer select-none hover:bg-slate-200/60 transition-colors"
+                      title="Clic para ordenar por Referencia"
+                    >
+                      <div className="flex items-center gap-1">
+                        <span>Referencia</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'referencia' ? 'text-blue-600 font-bold' : 'text-slate-400 opacity-60'}`}>
+                          {matrixSortCol === 'referencia' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('locales')}
+                      className="px-2.5 py-2 text-center cursor-pointer select-none hover:bg-slate-200/60 transition-colors"
+                      title="Clic para ordenar por Cantidad de Locales"
+                    >
+                      <div className="flex items-center justify-center gap-1">
+                        <span>Cantidad de Locales</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'locales' ? 'text-blue-600 font-bold' : 'text-slate-400 opacity-60'}`}>
+                          {matrixSortCol === 'locales' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
+                    <th 
+                      onClick={() => handleSortMatrix('m3')}
+                      className="px-2.5 py-2 text-right cursor-pointer select-none hover:bg-slate-200/60 transition-colors"
+                      title="Clic para ordenar por Metros cúbicos"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        <span>Metros cúbicos</span>
+                        <span className={`text-[10px] ${matrixSortCol === 'm3' ? 'text-blue-600 font-bold' : 'text-slate-400 opacity-60'}`}>
+                          {matrixSortCol === 'm3' ? (matrixSortDir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      </div>
+                    </th>
+
                     <th className="px-2 py-2 text-center w-12 text-slate-500">Acción</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
-                  {filteredAssignments.map((row) => {
+                  {sortedFilteredAssignments.map((row) => {
                     const isSelected = selectedRowIds.includes(row.id);
                     return (
                       <tr 

@@ -5,7 +5,7 @@ import {
   Upload, FileSpreadsheet, Sparkles, Send, CheckCircle2, 
   ChevronRight, ChevronDown, Search, ArrowRight, Table, 
   Layers, Package, MapPin, Calendar, Clock, AlertCircle,
-  GitFork, Scissors, Plus, X, CheckSquare, Square, CornerDownRight, User
+  GitFork, Scissors, Plus, X, CheckSquare, Square, CornerDownRight, User, Filter
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
@@ -176,6 +176,32 @@ export default function DailyPlanning() {
   const [specialAnalysisResult, setSpecialAnalysisResult] = useState(null);
   const [selectedSpecialRouteIds, setSelectedSpecialRouteIds] = useState([]);
   const [expandedSpecialRouteId, setExpandedSpecialRouteId] = useState(null);
+  const [specialTipoFilter, setSpecialTipoFilter] = useState('all'); // 'all' | 'nueva' | 'destinos' | '4digitos' | 'sin_ruteo'
+
+  // Filtrar Rutas Especiales por Tipo en el modal (Requisito 2)
+  const { filteredSpecialRoutes, specialCounts } = useMemo(() => {
+    const list = specialAnalysisResult?.specialRoutes || [];
+    const counts = {
+      all: list.length,
+      nueva: list.filter(r => r.isNewRoute).length,
+      destinos: list.filter(r => !r.isNewRoute && r.hasNewDestinos).length,
+      cuatroDigitos: list.filter(r => /^[1-9]\d{3}$/.test(String(r.ruta).trim())).length,
+      sinRuteo: list.filter(r => !/^[1-9]\d{3}$/.test(String(r.ruta).trim())).length,
+    };
+
+    let filtered = list;
+    if (specialTipoFilter === 'nueva') {
+      filtered = list.filter(r => r.isNewRoute);
+    } else if (specialTipoFilter === 'destinos') {
+      filtered = list.filter(r => !r.isNewRoute && r.hasNewDestinos);
+    } else if (specialTipoFilter === '4digitos') {
+      filtered = list.filter(r => /^[1-9]\d{3}$/.test(String(r.ruta).trim()));
+    } else if (specialTipoFilter === 'sin_ruteo') {
+      filtered = list.filter(r => !/^[1-9]\d{3}$/.test(String(r.ruta).trim()));
+    }
+
+    return { filteredSpecialRoutes: filtered, specialCounts: counts };
+  }, [specialAnalysisResult, specialTipoFilter]);
 
   // Mantener seleccionadas por defecto las rutas cargadas
   React.useEffect(() => {
@@ -951,9 +977,9 @@ export default function DailyPlanning() {
                         ? 'bg-amber-50 text-amber-900 border border-amber-300 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
-                    title="Rutas con más de 4 dígitos o que inician con 0"
+                    title="Rutas con más de 4 dígitos o que inician con 0 (Sin ruteo)"
                   >
-                    Especiales ({specialRoutesCount})
+                    Sin ruteo ({specialRoutesCount})
                   </button>
                 </div>
 
@@ -1544,18 +1570,38 @@ export default function DailyPlanning() {
                     </div>
                   </div>
 
-                  {/* Acciones de selección rápida */}
-                  <div className="flex items-center justify-between text-xs text-slate-500 px-1 shrink-0">
-                    <div className="flex items-center gap-2">
+                  {/* Acciones de selección rápida y Filtro por Tipo */}
+                  <div className="flex items-center justify-between text-xs text-slate-500 px-1 shrink-0 flex-wrap gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Desplegable de Tipo (Requisito 2) */}
+                      <div className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-lg">
+                        <Filter size={12} className="text-purple-600 shrink-0" />
+                        <span className="text-[11px] font-bold text-slate-600">Tipo:</span>
+                        <select
+                          value={specialTipoFilter}
+                          onChange={(e) => setSpecialTipoFilter(e.target.value)}
+                          className="text-[11px] font-semibold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                        >
+                          <option value="all">Todos los Tipos ({specialCounts.all})</option>
+                          <option value="nueva">Nuevas Rutas ({specialCounts.nueva})</option>
+                          <option value="destinos">Destinos Nuevos ({specialCounts.destinos})</option>
+                          <option value="4digitos">4 Dígitos ({specialCounts.cuatroDigitos})</option>
+                          <option value="sin_ruteo">Sin ruteo / No estándar ({specialCounts.sinRuteo})</option>
+                        </select>
+                      </div>
+
                       <span className="font-bold text-slate-700">
-                        {selectedSpecialRouteIds.length} seleccionada(s) de {specialAnalysisResult.specialRoutes.length}
+                        {selectedSpecialRouteIds.length} seleccionada(s) {specialTipoFilter !== 'all' ? `(${filteredSpecialRoutes.length} filtradas)` : `de ${specialAnalysisResult.specialRoutes.length}`}
                       </span>
                       <button
                         type="button"
-                        onClick={() => setSelectedSpecialRouteIds(specialAnalysisResult.specialRoutes.map(r => r.id))}
+                        onClick={() => {
+                          const idsToSelect = filteredSpecialRoutes.map(r => r.id);
+                          setSelectedSpecialRouteIds(prev => Array.from(new Set([...prev, ...idsToSelect])));
+                        }}
                         className="text-purple-600 hover:underline font-bold text-[11px]"
                       >
-                        Seleccionar todas
+                        Seleccionar {specialTipoFilter === 'all' ? 'todas' : 'filtradas'}
                       </button>
                       <span className="text-slate-300">|</span>
                       <button
@@ -1572,12 +1618,16 @@ export default function DailyPlanning() {
                   </div>
 
                   {/* Listado de Rutas Especiales Detectadas */}
-                  {specialAnalysisResult.specialRoutes.length === 0 ? (
+                  {filteredSpecialRoutes.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-slate-50 rounded-xl border border-slate-200">
                       <CheckCircle2 size={32} className="text-emerald-500 mb-2" />
-                      <h4 className="text-sm font-bold text-slate-700">No hay destinos nuevos</h4>
+                      <h4 className="text-sm font-bold text-slate-700">
+                        {specialAnalysisResult.specialRoutes.length === 0 ? 'No hay destinos nuevos' : 'No hay rutas para este tipo seleccionado'}
+                      </h4>
                       <p className="text-xs text-slate-500 max-w-sm mt-1">
-                        Todos los destinos de las {specialAnalysisResult.totalParsedRoutes} rutas leídas del archivo ya coinciden con las rutas transmitidas de {specialAnalysisResult.compareDate === 'all' ? 'todas las fechas' : specialAnalysisResult.compareDate}.
+                        {specialAnalysisResult.specialRoutes.length === 0 
+                          ? `Todos los destinos de las ${specialAnalysisResult.totalParsedRoutes} rutas leídas del archivo ya coinciden con las rutas transmitidas de ${specialAnalysisResult.compareDate === 'all' ? 'todas las fechas' : specialAnalysisResult.compareDate}.`
+                          : 'Prueba cambiando el filtro de Tipo en el menú desplegable superior.'}
                       </p>
                     </div>
                   ) : (
@@ -1587,13 +1637,15 @@ export default function DailyPlanning() {
                           <tr>
                             <th className="px-3 py-2 text-center w-8">
                               <input 
-                                type="checkbox"
-                                checked={selectedSpecialRouteIds.length === specialAnalysisResult.specialRoutes.length && specialAnalysisResult.specialRoutes.length > 0}
+                                type="checkbox" 
+                                checked={filteredSpecialRoutes.length > 0 && filteredSpecialRoutes.every(r => selectedSpecialRouteIds.includes(r.id))}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedSpecialRouteIds(specialAnalysisResult.specialRoutes.map(r => r.id));
+                                    const idsToSelect = filteredSpecialRoutes.map(r => r.id);
+                                    setSelectedSpecialRouteIds(prev => Array.from(new Set([...prev, ...idsToSelect])));
                                   } else {
-                                    setSelectedSpecialRouteIds([]);
+                                    const filteredIdsSet = new Set(filteredSpecialRoutes.map(r => r.id));
+                                    setSelectedSpecialRouteIds(prev => prev.filter(id => !filteredIdsSet.has(id)));
                                   }
                                 }}
                                 className="rounded text-purple-600 focus:ring-purple-500 cursor-pointer"
@@ -1611,7 +1663,7 @@ export default function DailyPlanning() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                          {specialAnalysisResult.specialRoutes.map((route) => {
+                          {filteredSpecialRoutes.map((route) => {
                             const isSelected = selectedSpecialRouteIds.includes(route.id);
                             const isExpanded = expandedSpecialRouteId === route.id;
 
