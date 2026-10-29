@@ -10,7 +10,7 @@ import {
 import { toast } from 'sonner';
 import { useTiendasCriticasStore } from '../store/tiendasCriticasStore';
 import MantenedorTiendasCriticasModal from './MantenedorTiendasCriticasModal';
-import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
+import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostRecentDate, normalizeDate } from '../store/planningStore';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
@@ -441,10 +441,16 @@ export default function RuteoView() {
 
   // Fechas disponibles (ordenadas cronológicamente de más reciente a más antigua)
   const availableDates = useMemo(() => {
-    const setDates = new Set([
-      ...Object.keys(savedRuteoByDate || {}),
-      ...Object.keys(transmittedAssignments || {})
-    ]);
+    const setDates = new Set();
+    const addDate = (d) => {
+      if (!d) return;
+      const norm = normalizeDate(d);
+      if (norm && !norm.startsWith('__') && norm !== 'Sin Fecha' && norm !== 'null' && norm !== 'undefined') {
+        setDates.add(norm);
+      }
+    };
+    Object.keys(savedRuteoByDate || {}).forEach(addDate);
+    Object.keys(transmittedAssignments || {}).forEach(addDate);
     return sortDatesDescending(Array.from(setDates));
   }, [savedRuteoByDate, transmittedAssignments]);
 
@@ -479,15 +485,21 @@ export default function RuteoView() {
   // Rutas de la fecha activa
   const currentRoutes = useMemo(() => {
     let routes = [];
-    if (transmittedAssignments && transmittedAssignments[activeDate] && transmittedAssignments[activeDate].length > 0) {
+    const normDate = normalizeDate(activeDate) || activeDate;
+    if (transmittedAssignments && transmittedAssignments[normDate] && transmittedAssignments[normDate].length > 0) {
+      routes = transmittedAssignments[normDate];
+    } else if (savedRuteoByDate && savedRuteoByDate[normDate] && savedRuteoByDate[normDate].length > 0) {
+      routes = savedRuteoByDate[normDate];
+    } else if (transmittedAssignments && transmittedAssignments[activeDate]) {
       routes = transmittedAssignments[activeDate];
-    } else if (savedRuteoByDate && savedRuteoByDate[activeDate] && savedRuteoByDate[activeDate].length > 0) {
+    } else if (savedRuteoByDate && savedRuteoByDate[activeDate]) {
       routes = savedRuteoByDate[activeDate];
     } else {
       routes = [];
     }
     return routes.map(r => ({
       ...r,
+      fecha: normalizeDate(r.fecha) || normDate,
       transportista: r.transportista || ensureRowTransportista(r)
     }));
   }, [savedRuteoByDate, transmittedAssignments, activeDate]);

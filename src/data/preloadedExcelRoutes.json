@@ -7566,7 +7566,7 @@
     "id": "trans-4100",
     "ruta": "4100",
     "nombreRuta": "RUTAS NEWREST BYI 00",
-    "fecha": "46309",
+    "fecha": "14-10-2026",
     "transportista": "T502",
     "ambientes": [
       "R",
@@ -7670,7 +7670,7 @@
     "id": "trans-4103",
     "ruta": "4103",
     "nombreRuta": "NEWREST ANGLO TORTOLAS 01",
-    "fecha": "46309",
+    "fecha": "14-10-2026",
     "transportista": "T502",
     "ambientes": [
       "S",
@@ -7956,7 +7956,7 @@
     "id": "trans-4200",
     "ruta": "4200",
     "nombreRuta": "BYI VIÑA DEL MAR NEWREST",
-    "fecha": "46309",
+    "fecha": "14-10-2026",
     "transportista": "T502",
     "ambientes": [
       "R",

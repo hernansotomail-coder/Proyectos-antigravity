@@ -5,7 +5,7 @@ import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
 import { findOperationForRoute, getOperacionName } from '../data/operacionesMaster';
 
 // Cache invalidation version for cross-computer synchronization
-const CURRENT_STORAGE_VERSION = 'v2026_10_28_prod_sync_v9';
+const CURRENT_STORAGE_VERSION = 'v2026_10_29_prod_sync_v10';
 try {
   if (typeof window !== 'undefined' && window.localStorage) {
     const savedVer = localStorage.getItem('keylogistics_storage_version');
@@ -97,7 +97,8 @@ export const normalizeDate = (rawDate) => {
 // Helper para convertir cualquier formato de fecha a timestamp numérico
 export const parseDateStrToTimestamp = (s) => {
   if (!s) return 0;
-  const clean = String(s).trim().split(' ')[0].split('T')[0];
+  const norm = normalizeDate(s);
+  const clean = String(norm || s).trim().split(' ')[0].split('T')[0];
   const parts = clean.split(/[-/]/);
   if (parts.length === 3) {
     if (parts[0].length === 4) {
@@ -108,15 +109,25 @@ export const parseDateStrToTimestamp = (s) => {
       return new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0])).getTime();
     }
   }
-  const t = new Date(s).getTime();
+  const t = new Date(clean).getTime();
   return isNaN(t) ? 0 : t;
 };
 
 // Helper para ordenar fechas cronológicamente de más reciente a más antigua
+// Normaliza automáticamente todas las fechas y elimina claves seriales numéricas (ej: 46309 -> 14-10-2026)
 export const sortDatesDescending = (dates) => {
-  if (!dates) return [];
-  const valid = Array.from(new Set(dates)).filter(d => d && !String(d).startsWith('__') && d !== 'Sin Fecha' && d !== 'null' && d !== 'undefined');
-  return valid.sort((a, b) => parseDateStrToTimestamp(b) - parseDateStrToTimestamp(a));
+  if (!dates || !Array.isArray(dates)) return [];
+  const normalizedSet = new Set();
+  dates.forEach(d => {
+    if (!d) return;
+    const s = String(d).trim();
+    if (s.startsWith('__') || s === 'Sin Fecha' || s === 'null' || s === 'undefined') return;
+    const norm = normalizeDate(d);
+    if (norm && !norm.startsWith('__') && norm !== 'Sin Fecha' && norm !== 'null' && norm !== 'undefined') {
+      normalizedSet.add(norm);
+    }
+  });
+  return Array.from(normalizedSet).sort((a, b) => parseDateStrToTimestamp(b) - parseDateStrToTimestamp(a));
 };
 
 // Helper para obtener la fecha más reciente como predeterminada (Requisito: siempre la más reciente como predeterminada)
@@ -473,14 +484,29 @@ const loadPersistedAssignments = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Object.keys(parsed).length > 0) {
+        const normalizedMap = {};
         Object.keys(parsed).forEach(dateKey => {
-          parsed[dateKey] = parsed[dateKey].map(r => ({
+          const cleanKey = normalizeDate(dateKey) || dateKey;
+          if (!cleanKey || cleanKey.startsWith('__') || cleanKey === 'Sin Fecha') return;
+          const mappedRows = (parsed[dateKey] || []).map(r => ({
             ...r,
+            fecha: cleanKey,
             transportista: ensureRowTransportista(r),
-            paradas: healParadasWithPreloaded(r.ruta, r.paradas, dateKey)
+            paradas: healParadasWithPreloaded(r.ruta, r.paradas, cleanKey)
           }));
+          if (!normalizedMap[cleanKey]) {
+            normalizedMap[cleanKey] = [];
+          }
+          mappedRows.forEach(row => {
+            const exists = normalizedMap[cleanKey].some(x => String(x.ruta).trim() === String(row.ruta).trim());
+            if (!exists) {
+              normalizedMap[cleanKey].push(row);
+            }
+          });
         });
-        return parsed;
+        if (Object.keys(normalizedMap).length > 0) {
+          return normalizedMap;
+        }
       }
     }
     return DEFAULT_SAMPLE_ASSIGNMENTS;
@@ -514,14 +540,31 @@ const loadPersistedSavedRuteo = () => {
     const saved = localStorage.getItem('keylogistics_saved_ruteo');
     if (saved) {
       const parsed = JSON.parse(saved);
-      Object.keys(parsed).forEach(dateKey => {
-        parsed[dateKey] = parsed[dateKey].map(r => ({
-          ...r,
-          transportista: ensureRowTransportista(r),
-          paradas: healParadasWithPreloaded(r.ruta, r.paradas, dateKey)
-        }));
-      });
-      return parsed;
+      if (Object.keys(parsed).length > 0) {
+        const normalizedMap = {};
+        Object.keys(parsed).forEach(dateKey => {
+          const cleanKey = normalizeDate(dateKey) || dateKey;
+          if (!cleanKey || cleanKey.startsWith('__') || cleanKey === 'Sin Fecha') return;
+          const mappedRows = (parsed[dateKey] || []).map(r => ({
+            ...r,
+            fecha: cleanKey,
+            transportista: ensureRowTransportista(r),
+            paradas: healParadasWithPreloaded(r.ruta, r.paradas, cleanKey)
+          }));
+          if (!normalizedMap[cleanKey]) {
+            normalizedMap[cleanKey] = [];
+          }
+          mappedRows.forEach(row => {
+            const exists = normalizedMap[cleanKey].some(x => String(x.ruta).trim() === String(row.ruta).trim());
+            if (!exists) {
+              normalizedMap[cleanKey].push(row);
+            }
+          });
+        });
+        if (Object.keys(normalizedMap).length > 0) {
+          return normalizedMap;
+        }
+      }
     }
     return DEFAULT_SAMPLE_ASSIGNMENTS;
   } catch (e) {
@@ -543,7 +586,15 @@ const loadPersistedSavedBaseline = () => {
     const saved = localStorage.getItem('keylogistics_saved_baseline');
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Object.keys(parsed).length > 0) return parsed;
+      if (Object.keys(parsed).length > 0) {
+        const normalizedMap = {};
+        Object.keys(parsed).forEach(dateKey => {
+          const cleanKey = normalizeDate(dateKey) || dateKey;
+          if (!cleanKey || cleanKey.startsWith('__') || cleanKey === 'Sin Fecha') return;
+          normalizedMap[cleanKey] = parsed[dateKey];
+        });
+        if (Object.keys(normalizedMap).length > 0) return normalizedMap;
+      }
     }
     return JSON.parse(JSON.stringify(DEFAULT_SAMPLE_ASSIGNMENTS));
   } catch (e) {
@@ -768,19 +819,25 @@ export const loadPersistedTransformedRoutes = () => {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed.map(r => {
-          const paradas = healParadasWithPreloaded(r.ruta, r.paradas, r.fecha);
+          const cleanFecha = normalizeDate(r.fecha) || r.fecha;
+          const paradas = healParadasWithPreloaded(r.ruta, r.paradas, cleanFecha);
           const distinctAmbientes = Array.from(new Set(paradas.map(p => p.ambiente))).sort();
           return {
             ...r,
+            fecha: cleanFecha,
             ambientes: distinctAmbientes.length > 0 ? distinctAmbientes : (r.ambientes || ['S']),
             paradas
           };
         });
       }
     }
-    return PRELOADED_EXCEL_ROUTES && PRELOADED_EXCEL_ROUTES.length > 0 
+    const baseRoutes = (PRELOADED_EXCEL_ROUTES && PRELOADED_EXCEL_ROUTES.length > 0 
       ? PRELOADED_EXCEL_ROUTES 
-      : createInitialTransformedRoutes();
+      : createInitialTransformedRoutes());
+    return baseRoutes.map(r => ({
+      ...r,
+      fecha: normalizeDate(r.fecha) || r.fecha
+    }));
   } catch (e) {
     console.error('Error loading transformed routes from localStorage:', e);
     return createInitialTransformedRoutes();
@@ -1396,11 +1453,20 @@ export const usePlanningStore = create((set, get) => ({
       }
 
       set(state => {
-        const mergedAssignments = { ...state.transmittedAssignments };
+        const mergedAssignments = {};
+        // Normalizar todas las fechas existentes en el estado local
+        Object.entries(state.transmittedAssignments || {}).forEach(([f, rows]) => {
+          const cleanF = normalizeDate(f) || f;
+          if (!cleanF || cleanF.startsWith('__') || cleanF === 'Sin Fecha') return;
+          mergedAssignments[cleanF] = rows;
+        });
+
         Object.entries(assignmentsMap).forEach(([fecha, dbRows]) => {
-          const localRows = state.transmittedAssignments?.[fecha] || [];
+          const cleanFecha = normalizeDate(fecha) || fecha;
+          if (!cleanFecha || cleanFecha.startsWith('__') || cleanFecha === 'Sin Fecha') return;
+          const localRows = mergedAssignments[cleanFecha] || [];
           if (!localRows || localRows.length === 0) {
-            mergedAssignments[fecha] = dbRows;
+            mergedAssignments[cleanFecha] = dbRows;
           } else {
             // Fusionar respetando filas ya asignadas localmente pero con DB autoritativa en rutas, métricas y paradas
             const localRowMap = new Map();
@@ -1409,7 +1475,7 @@ export const usePlanningStore = create((set, get) => ({
               localRowMap.set(k, lr);
             });
             
-            mergedAssignments[fecha] = dbRows.map(dbR => {
+            mergedAssignments[cleanFecha] = dbRows.map(dbR => {
               const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
               const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
               if (lr) {
@@ -1445,14 +1511,27 @@ export const usePlanningStore = create((set, get) => ({
             const dbRouteKeys = new Set(dbRows.map(dr => String(dr.ruta).trim()));
             localRows.forEach(lr => {
               if (lr.isAperturada && !dbRouteKeys.has(String(lr.ruta).trim())) {
-                mergedAssignments[fecha].push(lr);
+                mergedAssignments[cleanFecha].push(lr);
               }
             });
           }
         });
 
-        const mergedSaved = { ...state.savedRuteoByDate, ...mergedAssignments };
-        const mergedBaseline = { ...(state.savedRuteoBaseline || {}), ...mergedAssignments };
+        const mergedSaved = {};
+        Object.entries(state.savedRuteoByDate || {}).forEach(([f, rows]) => {
+          const cleanF = normalizeDate(f) || f;
+          if (!cleanF || cleanF.startsWith('__') || cleanF === 'Sin Fecha') return;
+          mergedSaved[cleanF] = rows;
+        });
+        Object.assign(mergedSaved, mergedAssignments);
+
+        const mergedBaseline = {};
+        Object.entries(state.savedRuteoBaseline || {}).forEach(([f, rows]) => {
+          const cleanF = normalizeDate(f) || f;
+          if (!cleanF || cleanF.startsWith('__') || cleanF === 'Sin Fecha') return;
+          mergedBaseline[cleanF] = rows;
+        });
+        Object.assign(mergedBaseline, mergedAssignments);
         const mergedOverrides = ruteoOverridesFromDb 
           ? { ...state.ruteoOverrides, ...ruteoOverridesFromDb } 
           : state.ruteoOverrides;

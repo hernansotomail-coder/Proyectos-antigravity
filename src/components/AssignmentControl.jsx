@@ -9,7 +9,7 @@ import {
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
-import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
+import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostRecentDate, normalizeDate } from '../store/planningStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
@@ -325,8 +325,16 @@ export default function AssignmentControl() {
   }, [initPlanningFromDb]);
 
   const availableDates = useMemo(() => {
-    const dates = Object.keys(transmittedAssignments || {});
-    return sortDatesDescending(dates);
+    const setDates = new Set();
+    const addDate = (d) => {
+      if (!d) return;
+      const norm = normalizeDate(d);
+      if (norm && !norm.startsWith('__') && norm !== 'Sin Fecha' && norm !== 'null' && norm !== 'undefined') {
+        setDates.add(norm);
+      }
+    };
+    Object.keys(transmittedAssignments || {}).forEach(addDate);
+    return sortDatesDescending(Array.from(setDates));
   }, [transmittedAssignments]);
 
   const activeDate = (selectedDisponibilizarDate && availableDates.includes(selectedDisponibilizarDate))
