@@ -7,7 +7,7 @@ import {
 import * as XLSX from 'xlsx';
 import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
-import { useStaffStore } from '../store/staffStore';
+import { useStaffStore, isStaffExternal } from '../store/staffStore';
 import { findOperationForRoute, getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
 import { Button } from './ui/Button';
 import { copyBriefingAsImage } from '../lib/matrixImageExporter';
@@ -144,6 +144,76 @@ export const normalizeClientForBriefing = (rawName) => {
   return getOperacionName('', cleaned || rawName);
 };
 
+// Determina si una asignación corresponde a Flota Externa / Terceros
+// Valida conductor (RUT EXT-, rol externo), camión (patente/código en flota externa o prefijos TL/FG/TF/TC/VL/CS/EM/EXT),
+// transportista externo y flags directos.
+export const isAssignmentExternal = (r, fleetList = [], staffList = []) => {
+  if (!r) return false;
+  if (r.tipo_flota === 'Externa') return true;
+  if (r.empresa_externa && String(r.empresa_externa).trim() !== '') return true;
+
+  // 1. Conductor y Auxiliares por RUT
+  const condRut = String(r.conductor_rut || '').trim().toUpperCase();
+  const aux1Rut = String(r.aux1_rut || '').trim().toUpperCase();
+  const aux2Rut = String(r.aux2_rut || '').trim().toUpperCase();
+  if (condRut.startsWith('EXT-') || aux1Rut.startsWith('EXT-') || aux2Rut.startsWith('EXT-')) {
+    return true;
+  }
+
+  // 2. Conductor y Auxiliares por Nombre (etiquetas [EXT- o (EXT-) o EXTERNO)
+  const condName = (r.conductor_name || '').trim();
+  if (condName && /\[EXT-|\(EXT-|EXTERNO/i.test(condName)) return true;
+  const aux1Name = (r.aux1_name || '').trim();
+  if (aux1Name && /\[EXT-|\(EXT-|EXTERNO/i.test(aux1Name)) return true;
+  const aux2Name = (r.aux2_name || '').trim();
+  if (aux2Name && /\[EXT-|\(EXT-|EXTERNO/i.test(aux2Name)) return true;
+
+  // 3. Conductor / Auxiliar en catálogo de staffList
+  if (condName && staffList && staffList.length > 0) {
+    const foundStaff = staffList.find(s => s.name && s.name.trim().toLowerCase() === condName.toLowerCase());
+    if (foundStaff && isStaffExternal(foundStaff)) return true;
+  }
+  if (aux1Name && staffList && staffList.length > 0) {
+    const foundAux1 = staffList.find(s => s.name && s.name.trim().toLowerCase() === aux1Name.toLowerCase());
+    if (foundAux1 && isStaffExternal(foundAux1)) return true;
+  }
+  if (aux2Name && staffList && staffList.length > 0) {
+    const foundAux2 = staffList.find(s => s.name && s.name.trim().toLowerCase() === aux2Name.toLowerCase());
+    if (foundAux2 && isStaffExternal(foundAux2)) return true;
+  }
+
+  // 4. Camión en catálogo de fleetList
+  const camion = (r.camion || '').trim();
+  const matchParen = camion.match(/^([^(]+)(?:\(([^)]+)\))?/);
+  const cCode = (matchParen ? matchParen[1] : camion).trim().toLowerCase();
+  const cPlate = (matchParen && matchParen[2] ? matchParen[2] : (r.patente || '')).trim().toLowerCase();
+
+  if (fleetList && fleetList.length > 0 && (cCode || cPlate)) {
+    const foundTruck = fleetList.find(f => {
+      const fCode = (f.internal_number || '').trim().toLowerCase();
+      const fPlate = (f.plate || '').trim().toLowerCase();
+      if (cCode && fCode && (fCode === cCode || cCode.startsWith(fCode) || fCode.startsWith(cCode))) return true;
+      if (cPlate && fPlate && fPlate === cPlate) return true;
+      return false;
+    });
+    if (foundTruck && isVehicleExternal(foundTruck)) return true;
+  }
+
+  // 5. Prefijos de patentes o códigos de vehículos externos conocidos
+  // TL: Transportes Lazcano, FG: Fabian Gonzalez, TF: Afca, TC: Karen Gonzalez, VL: Valencia, CS: SyC, EM: Leftraru, EXT: genérico
+  if (/^(TL|FG|TF|TC|VL|CS|EM|EXT)/i.test(cCode) || /^(TL|FG|TF|TC|VL|CS|EM|EXT)/i.test(cPlate)) {
+    return true;
+  }
+
+  // 6. Transportista externo (no código interno T100..T604 ni Sin Transportista ni Key)
+  const transp = (r.transportista || '').trim();
+  if (transp && !/^T\d+$/i.test(transp) && transp.toLowerCase() !== 'sin transportista' && transp.toLowerCase() !== 'key') {
+    return true;
+  }
+
+  return false;
+};
+
 // Formateadores numéricos de estilo chileno
 const formatInt = (num) => {
   if (num === null || num === undefined || isNaN(num) || num === 0) return '';
@@ -175,11 +245,14 @@ export default function Briefing() {
     initPlanningFromDb
   } = usePlanningStore();
   
-  const { fleetList } = useFleetStore();
+  const { fleetList, fetchFleet } = useFleetStore();
+  const { staffList, fetchStaff } = useStaffStore();
 
   React.useEffect(() => {
     initPlanningFromDb?.();
-  }, [initPlanningFromDb]);
+    fetchFleet?.();
+    fetchStaff?.();
+  }, [initPlanningFromDb, fetchFleet, fetchStaff]);
 
   // Fechas disponibles
   const availableDates = useMemo(() => {
@@ -210,7 +283,6 @@ export default function Briefing() {
     }
   }, [availableDates, activeDate]);
 
-  const { staffList } = useStaffStore();
   const [searchTerm, setSearchTerm] = useState('');
   // Multi-selección de Operaciones (Requisito 3)
   const [selectedOperations, setSelectedOperations] = useState([]);
@@ -312,50 +384,33 @@ export default function Briefing() {
         const conductor = (r.conductor_name || '').trim();
         const aux = (r.aux1_name || '').trim();
 
-        // Sin cobertura: Rutas que no tienen Conductor, ni auxiliar ni Camión
-        const isSinCobertura = !camion || camion.toLowerCase().includes('sin cami') || (!conductor && !aux);
-        if (isSinCobertura) {
+        const hasCamion = Boolean(camion && !camion.toLowerCase().includes('sin cami') && camion !== '-');
+        const hasConductor = Boolean(conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-');
+        const hasAux = Boolean(aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
+
+        // Cobertura: ruta cubierta si tiene camión asignado, conductor asignado o auxiliar asignado
+        const isCovered = hasCamion || hasConductor || hasAux;
+
+        if (!isCovered) {
           sinCoberturaCount++;
-        }
+        } else {
+          // Vuelta
+          const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
+          const matchVuelta = rawVuelta.match(/\d+/);
+          const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
 
-        // Vuelta
-        const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
-        const matchVuelta = rawVuelta.match(/\d+/);
-        const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
+          // Tipo de Flota (Propia vs Externa / Terceros)
+          const isExt = isAssignmentExternal(r, fleetList, staffList);
 
-        // Tipo de Flota (Propia vs Externa)
-        let isExt = false;
-        if (camion && !camion.toLowerCase().includes('sin cami')) {
-          const matchParen = camion.match(/^([^(]+)(?:\(([^)]+)\))?/);
-          const cCode = (matchParen ? matchParen[1] : camion).trim().toLowerCase();
-          const cPlate = (matchParen && matchParen[2] ? matchParen[2] : (r.patente || '')).trim().toLowerCase();
-
-          const foundTruck = fleetList.find(f => {
-            const fCode = (f.internal_number || '').trim().toLowerCase();
-            const fPlate = (f.plate || '').trim().toLowerCase();
-            if (cCode && fCode && (fCode === cCode || cCode.startsWith(fCode) || fCode.startsWith(cCode))) return true;
-            if (cPlate && fPlate && fPlate === cPlate) return true;
-            return false;
-          });
-
-          if (foundTruck) {
-            isExt = isVehicleExternal(foundTruck);
-          } else {
-            isExt = isVehicleExternal({
-              internal_number: cCode,
-              plate: cPlate,
-              transportista: r.transportista,
-              tipo_flota: r.tipo_flota,
-              empresa_externa: r.empresa_externa
-            });
-          }
+          // Clave identificadora para el conjunto (evita sobreconteo del mismo vehículo o dotación en la misma vuelta)
+          const identifier = hasCamion ? camion : (hasConductor ? conductor : (hasAux ? aux : `ruta-${r.ruta}`));
 
           if (vueltaNum === 1) {
-            if (isExt) trucks1vExterna.add(camion);
-            else trucks1vPropia.add(camion);
+            if (isExt) trucks1vExterna.add(identifier);
+            else trucks1vPropia.add(identifier);
           } else {
-            if (isExt) trucks2vExterna.add(camion);
-            else trucks2vPropia.add(camion);
+            if (isExt) trucks2vExterna.add(identifier);
+            else trucks2vPropia.add(identifier);
           }
         }
 
@@ -457,7 +512,7 @@ export default function Briefing() {
     };
 
     return { rows, totals };
-  }, [currentAssignedRows, fleetList]);
+  }, [currentAssignedRows, fleetList, staffList]);
 
   // Mini-etiquetas de todas las operaciones disponibles (Requisito 3)
   // Al comienzo van todas las tarjetas que tienen servicios registrados y al final las que no tienen servicios
