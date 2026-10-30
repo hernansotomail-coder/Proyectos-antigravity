@@ -60,20 +60,21 @@ export const getBriefingOperation = (route) => {
   const rawDenom = String(route.denominacion || route.nombreRuta || '').trim();
   const rawOp = String(route.operacion || '').trim();
 
-  // Requisito 1 y 2: Unir Enex Unitario, Sbarro, Fast Food y Petroleras en PETROLERAS
-  const anyPetroleras = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
-    const s = String(val || '').trim().toUpperCase();
-    return s.startsWith('RUTA FAST FOOD') || s.startsWith('FAST FOOD') || s.includes('FAST FOOD') ||
-           s.includes('PETROLER') || s.includes('ENEX') || s.includes('SBARRO');
-  });
-  if (anyPetroleras) return 'PETROLERAS';
-
   // Requisito 4: Aramark debe aparecer como Centralizado al igual que Centralizado megafrio
   const anyCentralizado = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
     return s.includes('ARAMARK') || s.includes('CENTRALIZADO') || s.includes('MEGAFRIO');
   });
   if (anyCentralizado) return 'Centralizado';
+
+  // Requisito: Unir Enex Unitario, Sbarro, Fast Food, Petroleras, Franquicia Copec y Copec en PETROLERAS
+  const anyPetroleras = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+    const s = String(val || '').trim().toUpperCase();
+    return s.startsWith('RUTA FAST FOOD') || s.startsWith('FAST FOOD') || s.includes('FAST FOOD') ||
+           s.includes('PETROLER') || s.includes('ENEX') || s.includes('SBARRO') ||
+           s.includes('FRANQUICIA COPEC') || s.includes('COPEC');
+  });
+  if (anyPetroleras) return 'PETROLERAS';
 
   // Requisito 1: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
   const anyCarls = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
@@ -138,8 +139,8 @@ export const getBriefingOperation = (route) => {
 export const normalizeClientForBriefing = (rawName) => {
   if (!rawName) return 'OTROS';
   const upper = String(rawName).toUpperCase().trim();
-  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD') || upper.includes('PETROLER') || upper.includes('ENEX') || upper.includes('SBARRO')) return 'PETROLERAS';
   if (upper.includes('ARAMARK') || upper.includes('CENTRALIZADO') || upper.includes('MEGAFRIO')) return 'Centralizado';
+  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD') || upper.includes('PETROLER') || upper.includes('ENEX') || upper.includes('SBARRO') || upper.includes('FRANQUICIA COPEC') || upper.includes('COPEC')) return 'PETROLERAS';
   if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
   if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
   if (upper.includes('SPID')) return 'SPID';

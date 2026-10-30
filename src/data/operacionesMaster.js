@@ -1841,97 +1841,97 @@ export const ROUTE_OPERATIONS_MAP = {
   "3270": {
     "ruta": "3270",
     "denominacion": "ESPECIAL FRANQUICIAS C-R 0",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3271": {
     "ruta": "3271",
     "denominacion": "ESPECIAL FRANQUICIAS C-R 1",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3272": {
     "ruta": "3272",
     "denominacion": "ESPECIAL FRANQUICIAS C-R 2",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3273": {
     "ruta": "3273",
     "denominacion": "ESPECIAL FRANQUICIAS C-R 3",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3274": {
     "ruta": "3274",
     "denominacion": "ESPECIAL FRANQUICIAS C-R 4",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3275": {
     "ruta": "3275",
     "denominacion": "ESPECIAL FRANQUICIAS C-R 5",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3276": {
     "ruta": "3276",
     "denominacion": "ESPECIAL FRANQUICIAS SECO 1",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3277": {
     "ruta": "3277",
     "denominacion": "ESPECIAL FRANQUICIAS SECO 2",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3278": {
     "ruta": "3278",
     "denominacion": "ESPECIAL FRANQUICIAS SECO 3",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3279": {
     "ruta": "3279",
     "denominacion": "ESPECIAL FRANQUICIAS SECO 4",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3280": {
     "ruta": "3280",
     "denominacion": "ESPECIAL FRANQUICIAS SECO 5",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3281": {
     "ruta": "3281",
     "denominacion": "2V ESPECIAL FRANQUICIA C-R 1",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3282": {
     "ruta": "3282",
     "denominacion": "2V ESPECIAL FRANQUICIA C-R 2",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3283": {
     "ruta": "3283",
     "denominacion": "2V ESPECIAL FRANQUICIA SECO 1",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3284": {
     "ruta": "3284",
     "denominacion": "2V ESPECIAL FRANQUICIA SECO 2",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3285": {
     "ruta": "3285",
     "denominacion": "2V ESPECIAL FRANQUICIA SECO 3",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3300": {
@@ -3245,61 +3245,61 @@ export const ROUTE_OPERATIONS_MAP = {
   "3571": {
     "ruta": "3571",
     "denominacion": "REDESPACHO FRANQUICIA C-R 1",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3572": {
     "ruta": "3572",
     "denominacion": "REDESPACHO FRANQUICIA C-R 2",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3573": {
     "ruta": "3573",
     "denominacion": "REDESPACHO FRANQUICIA C-R 3",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3574": {
     "ruta": "3574",
     "denominacion": "REDESPACHO FRANQUICIA C-R 4",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3575": {
     "ruta": "3575",
     "denominacion": "REDESPACHO FRANQUICIA C-R 5",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3576": {
     "ruta": "3576",
     "denominacion": "REDESPACHO FRANQUICIA SECO 1",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3577": {
     "ruta": "3577",
     "denominacion": "REDESPACHO FRANQUICIA SECO 2",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3578": {
     "ruta": "3578",
     "denominacion": "REDESPACHO FRANQUICIA SECO 3",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3579": {
     "ruta": "3579",
     "denominacion": "REDESPACHO FRANQUICIA SECO 4",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3580": {
     "ruta": "3580",
     "denominacion": "REDESPACHO FRANQUICIA SECO 5",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3621": {
@@ -3425,43 +3425,43 @@ export const ROUTE_OPERATIONS_MAP = {
   "3800": {
     "ruta": "3800",
     "denominacion": "RUTA FRANQUICIA COPEC 00",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3801": {
     "ruta": "3801",
     "denominacion": "RUTA FRANQUICIA COPEC 01 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3802": {
     "ruta": "3802",
     "denominacion": "RUTA FRANQUICIA COPEC 02 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3803": {
     "ruta": "3803",
     "denominacion": "RUTA FRANQUICIA COPEC 03 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3804": {
     "ruta": "3804",
     "denominacion": "RUTA FRANQUICIA COPEC 04 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3805": {
     "ruta": "3805",
     "denominacion": "RUTA FRANQUICIA COPEC 05 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3806": {
     "ruta": "3806",
     "denominacion": "RUTA FRANQUICIA COPEC 06 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3807": {
@@ -3473,79 +3473,79 @@ export const ROUTE_OPERATIONS_MAP = {
   "3808": {
     "ruta": "3808",
     "denominacion": "RUTA FRANQUICIA COPEC 08 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3809": {
     "ruta": "3809",
     "denominacion": "RUTA FRANQUICIA COPEC 09 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3810": {
     "ruta": "3810",
     "denominacion": "RUTA FRANQUICIA COPEC 10 C-R",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3811": {
     "ruta": "3811",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 1",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3812": {
     "ruta": "3812",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 2",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3813": {
     "ruta": "3813",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 3",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3814": {
     "ruta": "3814",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 4",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3815": {
     "ruta": "3815",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 5",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3816": {
     "ruta": "3816",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 6",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3817": {
     "ruta": "3817",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 7",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3818": {
     "ruta": "3818",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 8",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3819": {
     "ruta": "3819",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 9",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "3820": {
     "ruta": "3820",
     "denominacion": "RUTA FRANQUICIA COPEC SECO 10",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "4100": {
@@ -7553,67 +7553,67 @@ export const ROUTE_OPERATIONS_MAP = {
   "8200": {
     "ruta": "8200",
     "denominacion": "2 VUELTA FRANQUICIA COPEC 00",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8201": {
     "ruta": "8201",
     "denominacion": "2 V FRANQUICIA C-R COPEC 01",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8202": {
     "ruta": "8202",
     "denominacion": "2 V FRANQUICIA C-R COPEC 02",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8203": {
     "ruta": "8203",
     "denominacion": "2 V FRANQUICIA C-R COPEC 03",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8204": {
     "ruta": "8204",
     "denominacion": "2 V FRANQUICIA C-R COPEC 04",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8205": {
     "ruta": "8205",
     "denominacion": "2 V FRANQUICIA C-R COPEC 05",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8206": {
     "ruta": "8206",
     "denominacion": "2 V FRANQUICIA SECO COPEC 06",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8207": {
     "ruta": "8207",
     "denominacion": "2 V FRANQUICIA SECO COPEC 07",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8208": {
     "ruta": "8208",
     "denominacion": "2 V FRANQUICIA SECO COPEC 08",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8209": {
     "ruta": "8209",
     "denominacion": "2 V FRANQUICIA SECO COPEC 09",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8210": {
     "ruta": "8210",
     "denominacion": "2 V FRANQUICIA SECO COPEC 10",
-    "operacion": "Franquicia Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T302"
   },
   "8301": {
@@ -8308,7 +8308,6 @@ export const ALL_OPERACIONES = [
   "Carls Jr",
   "Centralizado",
   "El Golfo",
-  "Franquicia Copec",
   "Juan Valdez",
   "Keyfoods",
   "Newrest ByI",
@@ -8337,18 +8336,6 @@ export function canonicalizeOperation(name) {
   const trimmed = name.trim();
   const upper = trimmed.toUpperCase();
 
-  // Requisito 1 y 2: Unir Enex Unitario, Sbarro y Fast Food en PETROLERAS
-  if (
-    upper.startsWith('RUTA FAST FOOD') || 
-    upper.startsWith('FAST FOOD') || 
-    upper.includes('FAST FOOD') ||
-    upper.includes('PETROLER') ||
-    upper.includes('ENEX') ||
-    upper.includes('SBARRO')
-  ) {
-    return 'PETROLERAS';
-  }
-
   // Requisito 4: Aramark debe aparecer como Centralizado al igual que Centralizado Megafrio
   if (
     upper.includes('ARAMARK') || 
@@ -8356,6 +8343,20 @@ export function canonicalizeOperation(name) {
     upper.includes('MEGAFRIO')
   ) {
     return 'Centralizado';
+  }
+
+  // Requisito: Unir Enex Unitario, Sbarro, Fast Food, Petroleras, Franquicia Copec y Copec en PETROLERAS
+  if (
+    upper.startsWith('RUTA FAST FOOD') || 
+    upper.startsWith('FAST FOOD') || 
+    upper.includes('FAST FOOD') ||
+    upper.includes('PETROLER') ||
+    upper.includes('ENEX') ||
+    upper.includes('SBARRO') ||
+    upper.includes('FRANQUICIA COPEC') ||
+    upper.includes('COPEC')
+  ) {
+    return 'PETROLERAS';
   }
 
   // Requisito: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
@@ -8384,21 +8385,19 @@ export function canonicalizeOperation(name) {
   if (upper.includes('NEWREST')) return 'Newrest ByI';
   // 10. SPID
   if (upper.includes('SPID')) return 'SPID';
-  // 11. Franquicia Copec
-  if (upper.includes('FRANQUICIA COPEC')) return 'Franquicia Copec';
-  // 12. Panstars
+  // 11. Panstars
   if (upper.includes('PANSTAR')) return 'Panstars';
-  // 13. Carga Consolidada
+  // 12. Carga Consolidada
   if (upper.includes('CONSOLIDADA')) return 'Carga Consolidada';
-  // 14. SODEXO
+  // 13. SODEXO
   if (upper.includes('SODEXO')) return 'SODEXO';
-  // 15. Nutrisco
+  // 14. Nutrisco
   if (upper.includes('NUTRISCO')) return 'Nutrisco';
-  // 16. Nocturna
+  // 15. Nocturna
   if (upper.includes('NOCTURNA')) return 'Nocturna';
-  // 17. Sea Garden
+  // 16. Sea Garden
   if (upper.includes('SEA GARDEN')) return 'Sea Garden';
-  // 18. UM Unidades Móviles
+  // 17. UM Unidades Móviles
   if (upper.includes('ANTOFAGASTA')) return 'UM Antofagasta';
   if (upper.includes('CORONEL')) return 'UM Coronel';
   if (upper.includes('LA SERENA')) return 'UM La Serena';
@@ -8482,24 +8481,30 @@ export function getAllOperationsForRoute(r) {
     ops.add('El Golfo');
   }
 
-  // Requisito 1 y 2: Todo lo que empiece con "RUTA FAST FOOD", PETROLER, ENEX o SBARRO deben ser de PETROLERAS
-  const combinedStr = [r.ruta, r.cliente, r.denominacion, r.nombreRuta, r.operacion].filter(Boolean).join(' ').toUpperCase();
-  if (
-    combinedStr.includes('RUTA FAST FOOD') || 
-    combinedStr.includes('FAST FOOD') ||
-    combinedStr.includes('PETROLER') ||
-    combinedStr.includes('ENEX') ||
-    combinedStr.includes('SBARRO')
-  ) {
-    ops.add('PETROLERAS');
-  }
   // Requisito 4: Todo lo que dice "ARAMARK", "CENTRALIZADO", "MEGAFRIO" considerarlo como "Centralizado"
+  const combinedStr = [r.ruta, r.cliente, r.denominacion, r.nombreRuta, r.operacion].filter(Boolean).join(' ').toUpperCase();
   if (
     combinedStr.includes('ARAMARK') ||
     combinedStr.includes('CENTRALIZADO') ||
     combinedStr.includes('MEGAFRIO')
   ) {
     ops.add('Centralizado');
+  }
+
+  // Requisito: Todo lo que empiece con "RUTA FAST FOOD", PETROLER, ENEX, SBARRO, FRANQUICIA COPEC o COPEC deben ser de PETROLERAS
+  if (
+    !combinedStr.includes('CENTRALIZADO') &&
+    (
+      combinedStr.includes('RUTA FAST FOOD') || 
+      combinedStr.includes('FAST FOOD') ||
+      combinedStr.includes('PETROLER') ||
+      combinedStr.includes('ENEX') ||
+      combinedStr.includes('SBARRO') ||
+      combinedStr.includes('FRANQUICIA COPEC') ||
+      combinedStr.includes('COPEC')
+    )
+  ) {
+    ops.add('PETROLERAS');
   }
 
   // 1. Catálogo maestro por número de ruta
