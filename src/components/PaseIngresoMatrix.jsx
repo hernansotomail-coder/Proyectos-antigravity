@@ -26,25 +26,11 @@ export const NEWREST_PASE_ROUTES = new Set([
 
 /**
  * Rutas oficiales asignadas a Pase de Ingreso Juan Valdez:
- * 3200 al 3230
- * 6301 al 6352
- * 6355 al 6358
+ * Rango 63XX (6300 al 6399, por ejemplo: 6301, 6302, etc.)
  */
-export const JUAN_VALDEZ_PASE_ROUTES = new Set([
-  // 3200 al 3230
-  '3200', '3201', '3202', '3203', '3204', '3205', '3206', '3207', '3208', '3209', '3210',
-  '3211', '3212', '3213', '3214', '3215', '3216', '3217', '3218', '3219', '3220',
-  '3221', '3222', '3223', '3224', '3225', '3226', '3227', '3228', '3229', '3230',
-  // 6301 al 6352
-  '6301', '6302', '6303', '6304', '6305', '6306', '6307', '6308', '6309', '6310',
-  '6311', '6312', '6313', '6314', '6315', '6316', '6317', '6318', '6319', '6320',
-  '6321', '6322', '6323', '6324', '6325', '6326', '6327', '6328', '6329', '6330',
-  '6331', '6332', '6333', '6334', '6335', '6336', '6337', '6338', '6339', '6340',
-  '6341', '6342', '6343', '6344', '6345', '6346', '6347', '6348', '6349', '6350',
-  '6351', '6352',
-  // 6355 al 6358
-  '6355', '6356', '6357', '6358'
-]);
+export const JUAN_VALDEZ_PASE_ROUTES = new Set(
+  Array.from({ length: 100 }, (_, i) => String(6300 + i))
+);
 
 // Helper para comparar ruta con sets tolerando ceros a la izquierda
 const matchRuta = (set, raw) => {
@@ -143,8 +129,9 @@ export default function PaseIngresoMatrix({
         return combined.includes('newrest');
       }
       if (isJV) {
-        if (matchRuta(JUAN_VALDEZ_PASE_ROUTES, rutaRaw)) return true;
-        return combined.includes('juan') || combined.includes('valdez');
+        const cleanR = rutaRaw.replace(/^0+/, '');
+        // El pase diario de Juan Valdez considera el rango de rutas 63XX (6300 al 6399, ej: 6301, 6302, etc.)
+        return /^63\d{2}$/.test(cleanR) || matchRuta(JUAN_VALDEZ_PASE_ROUTES, rutaRaw);
       }
       return combined.includes(clientName.toLowerCase());
     };
