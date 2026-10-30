@@ -5,283 +5,283 @@ export const ROUTE_OPERATIONS_MAP = {
   "1401": {
     "ruta": "1401",
     "denominacion": "RUTA SBARRO COPEC 01",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1402": {
     "ruta": "1402",
     "denominacion": "RUTA SBARRO COPEC 02",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1403": {
     "ruta": "1403",
     "denominacion": "RUTA SBARRO COPEC 03",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1404": {
     "ruta": "1404",
     "denominacion": "RUTA SBARRO COPEC 04",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1405": {
     "ruta": "1405",
     "denominacion": "RUTA SBARRO COPEC 05",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1406": {
     "ruta": "1406",
     "denominacion": "RUTA SBARRO COPEC 06",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1407": {
     "ruta": "1407",
     "denominacion": "RUTA SBARRO COPEC 07",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1408": {
     "ruta": "1408",
     "denominacion": "RUTA SBARRO COPEC 08",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1409": {
     "ruta": "1409",
     "denominacion": "RUTA SBARRO COPEC 09",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1410": {
     "ruta": "1410",
     "denominacion": "RUTA SBARRO COPEC 10",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1411": {
     "ruta": "1411",
     "denominacion": "RUTA SBARRO COPEC 11",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1412": {
     "ruta": "1412",
     "denominacion": "RUTA SBARRO COPEC 12",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1413": {
     "ruta": "1413",
     "denominacion": "RUTA SBARRO COPEC 13",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1414": {
     "ruta": "1414",
     "denominacion": "RUTA SBARRO COPEC 14",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1415": {
     "ruta": "1415",
     "denominacion": "RUTA SBARRO COPEC 15",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1416": {
     "ruta": "1416",
     "denominacion": "RUTA SBARRO COPEC 16",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1417": {
     "ruta": "1417",
     "denominacion": "RUTA SBARRO COPEC 17",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1418": {
     "ruta": "1418",
     "denominacion": "RUTA SBARRO COPEC 18",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1419": {
     "ruta": "1419",
     "denominacion": "RUTA SBARRO COPEC 19",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1420": {
     "ruta": "1420",
     "denominacion": "RUTA SBARRO COPEC 20",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1441": {
     "ruta": "1441",
     "denominacion": "2° SERVICIO SBARRO COPEC 1",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1442": {
     "ruta": "1442",
     "denominacion": "2° SERVICIO SBARRO COPEC 2",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1443": {
     "ruta": "1443",
     "denominacion": "2° SERVICIO SBARRO COPEC 3",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1444": {
     "ruta": "1444",
     "denominacion": "2° SERVICIO SBARRO COPEC 4",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1445": {
     "ruta": "1445",
     "denominacion": "2° SERVICIO SBARRO COPEC 5",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1446": {
     "ruta": "1446",
     "denominacion": "2° SERVICIO SBARRO COPEC 6",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1447": {
     "ruta": "1447",
     "denominacion": "2° SERVICIO SBARRO COPEC 7",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1448": {
     "ruta": "1448",
     "denominacion": "2° SERVICIO SBARRO COPEC 8",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1449": {
     "ruta": "1449",
     "denominacion": "2° SERVICIO SBARRO COPEC 9",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1450": {
     "ruta": "1450",
     "denominacion": "2° SERVICIO SBARRO COPEC 10",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1461": {
     "ruta": "1461",
     "denominacion": "ESPECIAL SBARRO COPEC 01",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1462": {
     "ruta": "1462",
     "denominacion": "ESPECIAL SBARRO COPEC 02",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1463": {
     "ruta": "1463",
     "denominacion": "ESPECIAL SBARRO COPEC 03",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1464": {
     "ruta": "1464",
     "denominacion": "ESPECIAL SBARRO COPEC 04",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1465": {
     "ruta": "1465",
     "denominacion": "ESPECIAL SBARRO COPEC 05",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1466": {
     "ruta": "1466",
     "denominacion": "ESPECIAL SBARRO COPEC 06",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1467": {
     "ruta": "1467",
     "denominacion": "ESPECIAL SBARRO COPEC 07",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1468": {
     "ruta": "1468",
     "denominacion": "ESPECIAL SBARRO COPEC 08",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1469": {
     "ruta": "1469",
     "denominacion": "ESPECIAL SBARRO COPEC 09",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1470": {
     "ruta": "1470",
     "denominacion": "ESPECIAL SBARRO COPEC 10",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1471": {
     "ruta": "1471",
     "denominacion": "2DA V ESPECIAL SBARRO 01",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1472": {
     "ruta": "1472",
     "denominacion": "2DA V ESPECIAL SBARRO 02",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1473": {
     "ruta": "1473",
     "denominacion": "2DA V ESPECIAL SBARRO 03",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1474": {
     "ruta": "1474",
     "denominacion": "2DA V ESPECIAL SBARRO 04",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1475": {
     "ruta": "1475",
     "denominacion": "2DA V ESPECIAL SBARRO 05",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1480": {
     "ruta": "1480",
     "denominacion": "REDESPACHO SBARRO COPEC 01",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1481": {
     "ruta": "1481",
     "denominacion": "REDESPACHO SBARRO COPEC 02",
-    "operacion": "Sbarro Copec",
+    "operacion": "PETROLERAS",
     "transportista": "T311"
   },
   "1500": {
@@ -2657,223 +2657,223 @@ export const ROUTE_OPERATIONS_MAP = {
   "3440": {
     "ruta": "3440",
     "denominacion": "RUTA ENEX UNITARIO 01",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3441": {
     "ruta": "3441",
     "denominacion": "RUTA ENEX UNITARIO 02",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3442": {
     "ruta": "3442",
     "denominacion": "RUTA ENEX UNITARIO 03",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3443": {
     "ruta": "3443",
     "denominacion": "RUTA ENEX UNITARIO 04",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3444": {
     "ruta": "3444",
     "denominacion": "RUTA ENEX UNITARIO 05",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3445": {
     "ruta": "3445",
     "denominacion": "RUTA ENEX UNITARIO 06",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3446": {
     "ruta": "3446",
     "denominacion": "RUTA ENEX UNITARIO 07",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3447": {
     "ruta": "3447",
     "denominacion": "RUTA ENEX UNITARIO 08",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3448": {
     "ruta": "3448",
     "denominacion": "RUTA ENEX UNITARIO 09",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3449": {
     "ruta": "3449",
     "denominacion": "RUTA ENEX UNITARIO 10",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3450": {
     "ruta": "3450",
     "denominacion": "RUTA ENEX UNITARIO 11",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3451": {
     "ruta": "3451",
     "denominacion": "RUTA ENEX UNITARIO 12",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3452": {
     "ruta": "3452",
     "denominacion": "RUTA ENEX UNITARIO 13",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3453": {
     "ruta": "3453",
     "denominacion": "RUTA ENEX UNITARIO 14",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3454": {
     "ruta": "3454",
     "denominacion": "RUTA ENEX UNITARIO 15",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3455": {
     "ruta": "3455",
     "denominacion": "RUTA ENEX UNITARIO 16",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3456": {
     "ruta": "3456",
     "denominacion": "RUTA ENEX UNITARIO 17",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3457": {
     "ruta": "3457",
     "denominacion": "RUTA ENEX UNITARIO 18",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3458": {
     "ruta": "3458",
     "denominacion": "RUTA ENEX UNITARIO 19",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3459": {
     "ruta": "3459",
     "denominacion": "RUTA ENEX UNITARIO 20",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3460": {
     "ruta": "3460",
     "denominacion": "RUTA ENEX UNITARIO 21",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3470": {
     "ruta": "3470",
     "denominacion": "ESPECIAL ENEX UNITARIO 01",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3471": {
     "ruta": "3471",
     "denominacion": "ESPECIAL ENEX UNITARIO 02",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3472": {
     "ruta": "3472",
     "denominacion": "ESPECIAL ENEX UNITARIO 03",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3473": {
     "ruta": "3473",
     "denominacion": "ESPECIAL ENEX UNITARIO 04",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3474": {
     "ruta": "3474",
     "denominacion": "ESPECIAL ENEX UNITARIO 05",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3475": {
     "ruta": "3475",
     "denominacion": "ESPECIAL ENEX UNITARIO 06",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3476": {
     "ruta": "3476",
     "denominacion": "ESPECIAL ENEX UNITARIO 07",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3477": {
     "ruta": "3477",
     "denominacion": "2V ESPECIAL ENEX UNITARIO 01",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3478": {
     "ruta": "3478",
     "denominacion": "2V ESPECIAL ENEX UNITARIO 02",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3479": {
     "ruta": "3479",
     "denominacion": "2V ESPECIAL ENEX UNITARIO 03",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3480": {
     "ruta": "3480",
     "denominacion": "REDESPACHO ENEX UNITARIO 01",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3481": {
     "ruta": "3481",
     "denominacion": "REDESPACHO ENEX UNITARIO 02",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3482": {
     "ruta": "3482",
     "denominacion": "REDESPACHO ENEX UNITARIO 03",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3483": {
     "ruta": "3483",
     "denominacion": "REDESPACHO ENEX UNITARIO 04",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3484": {
     "ruta": "3484",
     "denominacion": "REDESPACHO ENEX UNITARIO 05",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3485": {
     "ruta": "3485",
     "denominacion": "REDESPACHO ENEX UNITARIO 06",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "3500": {
@@ -7715,121 +7715,121 @@ export const ROUTE_OPERATIONS_MAP = {
   "8450": {
     "ruta": "8450",
     "denominacion": "2V ENEX UNITARIO SERVICIO 01",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8451": {
     "ruta": "8451",
     "denominacion": "2V ENEX UNITARIO SERVICIO 02",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8452": {
     "ruta": "8452",
     "denominacion": "2V ENEX UNITARIO SERVICIO 03",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8453": {
     "ruta": "8453",
     "denominacion": "2V ENEX UNITARIO SERVICIO 04",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8454": {
     "ruta": "8454",
     "denominacion": "2V ENEX UNITARIO SERVICIO 05",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8455": {
     "ruta": "8455",
     "denominacion": "2V ENEX UNITARIO SERVICIO 06",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8456": {
     "ruta": "8456",
     "denominacion": "2V ENEX UNITARIO SERVICIO 07",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8457": {
     "ruta": "8457",
     "denominacion": "2V ENEX UNITARIO SERVICIO 08",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8458": {
     "ruta": "8458",
     "denominacion": "2V ENEX UNITARIO SERVICIO 09",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8459": {
     "ruta": "8459",
     "denominacion": "2V ENEX UNITARIO SERVICIO 10",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8460": {
     "ruta": "8460",
     "denominacion": "2V ENEX UNITARIO SERVICIO 11",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8461": {
     "ruta": "8461",
     "denominacion": "2V ENEX UNITARIO SERVICIO 12",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8462": {
     "ruta": "8462",
     "denominacion": "2V ENEX UNITARIO SERVICIO 13",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8463": {
     "ruta": "8463",
     "denominacion": "2V ENEX UNITARIO SERVICIO 14",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8464": {
     "ruta": "8464",
     "denominacion": "2V ENEX UNITARIO SERVICIO 15",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8465": {
     "ruta": "8465",
     "denominacion": "2V ENEX UNITARIO SERVICIO 16",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8466": {
     "ruta": "8466",
     "denominacion": "2V ENEX UNITARIO SERVICIO 17",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8467": {
     "ruta": "8467",
     "denominacion": "2V ENEX UNITARIO SERVICIO 18",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8468": {
     "ruta": "8468",
     "denominacion": "2V ENEX UNITARIO SERVICIO 19",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8469": {
     "ruta": "8469",
     "denominacion": "2V ENEX UNITARIO SERVICIO 20",
-    "operacion": "Enex Unitario",
+    "operacion": "PETROLERAS",
     "transportista": "T312"
   },
   "8600": {
@@ -8303,12 +8303,11 @@ export const ROUTE_OPERATIONS_MAP = {
 };
 
 export const ALL_OPERACIONES = [
-  "Aramark",
   "Cantabria",
   "Carga Consolidada",
   "Carls Jr",
+  "Centralizado",
   "El Golfo",
-  "Enex Unitario",
   "Franquicia Copec",
   "Juan Valdez",
   "Keyfoods",
@@ -8318,11 +8317,11 @@ export const ALL_OPERACIONES = [
   "Nutrisco",
   "Oxxo",
   "Panstars",
+  "PETROLERAS",
   "Petrolera - Oxxo - Carls",
   "Petroleras",
   "SODEXO",
   "SPID",
-  "Sbarro Copec",
   "Sea Garden",
   "Streat Burguer",
   "Subway",
@@ -8338,10 +8337,27 @@ export function canonicalizeOperation(name) {
   const trimmed = name.trim();
   const upper = trimmed.toUpperCase();
 
-  // Requisito 2: Todo lo que empiece con "RUTA FAST FOOD" deben ser de Petroleras
-  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD')) return 'Petroleras';
-  // Requisito 3: Todo lo que dice "ARAMARK Ruta " considerarlo como "Aramark"
-  if (upper.includes('ARAMARK RUTA') || upper.startsWith('ARAMARK') || upper.includes('ARAMARK')) return 'Aramark';
+  // Requisito 1 y 2: Unir Enex Unitario, Sbarro y Fast Food en PETROLERAS
+  if (
+    upper.startsWith('RUTA FAST FOOD') || 
+    upper.startsWith('FAST FOOD') || 
+    upper.includes('FAST FOOD') ||
+    upper.includes('PETROLER') ||
+    upper.includes('ENEX') ||
+    upper.includes('SBARRO')
+  ) {
+    return 'PETROLERAS';
+  }
+
+  // Requisito 4: Aramark debe aparecer como Centralizado al igual que Centralizado Megafrio
+  if (
+    upper.includes('ARAMARK') || 
+    upper.includes('CENTRALIZADO') || 
+    upper.includes('MEGAFRIO')
+  ) {
+    return 'Centralizado';
+  }
+
   // Requisito: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
   if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
   // Requisito: Las rutas que parten con "SBW " dentro de "Subway"
@@ -8351,46 +8367,38 @@ export function canonicalizeOperation(name) {
   if (upper.includes('GOLFO') || upper.includes('CONGELADO')) return 'El Golfo';
   // 2. Streat Burguer (con o sin 'u')
   if (upper.includes('STREAT') || upper.includes('BURGUER') || upper.includes('BURGER')) return 'Streat Burguer';
-  // 3. Petroleras (soporta Petrolera, Petroleras, Especiales Petrolera, Redespacho Petrolera)
-  if (upper.includes('PETROLER')) return 'Petroleras';
-  // 4. Carls Jr (soporta Carls, Carl's, Especiales Carls)
+  // 3. Carls Jr (soporta Carls, Carl's, Especiales Carls)
   if (upper.includes('CARL')) return 'Carls Jr';
-  // 5. Oxxo (soporta Oxxo, Especiales Oxxo)
+  // 4. Oxxo (soporta Oxxo, Especiales Oxxo)
   if (upper.includes('OXXO')) return 'Oxxo';
-  // 6. Subway (soporta Subway, SBW, SBW Redespacho)
+  // 5. Subway (soporta Subway, SBW, SBW Redespacho)
   if (upper.includes('SUBWAY') || upper.includes('SBW')) return 'Subway';
-  // 7. Juan Valdez
+  // 6. Juan Valdez
   if (upper.includes('VALDEZ')) return 'Juan Valdez';
-  // 8. Aramark
-  if (upper.includes('ARAMARK')) return 'Aramark';
-  // 9. Cantabria
+  // 7. Cantabria
   if (upper.includes('CANTABRIA')) return 'Cantabria';
-  // 10. Keyfoods
+  // 8. Keyfoods
   if (upper.includes('KEYFOOD')) return 'Keyfoods';
-  // 11. Newrest Centros Remotos vs Newrest ByI
+  // 9. Newrest Centros Remotos vs Newrest ByI
   if (upper.includes('CENTROS REMOTOS')) return 'Newrest Centros Remotos';
   if (upper.includes('NEWREST')) return 'Newrest ByI';
-  // 12. Sbarro Copec
-  if (upper.includes('SBARRO')) return 'Sbarro Copec';
-  // 13. SPID
+  // 10. SPID
   if (upper.includes('SPID')) return 'SPID';
-  // 14. Enex
-  if (upper.includes('ENEX')) return 'Enex Unitario';
-  // 15. Franquicia Copec
+  // 11. Franquicia Copec
   if (upper.includes('FRANQUICIA COPEC')) return 'Franquicia Copec';
-  // 16. Panstars
+  // 12. Panstars
   if (upper.includes('PANSTAR')) return 'Panstars';
-  // 17. Carga Consolidada
+  // 13. Carga Consolidada
   if (upper.includes('CONSOLIDADA')) return 'Carga Consolidada';
-  // 18. SODEXO
+  // 14. SODEXO
   if (upper.includes('SODEXO')) return 'SODEXO';
-  // 19. Nutrisco
+  // 15. Nutrisco
   if (upper.includes('NUTRISCO')) return 'Nutrisco';
-  // 20. Nocturna
+  // 16. Nocturna
   if (upper.includes('NOCTURNA')) return 'Nocturna';
-  // 21. Sea Garden
+  // 17. Sea Garden
   if (upper.includes('SEA GARDEN')) return 'Sea Garden';
-  // 22. UM Unidades Móviles
+  // 18. UM Unidades Móviles
   if (upper.includes('ANTOFAGASTA')) return 'UM Antofagasta';
   if (upper.includes('CORONEL')) return 'UM Coronel';
   if (upper.includes('LA SERENA')) return 'UM La Serena';
@@ -8474,14 +8482,24 @@ export function getAllOperationsForRoute(r) {
     ops.add('El Golfo');
   }
 
-  // Requisito 2: Todo lo que empiece con "RUTA FAST FOOD" deben ser de Petroleras
+  // Requisito 1 y 2: Todo lo que empiece con "RUTA FAST FOOD", PETROLER, ENEX o SBARRO deben ser de PETROLERAS
   const combinedStr = [r.ruta, r.cliente, r.denominacion, r.nombreRuta, r.operacion].filter(Boolean).join(' ').toUpperCase();
-  if (combinedStr.includes('RUTA FAST FOOD') || combinedStr.includes('FAST FOOD')) {
-    ops.add('Petroleras');
+  if (
+    combinedStr.includes('RUTA FAST FOOD') || 
+    combinedStr.includes('FAST FOOD') ||
+    combinedStr.includes('PETROLER') ||
+    combinedStr.includes('ENEX') ||
+    combinedStr.includes('SBARRO')
+  ) {
+    ops.add('PETROLERAS');
   }
-  // Requisito 3: Todo lo que dice "ARAMARK Ruta " considerarlo como "Aramark"
-  if (combinedStr.includes('ARAMARK')) {
-    ops.add('Aramark');
+  // Requisito 4: Todo lo que dice "ARAMARK", "CENTRALIZADO", "MEGAFRIO" considerarlo como "Centralizado"
+  if (
+    combinedStr.includes('ARAMARK') ||
+    combinedStr.includes('CENTRALIZADO') ||
+    combinedStr.includes('MEGAFRIO')
+  ) {
+    ops.add('Centralizado');
   }
 
   // 1. Catálogo maestro por número de ruta

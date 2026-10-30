@@ -89,7 +89,7 @@ export default function ManualDeUso() {
             Al subir la planilla Excel en <strong>Asignación Diaria</strong>, el motor de normalización cruza en milisegundos las rutas con el Catálogo Maestro de Operaciones:
           </p>
           <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
-            <p><strong>Cuentas Canónicas:</strong> Fast Food (Subway, Carls Jr, Streat Burguer), Franquicias Copec, Sbarro Copec, Enex Unitario, Newrest ByI, SODEXO, SPID, Nutrisco, Sea Garden, Carga Consolidada y Última Milla Regional.</p>
+            <p><strong>Cuentas Canónicas:</strong> Fast Food y Petroleras (Subway, Carls Jr, Streat Burguer, Sbarro, Enex Unitario y Copec), Centralizado (Aramark y Megafrio), Newrest ByI, SODEXO, SPID, Nutrisco, Sea Garden, Carga Consolidada y Última Milla Regional.</p>
             <p><strong>Temperaturas:</strong> Detección automática de ambientes (C: Congelado, R: Refrigerado, S: Seco) y suma de metros cúbicos.</p>
             <p><strong>Transmisión:</strong> Un solo clic en "Transmitir a Disponibilización" deja todo listo para armar tripulaciones.</p>
           </div>

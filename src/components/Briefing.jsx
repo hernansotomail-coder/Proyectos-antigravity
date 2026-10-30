@@ -2,8 +2,10 @@ import React, { useState, useMemo, useRef } from 'react';
 import { 
   Calendar, Download, Search, Filter, Layers, Truck, 
   Package, Scale, Snowflake, Thermometer, Wind, 
-  MapPin, AlertCircle, FileSpreadsheet, Building2, Copy
+  MapPin, AlertCircle, FileSpreadsheet, Building2, Copy,
+  Edit3, RotateCcw, X, Check
 } from 'lucide-react';
+import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
@@ -27,7 +29,7 @@ export const cleanBriefingOperationName = (name) => {
   return str;
 };
 
-// Verifica si la fila o servicio corresponde a "Traspaso" sin considerar "Aramark" (se excluye todo Traspaso excepto Aramark)
+// Verifica si la fila o servicio corresponde a "Traspaso" sin considerar "Aramark" o "Centralizado"
 export const isTraspasoExcluded = (route) => {
   if (!route) return false;
   const combined = [
@@ -41,10 +43,10 @@ export const isTraspasoExcluded = (route) => {
   ].filter(Boolean).join(' ').toLowerCase();
 
   const hasTraspaso = combined.includes('traspaso');
-  const hasAramark = combined.includes('aramark');
+  const hasAramarkOrCentralizado = combined.includes('aramark') || combined.includes('centralizado') || combined.includes('megafrio');
 
-  // Si contiene Traspaso y NO contiene Aramark, se excluye
-  if (hasTraspaso && !hasAramark) {
+  // Si contiene Traspaso y NO contiene Aramark ni Centralizado, se excluye
+  if (hasTraspaso && !hasAramarkOrCentralizado) {
     return true;
   }
   return false;
@@ -58,19 +60,20 @@ export const getBriefingOperation = (route) => {
   const rawDenom = String(route.denominacion || route.nombreRuta || '').trim();
   const rawOp = String(route.operacion || '').trim();
 
-  // Requisito 2: Todo lo que empiece con "RUTA FAST FOOD" deben ser de Petroleras
-  const anyFastFood = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+  // Requisito 1 y 2: Unir Enex Unitario, Sbarro, Fast Food y Petroleras en PETROLERAS
+  const anyPetroleras = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
-    return s.startsWith('RUTA FAST FOOD') || s.startsWith('FAST FOOD') || s.includes('FAST FOOD');
+    return s.startsWith('RUTA FAST FOOD') || s.startsWith('FAST FOOD') || s.includes('FAST FOOD') ||
+           s.includes('PETROLER') || s.includes('ENEX') || s.includes('SBARRO');
   });
-  if (anyFastFood) return 'Petroleras';
+  if (anyPetroleras) return 'PETROLERAS';
 
-  // Requisito 3: Todo lo que dice "ARAMARK Ruta " considerarlo como "Aramark"
-  const anyAramark = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+  // Requisito 4: Aramark debe aparecer como Centralizado al igual que Centralizado megafrio
+  const anyCentralizado = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
-    return s.includes('ARAMARK RUTA') || s.startsWith('ARAMARK') || s.includes('ARAMARK');
+    return s.includes('ARAMARK') || s.includes('CENTRALIZADO') || s.includes('MEGAFRIO');
   });
-  if (anyAramark) return 'Aramark';
+  if (anyCentralizado) return 'Centralizado';
 
   // Requisito 1: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
   const anyCarls = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
@@ -135,8 +138,8 @@ export const getBriefingOperation = (route) => {
 export const normalizeClientForBriefing = (rawName) => {
   if (!rawName) return 'OTROS';
   const upper = String(rawName).toUpperCase().trim();
-  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD')) return 'Petroleras';
-  if (upper.includes('ARAMARK RUTA') || upper.startsWith('ARAMARK') || upper.includes('ARAMARK')) return 'Aramark';
+  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD') || upper.includes('PETROLER') || upper.includes('ENEX') || upper.includes('SBARRO')) return 'PETROLERAS';
+  if (upper.includes('ARAMARK') || upper.includes('CENTRALIZADO') || upper.includes('MEGAFRIO')) return 'Centralizado';
   if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
   if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
   if (upper.includes('SPID')) return 'SPID';
@@ -250,6 +253,308 @@ const formatDecimalAlways = (num) => {
   return Number(num).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+// Modal para Editar Datos Operacionales de SPID (Requisito 3)
+function SpidEditModal({ isOpen, onClose, activeDate, currentData, onSave, onReset }) {
+  if (!isOpen) return null;
+
+  const [form, setForm] = useState({
+    propia1v: currentData?.propia1v ?? 0,
+    externa1v: currentData?.externa1v ?? 0,
+    propia2v: currentData?.propia2v ?? 0,
+    externa2v: currentData?.externa2v ?? 0,
+    sinCobertura: currentData?.sinCobertura ?? 0,
+    cajas: currentData?.cajas ?? 0,
+    kilos: currentData?.kilos ?? 0,
+    congeladoM3: currentData?.congeladoM3 ?? 0,
+    refrigeradoM3: currentData?.refrigeradoM3 ?? 0,
+    secoM3: currentData?.secoM3 ?? 0,
+    volumenM3: currentData?.volumenM3 ?? 0,
+    numDestinos: currentData?.numDestinos ?? 0,
+  });
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setForm({
+        propia1v: currentData?.propia1v ?? 0,
+        externa1v: currentData?.externa1v ?? 0,
+        propia2v: currentData?.propia2v ?? 0,
+        externa2v: currentData?.externa2v ?? 0,
+        sinCobertura: currentData?.sinCobertura ?? 0,
+        cajas: currentData?.cajas ?? 0,
+        kilos: currentData?.kilos ?? 0,
+        congeladoM3: currentData?.congeladoM3 ?? 0,
+        refrigeradoM3: currentData?.refrigeradoM3 ?? 0,
+        secoM3: currentData?.secoM3 ?? 0,
+        volumenM3: currentData?.volumenM3 ?? 0,
+        numDestinos: currentData?.numDestinos ?? 0,
+      });
+    }
+  }, [isOpen, currentData]);
+
+  const handleChange = (field, val) => {
+    setForm(prev => {
+      const parsed = val === '' ? '' : (parseFloat(val) || 0);
+      const next = { ...prev, [field]: parsed };
+      if (field === 'congeladoM3' || field === 'refrigeradoM3' || field === 'secoM3') {
+        const c = field === 'congeladoM3' ? (parseFloat(val) || 0) : (parseFloat(prev.congeladoM3) || 0);
+        const r = field === 'refrigeradoM3' ? (parseFloat(val) || 0) : (parseFloat(prev.refrigeradoM3) || 0);
+        const s = field === 'secoM3' ? (parseFloat(val) || 0) : (parseFloat(prev.secoM3) || 0);
+        next.volumenM3 = Number((c + r + s).toFixed(2));
+      }
+      return next;
+    });
+  };
+
+  const calculatedRutas = 
+    (parseFloat(form.propia1v) || 0) + 
+    (parseFloat(form.externa1v) || 0) + 
+    (parseFloat(form.propia2v) || 0) + 
+    (parseFloat(form.externa2v) || 0) + 
+    (parseFloat(form.sinCobertura) || 0);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    onSave({
+      propia1v: parseFloat(form.propia1v) || 0,
+      externa1v: parseFloat(form.externa1v) || 0,
+      propia2v: parseFloat(form.propia2v) || 0,
+      externa2v: parseFloat(form.externa2v) || 0,
+      sinCobertura: parseFloat(form.sinCobertura) || 0,
+      numRutas: calculatedRutas,
+      cajas: Math.round(parseFloat(form.cajas) || 0),
+      kilos: Number((parseFloat(form.kilos) || 0).toFixed(2)),
+      congeladoM3: Number((parseFloat(form.congeladoM3) || 0).toFixed(2)),
+      refrigeradoM3: Number((parseFloat(form.refrigeradoM3) || 0).toFixed(2)),
+      secoM3: Number((parseFloat(form.secoM3) || 0).toFixed(2)),
+      volumenM3: Number((parseFloat(form.volumenM3) || 0).toFixed(2)),
+      numDestinos: Math.round(parseFloat(form.numDestinos) || 0),
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+        <div className="bg-[#0B2545] text-white p-4 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-white/10 rounded-xl">
+              <Edit3 size={18} className="text-amber-300" />
+            </div>
+            <div>
+              <h2 className="text-sm font-black uppercase tracking-wide">Editar Métricas SPID</h2>
+              <p className="text-[11px] text-blue-200">Fecha operativa: <span className="font-bold text-white">{activeDate}</span></p>
+            </div>
+          </div>
+          <button 
+            type="button" 
+            onClick={onClose} 
+            className="text-white/70 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 text-xs overflow-y-auto max-h-[75vh]">
+          {/* Sección 1: Flota y Vueltas */}
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="font-black text-slate-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                <Truck size={14} className="text-blue-600" />
+                Flota y Vueltas
+              </span>
+              <span className="text-[11px] font-bold bg-blue-100 text-blue-900 px-2 py-0.5 rounded-full">
+                # Rutas: {calculatedRutas}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Real Key 1era V</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.propia1v}
+                  onChange={e => handleChange('propia1v', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Real Terceros 1era V</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.externa1v}
+                  onChange={e => handleChange('externa1v', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-amber-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">2da V (Cubiertas Key)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.propia2v}
+                  onChange={e => handleChange('propia2v', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-indigo-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">2da V (Terceros)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.externa2v}
+                  onChange={e => handleChange('externa2v', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-amber-950 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Sin cobertura</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.sinCobertura}
+                  onChange={e => handleChange('sinCobertura', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-red-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Sección 2: Carga y Entregas */}
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2.5">
+            <span className="font-black text-slate-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+              <Package size={14} className="text-emerald-600" />
+              Carga y Entregas
+            </span>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Cajas</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.cajas}
+                  onChange={e => handleChange('cajas', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Kilos (Kg)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.kilos}
+                  onChange={e => handleChange('kilos', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">N° Destinos</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.numDestinos}
+                  onChange={e => handleChange('numDestinos', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Sección 3: Ambientes y Volumen */}
+          <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 space-y-2.5">
+            <span className="font-black text-slate-800 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+              <Snowflake size={14} className="text-cyan-600" />
+              Ambientes y Volumen (m³)
+            </span>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Congelado m³</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.congeladoM3}
+                  onChange={e => handleChange('congeladoM3', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Refrigerado m³</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.refrigeradoM3}
+                  onChange={e => handleChange('refrigeradoM3', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-cyan-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Seco m³</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.secoM3}
+                  onChange={e => handleChange('secoM3', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-bold font-mono text-amber-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 mb-1">Volumen Total m³</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.volumenM3}
+                  onChange={e => handleChange('volumenM3', e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg font-black font-mono text-emerald-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Botones de acción */}
+          <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+            <button
+              type="button"
+              onClick={onReset}
+              className="text-xs font-bold text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-2 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+              title="Restablecer métricas manuales de SPID para esta fecha"
+            >
+              <RotateCcw size={13} />
+              <span>Restablecer a cero</span>
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-xs font-bold text-slate-600 hover:text-slate-800 px-3 py-2 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                className="text-xs font-bold bg-[#0B2545] hover:bg-[#133863] text-white px-4 py-2 rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check size={14} />
+                <span>Guardar Datos SPID</span>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Briefing() {
   const { 
     transmittedAssignments, 
@@ -304,6 +609,52 @@ export default function Briefing() {
 
   // Matriz de Pase de Ingreso para Juan Valdez y Newrest (Requisito 2)
   const [activePaseClient, setActivePaseClient] = useState(null);
+
+  // Overrides manuales de SPID por fecha (Requisito 3)
+  const [spidOverrides, setSpidOverrides] = useState(() => {
+    try {
+      const saved = localStorage.getItem('keylogistics_spid_briefing_overrides');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      console.warn('Error reading spidOverrides from localStorage:', e);
+      return {};
+    }
+  });
+
+  const [isSpidModalOpen, setIsSpidModalOpen] = useState(false);
+
+  const handleSaveSpidData = (spidData) => {
+    const norm = normalizeDate(activeDate);
+    const updated = {
+      ...spidOverrides,
+      [norm]: {
+        ...spidData,
+        isEdited: true
+      }
+    };
+    setSpidOverrides(updated);
+    try {
+      localStorage.setItem('keylogistics_spid_briefing_overrides', JSON.stringify(updated));
+    } catch (e) {
+      console.error('Error saving spidOverrides to localStorage:', e);
+    }
+    toast.success(`Datos operacionales de SPID guardados para el ${norm}`);
+    setIsSpidModalOpen(false);
+  };
+
+  const handleResetSpidData = () => {
+    const norm = normalizeDate(activeDate);
+    const updated = { ...spidOverrides };
+    delete updated[norm];
+    setSpidOverrides(updated);
+    try {
+      localStorage.setItem('keylogistics_spid_briefing_overrides', JSON.stringify(updated));
+    } catch (e) {
+      console.error('Error resetting spidOverrides:', e);
+    }
+    toast.info(`Datos manuales de SPID restablecidos para el ${norm}`);
+    setIsSpidModalOpen(false);
+  };
 
   const toggleOperation = (op) => {
     const isJv = op.toLowerCase().includes('juan') || op.toLowerCase().includes('valdez');
@@ -495,6 +846,58 @@ export default function Briefing() {
       };
     });
 
+    // Requisito 3: SPID siempre debe aparecer en el Briefing
+    const spidRowIndex = rows.findIndex(r => r.operacion.toUpperCase() === 'SPID');
+    const activeDateNorm = normalizeDate(activeDate);
+    const spidOverride = spidOverrides[activeDateNorm];
+
+    if (spidRowIndex === -1) {
+      rows.push({
+        operacion: 'SPID',
+        numRutas: 0,
+        propia1v: 0,
+        externa1v: 0,
+        propia2v: 0,
+        externa2v: 0,
+        sinCobertura: 0,
+        cajas: 0,
+        kilos: 0,
+        congeladoM3: 0,
+        refrigeradoM3: 0,
+        secoM3: 0,
+        volumenM3: 0,
+        numDestinos: 0,
+        isSpid: true,
+        hasRealRoutes: false,
+        isManualOverride: !!spidOverride
+      });
+    } else {
+      rows[spidRowIndex].isSpid = true;
+      rows[spidRowIndex].hasRealRoutes = true;
+    }
+
+    if (spidOverride) {
+      const targetSpid = rows.find(r => r.operacion.toUpperCase() === 'SPID');
+      if (targetSpid) {
+        targetSpid.propia1v = spidOverride.propia1v !== undefined ? Number(spidOverride.propia1v) : targetSpid.propia1v;
+        targetSpid.externa1v = spidOverride.externa1v !== undefined ? Number(spidOverride.externa1v) : targetSpid.externa1v;
+        targetSpid.propia2v = spidOverride.propia2v !== undefined ? Number(spidOverride.propia2v) : targetSpid.propia2v;
+        targetSpid.externa2v = spidOverride.externa2v !== undefined ? Number(spidOverride.externa2v) : targetSpid.externa2v;
+        targetSpid.sinCobertura = spidOverride.sinCobertura !== undefined ? Number(spidOverride.sinCobertura) : targetSpid.sinCobertura;
+        
+        targetSpid.numRutas = targetSpid.propia1v + targetSpid.externa1v + targetSpid.propia2v + targetSpid.externa2v + targetSpid.sinCobertura;
+        
+        targetSpid.cajas = spidOverride.cajas !== undefined ? Math.round(Number(spidOverride.cajas)) : targetSpid.cajas;
+        targetSpid.kilos = spidOverride.kilos !== undefined ? Number(Number(spidOverride.kilos).toFixed(2)) : targetSpid.kilos;
+        targetSpid.congeladoM3 = spidOverride.congeladoM3 !== undefined ? Number(Number(spidOverride.congeladoM3).toFixed(2)) : targetSpid.congeladoM3;
+        targetSpid.refrigeradoM3 = spidOverride.refrigeradoM3 !== undefined ? Number(Number(spidOverride.refrigeradoM3).toFixed(2)) : targetSpid.refrigeradoM3;
+        targetSpid.secoM3 = spidOverride.secoM3 !== undefined ? Number(Number(spidOverride.secoM3).toFixed(2)) : targetSpid.secoM3;
+        targetSpid.volumenM3 = spidOverride.volumenM3 !== undefined ? Number(Number(spidOverride.volumenM3).toFixed(2)) : targetSpid.volumenM3;
+        targetSpid.numDestinos = spidOverride.numDestinos !== undefined ? Number(spidOverride.numDestinos) : targetSpid.numDestinos;
+        targetSpid.isManualOverride = true;
+      }
+    }
+
     // Ordenar filas: primero las operaciones que tienen servicios registrados (numRutas > 0 o cajas > 0 o volumenM3 > 0), luego las que no
     rows.sort((a, b) => {
       const hasServicesA = (a.numRutas > 0 || a.cajas > 0 || a.volumenM3 > 0) ? 1 : 0;
@@ -527,7 +930,7 @@ export default function Briefing() {
     };
 
     return { rows, totals };
-  }, [currentAssignedRows, fleetList, staffList]);
+  }, [currentAssignedRows, fleetList, staffList, spidOverrides, activeDate]);
 
   // Mini-etiquetas de todas las operaciones disponibles (Requisito 3)
   // Al comienzo van todas las tarjetas que tienen servicios registrados y al final las que no tienen servicios
@@ -622,13 +1025,29 @@ export default function Briefing() {
       }
     });
 
+    // Si SPID está visible y fue editado manualmente sin rutas reales en currentAssignedRows:
+    const spidRow = displayedRows.find(r => r.operacion.toUpperCase() === 'SPID');
+    let extraPropia1v = 0;
+    let extraExterna1v = 0;
+    let extraPropia2v = 0;
+    let extraExterna2v = 0;
+    if (spidRow && (!spidRow.hasRealRoutes || spidRow.isManualOverride)) {
+      const spidRealRoutes = currentAssignedRows.filter(r => getBriefingOperation(r).toUpperCase() === 'SPID');
+      if (spidRealRoutes.length === 0) {
+        extraPropia1v = spidRow.propia1v || 0;
+        extraExterna1v = spidRow.externa1v || 0;
+        extraPropia2v = spidRow.propia2v || 0;
+        extraExterna2v = spidRow.externa2v || 0;
+      }
+    }
+
     return {
       operacion: selectedOperations.length > 0 ? `Subtotal (${selectedOperations.length} ops)` : 'Total general',
       numRutas: displayedRows.reduce((acc, r) => acc + r.numRutas, 0),
-      propia1v: uniqueProp1v.size,
-      externa1v: uniqueExt1v.size,
-      propia2v: uniqueProp2v.size,
-      externa2v: uniqueExt2v.size,
+      propia1v: uniqueProp1v.size + extraPropia1v,
+      externa1v: uniqueExt1v.size + extraExterna1v,
+      propia2v: uniqueProp2v.size + extraPropia2v,
+      externa2v: uniqueExt2v.size + extraExterna2v,
       sinCobertura: displayedRows.reduce((acc, r) => acc + r.sinCobertura, 0),
       cajas: displayedRows.reduce((acc, r) => acc + r.cajas, 0),
       kilos: Number(displayedRows.reduce((acc, r) => acc + r.kilos, 0).toFixed(2)),
@@ -762,6 +1181,17 @@ export default function Briefing() {
             title="Abrir / ocultar Matriz Pase de Ingreso Newrest"
           >
             <span>🎫 Pase Newrest</span>
+          </button>
+
+          {/* Botón Editar SPID (Requisito 3) */}
+          <button
+            type="button"
+            onClick={() => setIsSpidModalOpen(true)}
+            className="flex items-center gap-1.5 text-xs font-bold h-9 px-3 rounded-xl transition-all cursor-pointer bg-[#173e6b] hover:bg-[#123154] text-blue-100 border border-blue-400/40"
+            title="Editar métricas operacionales de SPID para la fecha activa"
+          >
+            <Edit3 size={14} className="text-amber-300" />
+            <span>Editar SPID</span>
           </button>
 
           {/* Botón Copiar imagen para Excel (Requisito 4) */}
@@ -965,6 +1395,8 @@ export default function Briefing() {
                   const isZebra = idx % 2 === 1;
                   const rowBg = isZebra ? 'bg-[#f4f7fb]/70' : 'bg-white';
                   const isJvOrNewrest = r.operacion.toLowerCase().includes('juan') || r.operacion.toLowerCase().includes('newrest');
+                  const isSpid = r.isSpid || r.operacion.toUpperCase() === 'SPID';
+                  const isClickable = isJvOrNewrest || isSpid;
                   return (
                     <tr 
                       key={r.operacion} 
@@ -973,32 +1405,57 @@ export default function Briefing() {
                           setActivePaseClient(prev => prev === 'Juan Valdez' ? null : 'Juan Valdez');
                         } else if (r.operacion.toLowerCase().includes('newrest')) {
                           setActivePaseClient(prev => prev === 'Newrest' ? null : 'Newrest');
+                        } else if (isSpid) {
+                          setIsSpidModalOpen(true);
                         }
                       }}
-                      className={`${rowBg} hover:bg-blue-50/60 transition-colors ${isJvOrNewrest ? 'cursor-pointer' : ''}`}
+                      className={`${rowBg} hover:bg-blue-50/60 transition-colors ${isClickable ? 'cursor-pointer' : ''}`}
                     >
                       {/* Operación */}
                       <td className="px-3.5 py-2.5 font-black uppercase text-slate-900 border-r border-slate-200/80 tracking-wide">
                         <div className="flex items-center justify-between gap-1.5">
-                          <span>{r.operacion}</span>
-                          {isJvOrNewrest && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const client = r.operacion.toLowerCase().includes('juan') ? 'Juan Valdez' : 'Newrest';
-                                setActivePaseClient(prev => prev === client ? null : client);
-                              }}
-                              className={`text-[9px] font-black px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
-                                (activePaseClient === 'Juan Valdez' && r.operacion.toLowerCase().includes('juan')) || (activePaseClient === 'Newrest' && r.operacion.toLowerCase().includes('newrest'))
-                                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
-                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
-                              }`}
-                              title={`Abrir Pase de Ingreso para ${r.operacion}`}
-                            >
-                              🎫 Pase
-                            </button>
-                          )}
+                          <div className="flex items-center gap-1.5">
+                            <span>{r.operacion}</span>
+                            {r.isManualOverride && (
+                              <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                                Manual
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            {isJvOrNewrest && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const client = r.operacion.toLowerCase().includes('juan') ? 'Juan Valdez' : 'Newrest';
+                                  setActivePaseClient(prev => prev === client ? null : client);
+                                }}
+                                className={`text-[9px] font-black px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
+                                  (activePaseClient === 'Juan Valdez' && r.operacion.toLowerCase().includes('juan')) || (activePaseClient === 'Newrest' && r.operacion.toLowerCase().includes('newrest'))
+                                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
+                                    : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                                }`}
+                                title={`Abrir Pase de Ingreso para ${r.operacion}`}
+                              >
+                                🎫 Pase
+                              </button>
+                            )}
+                            {isSpid && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setIsSpidModalOpen(true);
+                                }}
+                                className="text-[9px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-200 flex items-center gap-1 shadow-2xs"
+                                title="Editar métricas operacionales de SPID"
+                              >
+                                <Edit3 size={10} />
+                                <span>Editar</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </td>
 
@@ -1122,6 +1579,16 @@ export default function Briefing() {
           </table>
         </div>
       </div>
+
+      {/* Modal para editar métricas de SPID (Requisito 3) */}
+      <SpidEditModal
+        isOpen={isSpidModalOpen}
+        onClose={() => setIsSpidModalOpen(false)}
+        activeDate={normalizeDate(activeDate)}
+        currentData={briefingData.rows.find(r => r.operacion.toUpperCase() === 'SPID')}
+        onSave={handleSaveSpidData}
+        onReset={handleResetSpidData}
+      />
 
     </div>
   );
