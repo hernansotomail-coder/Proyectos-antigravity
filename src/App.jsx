@@ -21,6 +21,7 @@ import RuteoView from './components/RuteoView';
 import Briefing from './components/Briefing';
 import ChangeHistory from './components/ChangeHistory';
 import ManualDeUso from './components/ManualDeUso';
+import PagoDotacion from './components/PagoDotacion';
 import { usePlanningStore } from './store/planningStore';
 import { supabase } from './lib/supabase';
 
@@ -72,6 +73,7 @@ function App() {
           <Route path="add-staff" element={<Login><AddStaff /></Login>} />
           <Route path="manage-staff" element={<Login><ManageStaff /></Login>} />
           <Route path="attendance" element={<Login><Attendance /></Login>} />
+          <Route path="pago-dotacion" element={<Login><PagoDotacion /></Login>} />
           <Route path="users" element={<Login><UsersManager /></Login>} />
         </Route>
       </Routes>

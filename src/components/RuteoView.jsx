@@ -244,6 +244,43 @@ const TURNO_OPTIONS = [
   { value: 'No aplica', label: 'No aplica' }
 ];
 
+// Jerarquía oficial de ordenamiento por Turno solicitada:
+// Nocturno, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 2da vuelta, 3ra vuelta, no aplica
+export const getTurnoSortRank = (rawTurno) => {
+  if (!rawTurno) return 999; // Sin turno al final
+  const t = String(rawTurno).trim().toLowerCase();
+  if (t === 'nocturno') return 1;
+  if (t === '1' || t === 'turno 1') return 2;
+  if (t === '2' || t === 'turno 2') return 3;
+  if (t === '3' || t === 'turno 3') return 4;
+  if (t === '4' || t === 'turno 4') return 5;
+  if (t === '5' || t === 'turno 5') return 6;
+  if (t === '6' || t === 'turno 6') return 7;
+  if (t === '7' || t === 'turno 7') return 8;
+  if (t === '8' || t === 'turno 8') return 9;
+  if (t === '9' || t === 'turno 9') return 10;
+  if (t === '10' || t === 'turno 10') return 11;
+  if (t.includes('2da') || t.includes('segunda')) return 12;
+  if (t.includes('3ra') || t.includes('tercera')) return 13;
+  if (t.includes('no aplica') || t === 'n/a') return 14;
+  return 100;
+};
+
+// Convierte hora de cita en minutos desde medianoche (ej: "06:15" -> 375 minutos)
+export const parseHoraCitaToMinutes = (rawHora) => {
+  if (!rawHora) return 99999; // Sin hora al final de su respectivo turno
+  const s = String(rawHora).trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (m) {
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  }
+  const m4 = s.match(/^(\d{2})(\d{2})$/);
+  if (m4) {
+    return parseInt(m4[1], 10) * 60 + parseInt(m4[2], 10);
+  }
+  return 99999;
+};
+
 // Opciones de Prioridad solicitadas
 const PRIORIDAD_OPTIONS = [
   { value: 'Normal', label: 'Normal' },
@@ -1028,6 +1065,24 @@ export default function RuteoView() {
         destino_prioritario,
         displayVuelta
       };
+    });
+
+    // Ordenar de acuerdo a Turno (Nocturno, 1, 2, ..., 10, 2da vuelta, 3ra vuelta, no aplica) y Hora Cita ascendente
+    return trips.sort((a, b) => {
+      const rankA = getTurnoSortRank(a.turno);
+      const rankB = getTurnoSortRank(b.turno);
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
+
+      const timeA = parseHoraCitaToMinutes(a.hora_cita);
+      const timeB = parseHoraCitaToMinutes(b.hora_cita);
+      if (timeA !== timeB) {
+        return timeA - timeB;
+      }
+
+      // Desempate por número de ruta / ID
+      return String(a.rutasStr || '').localeCompare(String(b.rutasStr || ''), undefined, { numeric: true });
     });
   }, [filteredRoutes, activeDate, ruteoOverrides, tiendasCriticasList, findTiendaCritica]);
 

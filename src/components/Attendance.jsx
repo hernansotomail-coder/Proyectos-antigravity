@@ -7,7 +7,8 @@ import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
-import { UploadCloud, CheckCircle2, AlertCircle, Trash2, Plus, X } from 'lucide-react';
+import { UploadCloud, CheckCircle2, AlertCircle, Trash2, Plus, X, RefreshCw } from 'lucide-react';
+import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { toast } from 'sonner';
 
 // Helper to get days in month
@@ -50,6 +51,8 @@ export default function Attendance() {
   const [activeTab, setActiveTab] = useState('masiva');
   const { staffList, fetchStaff } = useStaffStore();
   const { saveAttendanceBulk, saveAttendanceRange, attendanceList, fetchAttendanceByDateRange, isLoading } = useAttendanceStore();
+  const { transmittedAssignments } = usePlanningStore();
+  const [isSyncing, setIsSyncing] = useState(false);
 
   useEffect(() => {
     fetchStaff(); // Ensure staff is loaded
@@ -80,9 +83,15 @@ export default function Attendance() {
     ? [Number(selectedDay)] 
     : Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
+  // Helper para normalizar RUT y Nombre al cruzar con Disponibilización
+  const cleanRut = (r) => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
+  const cleanName = (n) => String(n || '').trim().toUpperCase();
+
   const matrix = useMemo(() => {
     const rawMatrix = staffList.filter(s => s.status === 'Activo').map(staff => {
       const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
+      const sRut = cleanRut(staff.rut);
+      const sName = cleanName(staff.name);
       
       const row = {
         id: staff.id,
@@ -100,7 +109,35 @@ export default function Attendance() {
         } else {
           const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const record = staffAttendance.find(a => a.date && a.date.startsWith(dateStr));
-          row.days[day] = record ? record.service_type : '';
+          
+          if (record && record.service_type) {
+            row.days[day] = record.service_type;
+          } else {
+            // Requisito 1: Si en Disponibilización tiene Ruta asignada en esta fecha, asignar como "Trabajado"
+            const ddmmyyyy = `${String(day).padStart(2, '0')}-${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
+            const dayAssigns = transmittedAssignments?.[ddmmyyyy] || [];
+            
+            const hasAssignedRoute = dayAssigns.some(r => {
+              if (!r.ruta) return false;
+              const cRut = cleanRut(r.conductor_rut);
+              const cName = cleanName(r.conductor_name);
+              const a1Rut = cleanRut(r.aux1_rut);
+              const a1Name = cleanName(r.aux1_name);
+              const a2Rut = cleanRut(r.aux2_rut);
+              const a2Name = cleanName(r.aux2_name);
+
+              if (sRut && (cRut === sRut || a1Rut === sRut || a2Rut === sRut)) return true;
+              if (sName && (cName === sName || a1Name === sName || a2Name === sName)) return true;
+              return false;
+            });
+
+            if (hasAssignedRoute) {
+              row.days[day] = 'Trabajado';
+            } else {
+              // En caso que no exista información, que quede vacío para después asignar estado
+              row.days[day] = '';
+            }
+          }
         }
       });
 
@@ -115,7 +152,75 @@ export default function Attendance() {
     }
 
     return rawMatrix;
-  }, [staffList, attendanceList, daysArray, selectedYear, selectedMonth, statusFilter]);
+  }, [staffList, attendanceList, daysArray, selectedYear, selectedMonth, statusFilter, transmittedAssignments]);
+
+  // Sincronizar masivamente todas las rutas del mes desde Disponibilización a Asistencia
+  const handleSyncFromDisponibilizacion = async () => {
+    setIsSyncing(true);
+    try {
+      const protectedStatuses = ['Vacaciones', 'Licencia', 'Ausente', 'Permiso con goce', 'Permiso sin goce', 'Baja'];
+      const totalDays = getDaysInMonth(selectedYear, selectedMonth);
+      const recordsToSave = [];
+
+      for (let day = 1; day <= totalDays; day++) {
+        const isSunday = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0;
+        if (isSunday) continue;
+
+        const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const ddmmyyyy = `${String(day).padStart(2, '0')}-${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
+        const dayAssigns = transmittedAssignments?.[ddmmyyyy] || [];
+
+        if (dayAssigns.length === 0) continue;
+
+        dayAssigns.forEach(assign => {
+          if (!assign.ruta) return;
+
+          const cRut = cleanRut(assign.conductor_rut);
+          const cName = cleanName(assign.conductor_name);
+          const a1Rut = cleanRut(assign.aux1_rut);
+          const a1Name = cleanName(assign.aux1_name);
+          const a2Rut = cleanRut(assign.aux2_rut);
+          const a2Name = cleanName(assign.aux2_name);
+
+          staffList.forEach(s => {
+            const sRut = cleanRut(s.rut);
+            const sName = cleanName(s.name);
+            const isMatch = (cRut && sRut === cRut) || (cName && sName === cName) ||
+                            (a1Rut && sRut === a1Rut) || (a1Name && sName === a1Name) ||
+                            (a2Rut && sRut === a2Rut) || (a2Name && sName === a2Name);
+
+            if (isMatch) {
+              const existing = attendanceList.find(a => a.staff_id === s.id && a.date && a.date.startsWith(dateStr));
+              if (!existing || (!protectedStatuses.includes(existing.service_type) && existing.service_type !== 'Trabajado')) {
+                if (!recordsToSave.some(r => r.staff_id === s.id && r.date === dateStr)) {
+                  recordsToSave.push({
+                    staff_id: s.id,
+                    date: dateStr,
+                    service_type: 'Trabajado'
+                  });
+                }
+              }
+            }
+          });
+        });
+      }
+
+      if (recordsToSave.length === 0) {
+        toast.info('No se encontraron nuevas asignaciones con ruta pendientes por sincronizar en este mes.');
+      } else {
+        const ok = await saveAttendanceBulk(recordsToSave);
+        if (ok) {
+          toast.success(`¡Se sincronizaron ${recordsToSave.length} registros como "Trabajado" desde Disponibilización!`);
+          loadMatrixData();
+        }
+      }
+    } catch (err) {
+      console.error('Error sincronizando asistencia desde disponibilización:', err);
+      toast.error('Ocurrió un error al sincronizar con Disponibilización');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const handleSaveEditCell = async (e) => {
     e.preventDefault();
@@ -656,6 +761,17 @@ export default function Attendance() {
                 ]}
               />
             </div>
+
+            <Button
+              type="button"
+              onClick={handleSyncFromDisponibilizacion}
+              disabled={isSyncing}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 px-3.5 flex items-center gap-1.5 rounded-xl shadow-xs cursor-pointer ml-auto shrink-0"
+              title="Sincronizar automáticamente conductores y auxiliares con rutas asignadas en Disponibilización como 'Trabajado'"
+            >
+              <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
+              {isSyncing ? 'Sincronizando...' : 'Sincronizar desde Disponibilización'}
+            </Button>
           </div>
 
           <div className="flex-1 overflow-auto border border-slate-200 rounded-xl relative shadow-inner bg-slate-50">

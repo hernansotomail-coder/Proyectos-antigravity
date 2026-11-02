@@ -10,7 +10,7 @@ import * as XLSX from 'xlsx';
 import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { useStaffStore, isStaffExternal } from '../store/staffStore';
-import { findOperationForRoute, getOperacionName, ALL_OPERACIONES } from '../data/operacionesMaster';
+import { findOperationForRoute, getOperacionName, ALL_OPERACIONES, canonicalizeOperation } from '../data/operacionesMaster';
 import { Button } from './ui/Button';
 import { copyBriefingAsImage } from '../lib/matrixImageExporter';
 import PaseIngresoMatrix, { NEWREST_PASE_ROUTES, JUAN_VALDEZ_PASE_ROUTES } from './PaseIngresoMatrix';
@@ -666,12 +666,13 @@ export default function Briefing() {
       setActivePaseClient(prev => prev === 'Newrest' ? null : 'Newrest');
     }
 
+    const canonOp = canonicalizeOperation(op) || op;
     setSelectedOperations(prev => {
-      const exists = prev.some(item => item.toLowerCase() === op.toLowerCase());
+      const exists = prev.some(item => (canonicalizeOperation(item) || item).toLowerCase() === canonOp.toLowerCase());
       if (exists) {
-        return prev.filter(item => item.toLowerCase() !== op.toLowerCase());
+        return prev.filter(item => (canonicalizeOperation(item) || item).toLowerCase() !== canonOp.toLowerCase());
       } else {
-        return [...prev, op];
+        return [...prev, canonOp];
       }
     });
   };
@@ -936,29 +937,40 @@ export default function Briefing() {
   // Mini-etiquetas de todas las operaciones disponibles (Requisito 3)
   // Al comienzo van todas las tarjetas que tienen servicios registrados y al final las que no tienen servicios
   const operationsList = useMemo(() => {
-    const presentOps = new Set(briefingData.rows.map(r => r.operacion));
+    const presentOps = new Set();
+    
+    // 1. Agregar operaciones reales del briefing canónicas
+    briefingData.rows.forEach(r => {
+      const canon = canonicalizeOperation(r.operacion) || r.operacion;
+      if (canon) presentOps.add(canon);
+    });
+
+    // 2. Agregar catálogo maestro de operaciones canonicalizadas
     ALL_OPERACIONES.forEach(op => {
       const clean = cleanBriefingOperationName(op);
-      const lower = clean.toLowerCase();
+      const canon = canonicalizeOperation(clean) || clean;
+      const lower = canon.toLowerCase();
       // Excluir Traspaso a excepción de lo que dice Aramark
       if (lower.includes('traspaso') && !lower.includes('aramark')) {
         return;
       }
-      if (clean) presentOps.add(clean);
+      if (canon) presentOps.add(canon);
     });
 
     const opsArray = Array.from(presentOps);
     const opCountMap = new Map();
     briefingData.rows.forEach(r => {
-      opCountMap.set(r.operacion.toLowerCase(), {
-        count: r.numRutas || 0,
-        hasServices: (r.numRutas > 0 || r.cajas > 0 || r.volumenM3 > 0)
+      const canon = (canonicalizeOperation(r.operacion) || r.operacion).toLowerCase();
+      const existing = opCountMap.get(canon) || { count: 0, hasServices: false };
+      opCountMap.set(canon, {
+        count: existing.count + (r.numRutas || 0),
+        hasServices: existing.hasServices || (r.numRutas > 0 || r.cajas > 0 || r.volumenM3 > 0)
       });
     });
 
     return opsArray.sort((a, b) => {
-      const infoA = opCountMap.get(a.toLowerCase()) || { count: 0, hasServices: false };
-      const infoB = opCountMap.get(b.toLowerCase()) || { count: 0, hasServices: false };
+      const infoA = opCountMap.get((canonicalizeOperation(a) || a).toLowerCase()) || { count: 0, hasServices: false };
+      const infoB = opCountMap.get((canonicalizeOperation(b) || b).toLowerCase()) || { count: 0, hasServices: false };
 
       const hasServicesA = infoA.hasServices ? 1 : 0;
       const hasServicesB = infoB.hasServices ? 1 : 0;
@@ -980,12 +992,18 @@ export default function Briefing() {
   const displayedRows = useMemo(() => {
     let list = briefingData.rows;
     if (selectedOperations.length > 0) {
-      const lowerSelected = new Set(selectedOperations.map(o => o.toLowerCase()));
-      list = list.filter(r => lowerSelected.has(r.operacion.toLowerCase()));
+      const lowerSelected = new Set(selectedOperations.map(o => (canonicalizeOperation(o) || o).toLowerCase()));
+      list = list.filter(r => {
+        const rowOp = (canonicalizeOperation(r.operacion) || r.operacion).toLowerCase();
+        return lowerSelected.has(rowOp) || lowerSelected.has(r.operacion.toLowerCase());
+      });
     }
     if (searchTerm.trim()) {
       const lower = searchTerm.toLowerCase();
-      list = list.filter(r => r.operacion.toLowerCase().includes(lower));
+      list = list.filter(r => {
+        const rowOp = (canonicalizeOperation(r.operacion) || r.operacion).toLowerCase();
+        return rowOp.includes(lower) || r.operacion.toLowerCase().includes(lower);
+      });
     }
     return list;
   }, [briefingData.rows, selectedOperations, searchTerm]);
@@ -1299,8 +1317,9 @@ export default function Briefing() {
           </button>
 
           {operationsList.map(op => {
-            const isSelected = selectedOperations.some(item => item.toLowerCase() === op.toLowerCase());
-            const rowData = briefingData.rows.find(r => r.operacion.toLowerCase() === op.toLowerCase());
+            const canonOp = canonicalizeOperation(op) || op;
+            const isSelected = selectedOperations.some(item => (canonicalizeOperation(item) || item).toLowerCase() === canonOp.toLowerCase());
+            const rowData = briefingData.rows.find(r => (canonicalizeOperation(r.operacion) || r.operacion).toLowerCase() === canonOp.toLowerCase());
             const countInDay = rowData?.numRutas || 0;
             const hasServices = !!(rowData && (rowData.numRutas > 0 || rowData.cajas > 0 || rowData.volumenM3 > 0));
 

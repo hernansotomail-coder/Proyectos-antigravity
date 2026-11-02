@@ -8318,7 +8318,6 @@ export const ALL_OPERACIONES = [
   "Panstars",
   "PETROLERAS",
   "Petrolera - Oxxo - Carls",
-  "Petroleras",
   "SODEXO",
   "SPID",
   "Sea Garden",

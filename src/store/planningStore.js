@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
 import { findOperationForRoute, getOperacionName } from '../data/operacionesMaster';
+import { useStaffStore } from './staffStore';
 
 // Cache invalidation version for cross-computer synchronization
 const CURRENT_STORAGE_VERSION = 'v2026_10_29_prod_sync_v10';
@@ -382,6 +383,97 @@ export const persistChangeHistoryToDb = async (changeList) => {
   } catch (e) {
     console.warn('[Supabase] Excepción guardando change history:', e);
     return false;
+  }
+};
+
+// Sincronizar automáticamente la disponibilización con el módulo de Asistencia
+// Requisito 1: Si un Conductor o Auxiliar tiene Ruta en esa fecha, asignar como "Trabajado"
+export const syncDisponibilizacionToAttendance = async (fecha, assignments) => {
+  try {
+    if (!fecha || !assignments || assignments.length === 0) return;
+
+    // Normalizar fecha DD-MM-YYYY a YYYY-MM-DD para tabla attendance
+    let yyyyMmDd = '';
+    const norm = normalizeDate(fecha);
+    const parts = norm.split('-');
+    if (parts.length === 3) {
+      yyyyMmDd = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    } else {
+      return;
+    }
+
+    // Obtener lista de personal
+    let staffList = useStaffStore.getState().staffList || [];
+    if (staffList.length === 0) {
+      staffList = await useStaffStore.getState().fetchStaff();
+    }
+    if (!staffList || staffList.length === 0) return;
+
+    const cleanRut = (r) => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
+    const cleanName = (n) => String(n || '').trim().toUpperCase();
+
+    // Identificar conductores y auxiliares que tienen una ruta asignada
+    const workedStaffIds = new Set();
+
+    assignments.forEach(r => {
+      // Solo si tiene ruta válida
+      if (!r.ruta) return;
+
+      const condRut = cleanRut(r.conductor_rut);
+      const condName = cleanName(r.conductor_name);
+      const aux1Rut = cleanRut(r.aux1_rut);
+      const aux1Name = cleanName(r.aux1_name);
+      const aux2Rut = cleanRut(r.aux2_rut);
+      const aux2Name = cleanName(r.aux2_name);
+
+      staffList.forEach(s => {
+        const sRut = cleanRut(s.rut);
+        const sName = cleanName(s.name);
+
+        if ((condRut && sRut === condRut) || (condName && sName === condName)) {
+          workedStaffIds.add(s.id);
+        }
+        if ((aux1Rut && sRut === aux1Rut) || (aux1Name && sName === aux1Name)) {
+          workedStaffIds.add(s.id);
+        }
+        if ((aux2Rut && sRut === aux2Rut) || (aux2Name && sName === aux2Name)) {
+          workedStaffIds.add(s.id);
+        }
+      });
+    });
+
+    if (workedStaffIds.size === 0) return;
+
+    // Obtener registros existentes para no sobrescribir estados protegidos (Licencias, Vacaciones)
+    const { data: existingRecords } = await supabase
+      .from('attendance')
+      .select('staff_id, service_type')
+      .eq('date', yyyyMmDd);
+
+    const protectedStatuses = ['Vacaciones', 'Licencia', 'Ausente', 'Permiso con goce', 'Permiso sin goce', 'Baja'];
+    const recordsToUpsert = [];
+
+    workedStaffIds.forEach(staffId => {
+      const existing = (existingRecords || []).find(e => e.staff_id === staffId);
+      if (existing && protectedStatuses.includes(existing.service_type)) {
+        // Respetar estado protegido existente
+        return;
+      }
+      recordsToUpsert.push({
+        staff_id: staffId,
+        date: yyyyMmDd,
+        service_type: 'Trabajado'
+      });
+    });
+
+    if (recordsToUpsert.length > 0) {
+      await supabase
+        .from('attendance')
+        .upsert(recordsToUpsert, { onConflict: 'staff_id,date' });
+      console.log(`[AsistenciaSync] Sincronizados ${recordsToUpsert.length} registros como "Trabajado" para el ${fecha}`);
+    }
+  } catch (err) {
+    console.warn('[AsistenciaSync] Error sincronizando asistencia:', err);
   }
 };
 
@@ -1944,6 +2036,8 @@ export const usePlanningStore = create((set, get) => ({
     if (synced?.savedHistoryList) {
       persistHistoryToDb(synced.savedHistoryList);
     }
+    // Sincronizar automáticamente con Asistencia (Requisito 1: Marcar Trabajado si tiene Ruta asignada)
+    syncDisponibilizacionToAttendance(fecha, enrichedRows);
 
     set({
       transmittedAssignments: updatedAssignments,
