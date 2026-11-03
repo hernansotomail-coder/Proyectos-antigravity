@@ -15,7 +15,7 @@ import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
-import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute, canonicalizeOperation, isOperationMatching } from '../data/operacionesMaster';
+import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute, canonicalizeOperation, isOperationMatching, splitOperationNames } from '../data/operacionesMaster';
 import { getBriefingOperation } from './Briefing';
 
 // ==========================================
@@ -1071,7 +1071,7 @@ export default function RuteoView() {
       }
     });
 
-    return Array.from(tripMap.values()).map(trip => {
+    const trips = Array.from(tripMap.values()).map(trip => {
       const rutasStr = trip.rutas.map(r => r.ruta).join('+');
       
       // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación y combinaciones de viajes)
