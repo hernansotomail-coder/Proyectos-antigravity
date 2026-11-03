@@ -68,13 +68,37 @@ const persistStaffPhones = (map) => {
   }
 };
 
+// Persistencia local para el listado completo de dotación (Fallback offline y carga instantánea)
+const loadPersistedStaffList = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_staff_cache_v1');
+    if (!saved) return [];
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+const persistStaffList = (list) => {
+  try {
+    if (Array.isArray(list) && list.length > 0) {
+      localStorage.setItem('keylogistics_staff_cache_v1', JSON.stringify(list));
+    }
+  } catch (e) {
+    console.error('Error persisting staff cache:', e);
+  }
+};
+
 export const useStaffStore = create((set, get) => ({
-  staffList: [],
+  staffList: loadPersistedStaffList(),
   isLoading: false,
   error: null,
 
-  fetchStaff: async () => {
-    set({ isLoading: true });
+  fetchStaff: async (retryCount = 0) => {
+    if (get().staffList.length === 0) {
+      set({ isLoading: true });
+    }
     try {
       const { data, error } = await supabase
         .from('staff')
@@ -82,6 +106,9 @@ export const useStaffStore = create((set, get) => ({
         .order('name', { ascending: true });
 
       if (error) throw error;
+      if (!data || data.length === 0) {
+        if (get().staffList.length > 0) return get().staffList;
+      }
       
       const tipoMap = loadPersistedTipoDotacion();
       const phoneMap = loadPersistedStaffPhones();
@@ -136,11 +163,20 @@ export const useStaffStore = create((set, get) => ({
         }, 1200);
       }
 
-      set({ staffList: enriched, error: null });
+      persistStaffList(enriched);
+      set({ staffList: enriched, error: null, isLoading: false });
+      return enriched;
     } catch (err) {
-      console.error(err);
-      set({ error: err.message });
-      toast.error('Error al cargar la dotación');
+      console.warn(`[StaffStore] Error al cargar dotación de Supabase (intento ${retryCount + 1}):`, err);
+      if (retryCount < 3) {
+        const delay = (retryCount + 1) * 1500;
+        setTimeout(() => {
+          get().fetchStaff(retryCount + 1);
+        }, delay);
+      } else if (get().staffList.length === 0) {
+        set({ error: err.message });
+        toast.error('Error al conectar con la base de datos de dotación. Reintentando en segundo plano...');
+      }
     } finally {
       set({ isLoading: false });
     }

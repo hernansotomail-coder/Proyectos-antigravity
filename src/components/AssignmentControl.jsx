@@ -759,7 +759,7 @@ export default function AssignmentControl() {
 
         // Requisito 3: Para los camiones disponibles y métricas, solo considerar Región 'RM' en Gestión Flota
         const rReg = String(t.region || '').trim().toUpperCase();
-        const isRM = rReg === 'RM' || rReg.includes('METROPOLITAN');
+        const isRM = !rReg || rReg === 'RM' || rReg.includes('METROPOLITAN');
         if (!isRM) return false;
 
         // Filtro por tipo de flota (Propia / Externa / Todos)

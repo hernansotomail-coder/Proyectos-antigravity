@@ -12,6 +12,28 @@ export const isValidVehicleKey = (k) => {
   return true;
 };
 
+// Persistencia local para el listado completo de flota (Fallback offline y carga instantánea)
+const loadPersistedFleetList = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_fleet_cache_v1');
+    if (!saved) return [];
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+};
+
+const persistFleetList = (list) => {
+  try {
+    if (Array.isArray(list) && list.length > 0) {
+      localStorage.setItem('keylogistics_fleet_cache_v1', JSON.stringify(list));
+    }
+  } catch (e) {
+    console.error('Error persisting fleet cache:', e);
+  }
+};
+
 // Persistencia local para Lavados y Certificaciones de Flota
 const loadPersistedFleetWashes = () => {
   try {
@@ -175,11 +197,14 @@ export const isVehicleExternal = (f) => {
 };
 
 export const useFleetStore = create((set, get) => ({
-  fleetList: [],
+  fleetList: loadPersistedFleetList(),
   isLoading: false,
 
-  fetchFleet: async () => {
-    set({ isLoading: true });
+  fetchFleet: async (retryCount = 0) => {
+    // Si no hay datos previos, marcar carga inicial
+    if (get().fleetList.length === 0) {
+      set({ isLoading: true });
+    }
     try {
       const { data, error } = await supabase
         .from('fleet')
@@ -187,6 +212,9 @@ export const useFleetStore = create((set, get) => ({
         .order('plate');
       
       if (error) throw error;
+      if (!data || data.length === 0) {
+        if (get().fleetList.length > 0) return get().fleetList;
+      }
 
       const washesMap = loadPersistedFleetWashes();
       const overridesMap = loadPersistedFleetOverrides();
@@ -298,10 +326,20 @@ export const useFleetStore = create((set, get) => ({
         }, 1000);
       }
 
-      set({ fleetList: enriched });
+      // Persistir cache para acceso instantáneo
+      persistFleetList(enriched);
+      set({ fleetList: enriched, isLoading: false });
+      return enriched;
     } catch (err) {
-      console.error(err);
-      toast.error('Error al cargar la flota');
+      console.warn(`[FleetStore] Error al cargar flota de Supabase (intento ${retryCount + 1}):`, err);
+      if (retryCount < 3) {
+        const delay = (retryCount + 1) * 1500;
+        setTimeout(() => {
+          get().fetchFleet(retryCount + 1);
+        }, delay);
+      } else if (get().fleetList.length === 0) {
+        toast.error('Error al conectar con la base de datos de flota. Reintentando en segundo plano...');
+      }
     } finally {
       set({ isLoading: false });
     }

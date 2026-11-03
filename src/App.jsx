@@ -23,18 +23,31 @@ import ChangeHistory from './components/ChangeHistory';
 import ManualDeUso from './components/ManualDeUso';
 import PagoDotacion from './components/PagoDotacion';
 import { usePlanningStore } from './store/planningStore';
+import { useFleetStore } from './store/fleetStore';
+import { useStaffStore } from './store/staffStore';
 import { supabase } from './lib/supabase';
 
 function App() {
   const { initPlanningFromDb } = usePlanningStore();
 
   useEffect(() => {
+    // 1. Carga inicial garantizada de datos desde Supabase
     initPlanningFromDb?.();
+    useFleetStore.getState().fetchFleet?.();
+    useStaffStore.getState().fetchStaff?.();
 
-    // Suscripción Realtime a Supabase: sincroniza automáticamente entre notebooks cuando cualquiera guarde o transmita
+    // 2. Intervalo periódico en segundo plano para refrescar flota y dotación si la conexión falló
+    const refreshInterval = setInterval(() => {
+      useFleetStore.getState().fetchFleet?.();
+      useStaffStore.getState().fetchStaff?.();
+    }, 180000); // Cada 3 minutos
+
+    // 3. Suscripciones Realtime a Supabase: sincroniza automáticamente entre notebooks
     let debounceTimer = null;
+    let fleetTimer = null;
+    let staffTimer = null;
     try {
-      const channel = supabase
+      const channelPlanning = supabase
         .channel('realtime:planning_assignments')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'planning_assignments' }, (payload) => {
           console.log('[Realtime] Notificación de actualización en planning_assignments:', payload?.new?.fecha || payload);
@@ -45,14 +58,40 @@ function App() {
         })
         .subscribe();
 
+      const channelFleet = supabase
+        .channel('realtime:fleet')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'fleet' }, () => {
+          if (fleetTimer) clearTimeout(fleetTimer);
+          fleetTimer = setTimeout(() => {
+            useFleetStore.getState().fetchFleet?.();
+          }, 600);
+        })
+        .subscribe();
+
+      const channelStaff = supabase
+        .channel('realtime:staff')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'staff' }, () => {
+          if (staffTimer) clearTimeout(staffTimer);
+          staffTimer = setTimeout(() => {
+            useStaffStore.getState().fetchStaff?.();
+          }, 600);
+        })
+        .subscribe();
+
       return () => {
+        clearInterval(refreshInterval);
         if (debounceTimer) clearTimeout(debounceTimer);
+        if (fleetTimer) clearTimeout(fleetTimer);
+        if (staffTimer) clearTimeout(staffTimer);
         try {
-          supabase.removeChannel(channel);
+          supabase.removeChannel(channelPlanning);
+          supabase.removeChannel(channelFleet);
+          supabase.removeChannel(channelStaff);
         } catch (e) {}
       };
     } catch (err) {
       console.warn('[Realtime] Error iniciando suscripción:', err);
+      return () => clearInterval(refreshInterval);
     }
   }, [initPlanningFromDb]);
 
