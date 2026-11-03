@@ -655,17 +655,6 @@ export default function PagoDotacion() {
   });
   const [assignStaffInputValue, setAssignStaffInputValue] = useState('');
 
-  // Sincronizar campo de asignación si cambia el colaborador seleccionado arriba
-  useEffect(() => {
-    if (excelSelectedStaffRut) {
-      const staffObj = transmittedStaffList.find(s => s.rut === excelSelectedStaffRut) || staffMapByRut.get(excelSelectedStaffRut);
-      if (staffObj) {
-        setAssignStaffInputValue(`${staffObj.name} (${staffObj.role}) - ${staffObj.rut}`);
-        setNewTripForm(prev => ({ ...prev, staffRut: excelSelectedStaffRut }));
-      }
-    }
-  }, [excelSelectedStaffRut, transmittedStaffList, staffMapByRut]);
-
   // Lista de personal con viajes transmitidos
   const transmittedStaffList = useMemo(() => {
     const map = new Map();
@@ -688,6 +677,17 @@ export default function PagoDotacion() {
 
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [transmittedTripsList, staffList]);
+
+  // Sincronizar campo de asignación si cambia el colaborador seleccionado arriba
+  useEffect(() => {
+    if (excelSelectedStaffRut) {
+      const staffObj = transmittedStaffList.find(s => s.rut === excelSelectedStaffRut) || staffMapByRut.get(excelSelectedStaffRut);
+      if (staffObj) {
+        setAssignStaffInputValue(`${staffObj.name} (${staffObj.role}) - ${staffObj.rut}`);
+        setNewTripForm(prev => ({ ...prev, staffRut: excelSelectedStaffRut }));
+      }
+    }
+  }, [excelSelectedStaffRut, transmittedStaffList, staffMapByRut]);
 
   // Lista ordenada de viajes transmitidos según filtros
   // Los viajes se ordenan por fecha cronológicamente
