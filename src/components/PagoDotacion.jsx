@@ -34,6 +34,7 @@ export const OFFICIAL_PAYMENT_COLUMNS = [
 
 export const SERVICE_TYPE_OPTIONS = [
   'Ruta',
+  'Eventualidad_Key',
   'Retiro camión',
   'Servicio de taller',
   'Servicio de vulcanización',
@@ -46,6 +47,9 @@ export const SERVICE_TYPE_OPTIONS = [
 // Formato de moneda chilena ($ X.XXX.XXX)
 const formatCLP = (amount) => {
   const num = Number(amount) || 0;
+  if (num < 0) {
+    return '-$' + Math.abs(Math.round(num)).toLocaleString('es-CL');
+  }
   return '$' + Math.round(num).toLocaleString('es-CL');
 };
 
@@ -78,6 +82,7 @@ export default function PagoDotacion() {
   const { 
     paymentsList, 
     transmittedTripsList,
+    contractUploadDates,
     fetchPayments, 
     addBatchPayments, 
     addManualPayment, 
@@ -219,18 +224,26 @@ export default function PagoDotacion() {
         return false;
       }
 
-      if (filterConductor) {
+      if (filterConductor.trim()) {
         const itemRut = cleanRut(item.rutCond1 || item.rut);
-        const itemNom = cleanStr(item.nomCond1 || item.nombre);
-        if (itemRut !== filterConductor && itemNom !== filterConductor) {
+        const itemNom = cleanStr(item.nomCond1 || item.nombre).toLowerCase();
+        const search = filterConductor.toLowerCase().trim();
+        const searchRut = cleanRut(search);
+        const matchRut = searchRut && itemRut.includes(searchRut);
+        const matchNom = search && itemNom.includes(search);
+        if (!matchRut && !matchNom) {
           return false;
         }
       }
 
-      if (filterAuxiliar) {
+      if (filterAuxiliar.trim()) {
         const itemRut = cleanRut(item.rutCond1 || item.rut);
-        const itemNom = cleanStr(item.nomCond1 || item.nombre);
-        if (itemRut !== filterAuxiliar && itemNom !== filterAuxiliar) {
+        const itemNom = cleanStr(item.nomCond1 || item.nombre).toLowerCase();
+        const search = filterAuxiliar.toLowerCase().trim();
+        const searchRut = cleanRut(search);
+        const matchRut = searchRut && itemRut.includes(searchRut);
+        const matchNom = search && itemNom.includes(search);
+        if (!matchRut && !matchNom) {
           return false;
         }
       }
@@ -628,6 +641,8 @@ export default function PagoDotacion() {
   // Búsqueda por Conductor/Auxiliar, asignación de nuevos viajes y resaltado amarillo pastel
   // =========================================================================
   const [excelSelectedStaffRut, setExcelSelectedStaffRut] = useState('');
+  const [excelStaffInput, setExcelStaffInput] = useState('');
+  const [excelServiceTypeInput, setExcelServiceTypeInput] = useState('');
   const [excelSearchText, setExcelSearchText] = useState('');
 
   // Formulario para Asignar Nuevo Viaje Manual en la Vista Excel
@@ -638,6 +653,18 @@ export default function PagoDotacion() {
     tipoServicio: 'Ruta',
     monto: ''
   });
+  const [assignStaffInputValue, setAssignStaffInputValue] = useState('');
+
+  // Sincronizar campo de asignación si cambia el colaborador seleccionado arriba
+  useEffect(() => {
+    if (excelSelectedStaffRut) {
+      const staffObj = transmittedStaffList.find(s => s.rut === excelSelectedStaffRut) || staffMapByRut.get(excelSelectedStaffRut);
+      if (staffObj) {
+        setAssignStaffInputValue(`${staffObj.name} (${staffObj.role}) - ${staffObj.rut}`);
+        setNewTripForm(prev => ({ ...prev, staffRut: excelSelectedStaffRut }));
+      }
+    }
+  }, [excelSelectedStaffRut, transmittedStaffList, staffMapByRut]);
 
   // Lista de personal con viajes transmitidos
   const transmittedStaffList = useMemo(() => {
@@ -667,14 +694,33 @@ export default function PagoDotacion() {
   const displayedTransmittedTrips = useMemo(() => {
     let list = [...transmittedTripsList];
 
+    // Filtro por Conductor o Auxiliar (por RUT o texto escrito)
     if (excelSelectedStaffRut) {
       list = list.filter(t => cleanRut(t.rutCond1) === excelSelectedStaffRut);
+    } else if (excelStaffInput.trim()) {
+      const term = excelStaffInput.toLowerCase().trim();
+      const termRut = cleanRut(term);
+      list = list.filter(t => {
+        const cRut = cleanRut(t.rutCond1);
+        const cNom = cleanStr(t.nomCond1).toLowerCase();
+        return (termRut && cRut.includes(termRut)) || cNom.includes(term);
+      });
     }
 
+    // Filtro por Tipo de Servicio con escritura
+    if (excelServiceTypeInput.trim()) {
+      const term = excelServiceTypeInput.toLowerCase().trim();
+      list = list.filter(t => {
+        const sType = cleanStr(t.tipoServicio || t.tipoPunto || '').toLowerCase();
+        return sType.includes(term);
+      });
+    }
+
+    // Búsqueda general por ruta, contrato, glosa, etc.
     if (excelSearchText.trim()) {
       const term = excelSearchText.toLowerCase();
       list = list.filter(t => {
-        const full = [t.fechaDespacho, t.rutCond1, t.nomCond1, t.rutas, t.tipoServicio, t.contratoOrigen]
+        const full = [t.fechaDespacho, t.rutCond1, t.nomCond1, t.rutas, t.tipoServicio, t.tipoPunto, t.contratoOrigen, t.glosa]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -688,7 +734,7 @@ export default function PagoDotacion() {
       const timeB = parseDateStrToTimestamp(b.fechaDespacho);
       return timeA - timeB;
     });
-  }, [transmittedTripsList, excelSelectedStaffRut, excelSearchText]);
+  }, [transmittedTripsList, excelSelectedStaffRut, excelStaffInput, excelServiceTypeInput, excelSearchText]);
 
   // Manejador para Asignar Nuevo Viaje Manual en la Vista Excel
   const handleAddNewTransmittedTrip = async (e) => {
@@ -698,7 +744,7 @@ export default function PagoDotacion() {
       toast.warning('Selecciona o busca el Conductor o Auxiliar al que deseas asignar el viaje.');
       return;
     }
-    if (!newTripForm.ruta.trim() || !newTripForm.monto) {
+    if (!newTripForm.ruta.trim() || newTripForm.monto === '' || newTripForm.monto === undefined) {
       toast.warning('Por favor completa la Ruta y el Monto del viaje.');
       return;
     }
@@ -712,19 +758,47 @@ export default function PagoDotacion() {
       id: `manual-trans-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       fechaDespacho: normFecha,
       periodo: periodInfo.key,
+      periodoLabel: periodInfo.label,
       rutCond1: targetRut,
       nomCond1: staffObj?.name || 'Personal Asignado',
       tipoCond1: staffObj?.role || 'Conductor',
       rutas: newTripForm.ruta.trim(),
-      tipoServicio: newTripForm.tipoServicio,
+      tipoServicio: newTripForm.tipoServicio || 'Ruta',
       total: montoNum,
       pagoCond1: montoNum,
-      contratoOrigen: 'Asignación Manual',
+      contratoOrigen: 'Eventualidad_Key',
+      glosa: 'Eventualidad_Key',
       origen: 'Manual',
       isManuallyAssigned: true // Activa el resaltado amarillo pastel
     };
 
     await addTransmittedTrip(newTrip);
+
+    // Sincronizar en tiempo real con Disponibilización ("la plataforma")
+    try {
+      const isConductor = (staffObj?.role || '').toLowerCase().includes('cond') || (staffObj?.role || '').toLowerCase() !== 'auxiliar';
+      await usePlanningStore.getState().addExtraServices([{
+        fecha: normFecha,
+        conductor_name: isConductor ? (staffObj?.name || 'Conductor') : '',
+        conductor_rut: isConductor ? targetRut : '',
+        aux1_name: !isConductor ? (staffObj?.name || 'Auxiliar') : '',
+        aux1_rut: !isConductor ? targetRut : '',
+        camion: '',
+        ruta: newTripForm.ruta.trim(),
+        servicio: newTripForm.tipoServicio || 'Ruta',
+        operacion: 'Eventualidad_Key',
+        cliente: 'Eventualidad_Key',
+        nota: 'Asignación Pago Dotación - Eventualidad_Key'
+      }]);
+    } catch (err) {
+      console.warn('Error sincronizando con planningStore:', err);
+    }
+
+    // Enfocar automáticamente al colaborador en la planilla
+    setExcelSelectedStaffRut(targetRut);
+    setExcelStaffInput(staffObj?.name ? `${staffObj.name} (${targetRut})` : targetRut);
+    setExcelSearchText('');
+    setExcelServiceTypeInput('');
 
     // Limpiar campos de ruta y monto
     setNewTripForm(prev => ({
@@ -732,6 +806,8 @@ export default function PagoDotacion() {
       ruta: '',
       monto: ''
     }));
+
+    toast.success(`Viaje '${newTrip.rutas}' asignado a ${staffObj?.name || targetRut} (Eventualidad_Key) y reflejado en la plataforma`);
   };
 
   // Catálogo de rutas de briefing para autocompletar
@@ -848,36 +924,42 @@ export default function PagoDotacion() {
                 </select>
               </div>
 
-              {/* Filtro por Conductor */}
-              <div className="w-44">
-                <select
+              {/* Filtro por Conductor (con escritura) */}
+              <div className="w-48 relative">
+                <input
+                  type="text"
+                  list="conductores-dashboard-list"
+                  placeholder="Escribir o elegir Conductor..."
                   value={filterConductor}
                   onChange={(e) => setFilterConductor(e.target.value)}
                   className="w-full py-1.5 px-2.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                >
-                  <option value="">Todos los Conductores</option>
+                />
+                <datalist id="conductores-dashboard-list">
                   {allConductores.map(c => (
-                    <option key={c.rut || c.name} value={c.rut || c.name}>
-                      {c.name} {c.rut ? `(${c.rut})` : ''}
+                    <option key={c.rut || c.name} value={c.name}>
+                      {c.rut ? `${c.name} (${c.rut})` : c.name}
                     </option>
                   ))}
-                </select>
+                </datalist>
               </div>
 
-              {/* Filtro por Auxiliar */}
-              <div className="w-44">
-                <select
+              {/* Filtro por Auxiliar (con escritura) */}
+              <div className="w-48 relative">
+                <input
+                  type="text"
+                  list="auxiliares-dashboard-list"
+                  placeholder="Escribir o elegir Auxiliar..."
                   value={filterAuxiliar}
                   onChange={(e) => setFilterAuxiliar(e.target.value)}
                   className="w-full py-1.5 px-2.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                >
-                  <option value="">Todos los Auxiliares</option>
+                />
+                <datalist id="auxiliares-dashboard-list">
                   {allAuxiliares.map(a => (
-                    <option key={a.rut || a.name} value={a.rut || a.name}>
-                      {a.name} {a.rut ? `(${a.rut})` : ''}
+                    <option key={a.rut || a.name} value={a.name}>
+                      {a.rut ? `${a.name} (${a.rut})` : a.name}
                     </option>
                   ))}
-                </select>
+                </datalist>
               </div>
 
               {(filterSearch || filterPeriodo || filterConductor || filterAuxiliar) && (
@@ -1281,7 +1363,7 @@ export default function PagoDotacion() {
                             {row.tipoCond1 || 'Conductor'}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-right font-black text-emerald-700">
+                        <td className={`px-3 py-2 text-right font-black ${(parseFloat(row.total) || 0) < 0 ? "text-red-600 bg-red-50/60" : "text-emerald-700"}`}>
                           {formatCLP(row.total)}
                         </td>
                         <td className="px-3 py-2 text-center">
@@ -1539,7 +1621,7 @@ export default function PagoDotacion() {
                           </span>
                         </td>
                         <td className="px-3 py-2 font-bold text-slate-700">{row.rutas}</td>
-                        <td className="px-3 py-2 text-right font-black text-emerald-700">{formatCLP(row.total)}</td>
+                        <td className={`px-3 py-2 text-right font-black ${(parseFloat(row.total) || 0) < 0 ? "text-red-600 bg-red-50/60" : "text-emerald-700"}`}>{formatCLP(row.total)}</td>
                         <td className="px-3 py-2 text-center">
                           {row.matchedStaffInAttendance ? (
                             <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 font-bold text-[10px] rounded-full border border-emerald-200">
@@ -1567,36 +1649,195 @@ export default function PagoDotacion() {
       {activeTab === 'excel' && (
         <div className="space-y-6">
 
-          {/* Barra Superior: Selector de Personal y Búsqueda */}
+          {/* Banner de Última Fecha de Carga por Contrato (Requisito 1) */}
+          <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="text-[11px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <Calendar size={14} className="text-blue-600" />
+                Última Fecha de Carga por Contrato
+              </span>
+              <span className="text-[10px] text-slate-400">
+                Cada contrato nuevo subido pisa al anterior del mismo tipo. Los registros "Eventualidad_Key" se mantienen siempre.
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              {/* Colectivo */}
+              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                    Colectivo
+                  </span>
+                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.colectivo ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                </div>
+                <p className="text-xs font-black text-slate-800">
+                  {contractUploadDates?.colectivo || 'Sin cargas'}
+                </p>
+              </div>
+
+              {/* Contrato 8 */}
+              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                    Contrato 8
+                  </span>
+                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato8 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                </div>
+                <p className="text-xs font-black text-slate-800">
+                  {contractUploadDates?.contrato8 || 'Sin cargas'}
+                </p>
+              </div>
+
+              {/* Contrato 9 */}
+              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                    Contrato 9
+                  </span>
+                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato9 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                </div>
+                <p className="text-xs font-black text-slate-800">
+                  {contractUploadDates?.contrato9 || 'Sin cargas'}
+                </p>
+              </div>
+
+              {/* Contrato 13 */}
+              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-black text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                    Contrato 13
+                  </span>
+                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato13 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                </div>
+                <p className="text-xs font-black text-slate-800">
+                  {contractUploadDates?.contrato13 || 'Sin cargas'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Barra Superior: Filtros con Escritura para Personal, Tipo Servicio y Búsqueda */}
           <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
                   <FileSpreadsheet size={18} className="text-blue-600" />
-                  Planilla Operacional de Viajes Transmitidos
+                  Planilla Operacional de Viajes Transmitidos ({displayedTransmittedTrips.length})
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Filtra por Conductor o Auxiliar para revisar sus viajes y asignar nuevos recorridos
+                  Filtra escribiendo el nombre o RUT del colaborador, tipo de servicio o asigna nuevos viajes con glosa Eventualidad_Key
                 </p>
               </div>
 
-              {/* Selector de Conductor o Auxiliar */}
-              <div className="w-72">
-                <select
-                  value={excelSelectedStaffRut}
-                  onChange={(e) => {
-                    setExcelSelectedStaffRut(e.target.value);
-                    setNewTripForm(prev => ({ ...prev, staffRut: e.target.value }));
-                  }}
-                  className="w-full py-1.5 px-3 text-xs bg-white border border-blue-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-800"
-                >
-                  <option value="">-- Ver todos los viajes ({transmittedTripsList.length}) --</option>
-                  {transmittedStaffList.map(s => (
-                    <option key={s.rut} value={s.rut}>
-                      {s.name} ({s.role}) - {s.rut}
-                    </option>
-                  ))}
-                </select>
+              {/* Filtros con Escritura */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                {/* 1. Selector/Buscador de Conductor o Auxiliar con escritura */}
+                <div className="w-64 relative">
+                  <input
+                    type="text"
+                    list="excel-staff-datalist"
+                    placeholder="Escribir o buscar Personal..."
+                    value={excelStaffInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setExcelStaffInput(val);
+                      const matched = transmittedStaffList.find(s => 
+                        cleanRut(s.rut) === cleanRut(val) || 
+                        `${s.name} (${s.role}) - ${s.rut}` === val ||
+                        s.name.toLowerCase() === val.toLowerCase()
+                      );
+                      if (matched) {
+                        setExcelSelectedStaffRut(matched.rut);
+                        setNewTripForm(prev => ({ ...prev, staffRut: matched.rut }));
+                        setAssignStaffInputValue(`${matched.name} (${matched.role}) - ${matched.rut}`);
+                      } else if (!val.trim()) {
+                        setExcelSelectedStaffRut('');
+                      }
+                    }}
+                    className="w-full py-1.5 pl-3 pr-7 text-xs bg-white border border-blue-400 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-800"
+                  />
+                  {excelStaffInput && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExcelStaffInput('');
+                        setExcelSelectedStaffRut('');
+                      }}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                  <datalist id="excel-staff-datalist">
+                    {transmittedStaffList.map(s => (
+                      <option key={s.rut} value={`${s.name} (${s.role}) - ${s.rut}`}>
+                        RUT: {s.rut}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+
+                {/* 2. Filtro Tipo de Servicio con escritura */}
+                <div className="w-48 relative">
+                  <input
+                    type="text"
+                    list="excel-service-datalist"
+                    placeholder="Filtrar Tipo Servicio..."
+                    value={excelServiceTypeInput}
+                    onChange={(e) => setExcelServiceTypeInput(e.target.value)}
+                    className="w-full py-1.5 pl-3 pr-7 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium text-slate-800"
+                  />
+                  {excelServiceTypeInput && (
+                    <button
+                      type="button"
+                      onClick={() => setExcelServiceTypeInput('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                  <datalist id="excel-service-datalist">
+                    {SERVICE_TYPE_OPTIONS.map(opt => (
+                      <option key={opt} value={opt} />
+                    ))}
+                  </datalist>
+                </div>
+
+                {/* 3. Búsqueda libre */}
+                <div className="w-44 relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+                  <input
+                    type="text"
+                    placeholder="Buscar ruta, glosa..."
+                    value={excelSearchText}
+                    onChange={(e) => setExcelSearchText(e.target.value)}
+                    className="w-full py-1.5 pl-7 pr-6 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {excelSearchText && (
+                    <button
+                      type="button"
+                      onClick={() => setExcelSearchText('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Limpiar filtros */}
+                {(excelStaffInput || excelSelectedStaffRut || excelServiceTypeInput || excelSearchText) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExcelStaffInput('');
+                      setExcelSelectedStaffRut('');
+                      setExcelServiceTypeInput('');
+                      setExcelSearchText('');
+                    }}
+                    className="text-xs text-blue-600 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <X size={12} /> Limpiar
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1626,7 +1867,9 @@ export default function PagoDotacion() {
                   </div>
                   <div className="border-l border-slate-200 pl-4">
                     <span className="text-[10px] text-slate-400 font-bold uppercase block">Monto Acumulado</span>
-                    <span className="text-sm font-black text-emerald-700">
+                    <span className={`text-sm font-black ${
+                      displayedTransmittedTrips.reduce((acc, t) => acc + (parseFloat(t.total) || 0), 0) < 0 ? 'text-red-600' : 'text-emerald-700'
+                    }`}>
                       {formatCLP(displayedTransmittedTrips.reduce((acc, t) => acc + (parseFloat(t.total) || 0), 0))}
                     </span>
                   </div>
@@ -1636,12 +1879,17 @@ export default function PagoDotacion() {
 
             {/* Formulario para Asignar Nuevos Viajes Directamente (3.7) */}
             <form onSubmit={handleAddNewTransmittedTrip} className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="p-1 bg-amber-100 text-amber-800 rounded-md">
-                  <Plus size={14} />
-                </span>
-                <span className="text-xs font-black text-slate-800">
-                  Asignar Nuevo Viaje (Se ordenará por fecha y se destacará en amarillo pastel)
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="p-1 bg-amber-100 text-amber-800 rounded-md">
+                    <Plus size={14} />
+                  </span>
+                  <span className="text-xs font-black text-slate-800">
+                    Asignar Nuevo Viaje (Glosa "Eventualidad_Key", se destaca en amarillo pastel y se refleja en la plataforma)
+                  </span>
+                </div>
+                <span className="text-[10px] font-black text-amber-900 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300">
+                  Glosa: Eventualidad_Key
                 </span>
               </div>
 
@@ -1658,20 +1906,37 @@ export default function PagoDotacion() {
                   />
                 </div>
 
-                {/* 2. Personal */}
+                {/* 2. Personal (con escritura y datalist) */}
                 <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Personal</label>
-                  <select
-                    value={excelSelectedStaffRut || newTripForm.staffRut}
-                    onChange={(e) => setNewTripForm({ ...newTripForm, staffRut: e.target.value })}
-                    disabled={!!excelSelectedStaffRut}
-                    className="w-full py-1.5 px-2.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:bg-slate-100"
-                  >
-                    <option value="">Seleccionar personal...</option>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Personal (Escribir o buscar)</label>
+                  <input
+                    type="text"
+                    list="assign-staff-datalist"
+                    placeholder="Escribir nombre o RUT..."
+                    value={assignStaffInputValue}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setAssignStaffInputValue(val);
+                      const matched = transmittedStaffList.find(s => 
+                        cleanRut(s.rut) === cleanRut(val) || 
+                        `${s.name} (${s.role}) - ${s.rut}` === val ||
+                        s.name.toLowerCase().includes(val.toLowerCase())
+                      );
+                      if (matched) {
+                        setNewTripForm(prev => ({ ...prev, staffRut: matched.rut }));
+                      } else {
+                        setNewTripForm(prev => ({ ...prev, staffRut: cleanRut(val) }));
+                      }
+                    }}
+                    className="w-full py-1.5 px-2.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                  />
+                  <datalist id="assign-staff-datalist">
                     {transmittedStaffList.map(s => (
-                      <option key={s.rut} value={s.rut}>{s.name} ({s.role})</option>
+                      <option key={s.rut} value={`${s.name} (${s.role}) - ${s.rut}`}>
+                        {s.name} ({s.role}) - RUT: {s.rut}
+                      </option>
                     ))}
-                  </select>
+                  </datalist>
                 </div>
 
                 {/* 3. Ruta */}
@@ -1692,30 +1957,38 @@ export default function PagoDotacion() {
                   </datalist>
                 </div>
 
-                {/* 4. Tipo Servicio */}
+                {/* 4. Tipo Servicio (con escritura y datalist) */}
                 <div>
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tipo Servicio</label>
-                  <select
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tipo Servicio (Escribir)</label>
+                  <input
+                    type="text"
+                    list="assign-service-datalist"
+                    placeholder="Seleccionar o escribir..."
                     value={newTripForm.tipoServicio}
                     onChange={(e) => setNewTripForm({ ...newTripForm, tipoServicio: e.target.value })}
                     className="w-full py-1.5 px-2.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                  >
+                  />
+                  <datalist id="assign-service-datalist">
                     {SERVICE_TYPE_OPTIONS.map(opt => (
-                      <option key={opt} value={opt}>{opt}</option>
+                      <option key={opt} value={opt} />
                     ))}
-                  </select>
+                  </datalist>
                 </div>
 
-                {/* 5. Monto */}
+                {/* 5. Monto (Rojo si es negativo) */}
                 <div>
                   <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Monto ($ CLP)</label>
                   <div className="flex gap-1.5">
                     <input
                       type="number"
-                      placeholder="Ej. 20000"
+                      placeholder="Ej. 20000 o -2000"
                       value={newTripForm.monto}
                       onChange={(e) => setNewTripForm({ ...newTripForm, monto: e.target.value })}
-                      className="w-full py-1.5 px-2.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-black text-emerald-700"
+                      className={`w-full py-1.5 px-2.5 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-black ${
+                        (parseFloat(newTripForm.monto) || 0) < 0 
+                          ? 'text-red-600 bg-red-50/60 border-red-300' 
+                          : 'text-emerald-700 border-slate-200'
+                      }`}
                     />
                     <Button
                       type="submit"
@@ -1794,18 +2067,24 @@ export default function PagoDotacion() {
                         <td className="px-3 py-2 text-slate-700 border-r border-slate-200">
                           {row.tipoServicio || row.tipoPunto || 'Ruta'}
                         </td>
-                        <td className="px-3 py-2 text-right font-black text-emerald-800 border-r border-slate-200 text-sm">
+                        <td className={`px-3 py-2 text-right font-black border-r border-slate-200 text-sm ${
+                          (parseFloat(row.total) || 0) < 0 ? 'text-red-600 bg-red-50/60' : 'text-emerald-800'
+                        }`}>
                           {formatCLP(row.total)}
                         </td>
                         <td className="px-3 py-2 text-center border-r border-slate-200">
-                          <span className="px-2 py-0.5 rounded font-extrabold text-[10px] bg-white/80 border border-slate-200 text-slate-700">
-                            {row.contratoOrigen || row.origen || 'Excel'}
+                          <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] border ${
+                            (row.contratoOrigen === 'Eventualidad_Key' || row.glosa === 'Eventualidad_Key')
+                              ? 'bg-amber-200 text-amber-950 border-amber-300 shadow-2xs'
+                              : 'bg-white/80 border-slate-200 text-slate-700'
+                          }`}>
+                            {row.glosa || row.contratoOrigen || row.origen || 'Excel'}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-center border-r border-slate-200">
                           {isManual ? (
                             <span className="px-2 py-0.5 bg-amber-200 text-amber-900 border border-amber-300 rounded font-black text-[10px]">
-                              ✨ Asignado Manual
+                              ★ Eventualidad_Key
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-black text-[10px]">

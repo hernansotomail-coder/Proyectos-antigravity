@@ -5,9 +5,26 @@ import { normalizeDate } from './planningStore';
 
 const STORAGE_KEY_MASTER = 'keylogistics_pago_dotacion';
 const STORAGE_KEY_TRANSMITTED = 'keylogistics_pago_dotacion_transmitted';
+const STORAGE_KEY_CONTRACT_DATES = 'keylogistics_pago_contract_dates';
 
 export const cleanRut = (r) => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
 export const cleanStr = (s) => String(s || '').trim();
+
+// Formato chileno de fecha y hora: DD-MM-YYYY HH:mm
+export const formatChileanDateTime = (date = new Date()) => {
+  try {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return null;
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${day}-${month}-${year} ${hours}:${minutes}`;
+  } catch (e) {
+    return null;
+  }
+};
 
 // Regla de periodos: Cada periodo va del 21 al 20 del mes siguiente.
 // Por ejemplo: 21 de octubre a 20 de noviembre se considera como periodo de "Noviembre 2026".
@@ -57,6 +74,12 @@ export const getPeriodFromDate = (rawDate) => {
 export const usePagoDotacionStore = create((set, get) => ({
   paymentsList: [],             // Lista maestra total (para gráficos y totales generales)
   transmittedTripsList: [],     // Lista operacional de viajes transmitidos y conciliados
+  contractUploadDates: {        // Última fecha de carga por contrato (DD-MM-YYYY HH:mm)
+    colectivo: null,
+    contrato8: null,
+    contrato9: null,
+    contrato13: null
+  },
   isLoading: false,
 
   // Cargar pagos desde Supabase DB (con fallback a localStorage)
@@ -97,22 +120,62 @@ export const usePagoDotacionStore = create((set, get) => ({
         }
       }
 
+      // 3. Cargar fechas de última carga por contrato
+      const { data: datesData, error: datesErr } = await supabase
+        .from('planning_assignments')
+        .select('*')
+        .eq('fecha', '__pago_dotacion_contract_dates__')
+        .maybeSingle();
+
+      let loadedDates = {
+        colectivo: null,
+        contrato8: null,
+        contrato9: null,
+        contrato13: null
+      };
+
+      if (!datesErr && datesData && datesData.assignments && typeof datesData.assignments === 'object') {
+        loadedDates = { ...loadedDates, ...datesData.assignments };
+      } else if (typeof window !== 'undefined' && window.localStorage) {
+        const savedDates = localStorage.getItem(STORAGE_KEY_CONTRACT_DATES);
+        if (savedDates) {
+          try { loadedDates = { ...loadedDates, ...JSON.parse(savedDates) }; } catch (e) {}
+        }
+      }
+
+      // Inferencia inicial si hay viajes existentes pero no se registraron fechas aún
+      if (Array.isArray(loadedTrans) && loadedTrans.length > 0) {
+        const findDateFor = (keyword) => {
+          const found = loadedTrans.find(t => String(t.contratoOrigen || t.origen || '').toLowerCase().includes(keyword));
+          if (found && (found.transmittedAt || found.createdAt)) {
+            return formatChileanDateTime(found.transmittedAt || found.createdAt);
+          }
+          return null;
+        };
+        if (!loadedDates.colectivo) loadedDates.colectivo = findDateFor('colectivo');
+        if (!loadedDates.contrato8) loadedDates.contrato8 = findDateFor('8');
+        if (!loadedDates.contrato9) loadedDates.contrato9 = findDateFor('9');
+        if (!loadedDates.contrato13) loadedDates.contrato13 = findDateFor('13');
+      }
+
       set({
         paymentsList: loadedMaster,
         transmittedTripsList: loadedTrans,
+        contractUploadDates: loadedDates,
         isLoading: false
       });
 
       if (typeof window !== 'undefined' && window.localStorage) {
         localStorage.setItem(STORAGE_KEY_MASTER, JSON.stringify(loadedMaster));
         localStorage.setItem(STORAGE_KEY_TRANSMITTED, JSON.stringify(loadedTrans));
+        localStorage.setItem(STORAGE_KEY_CONTRACT_DATES, JSON.stringify(loadedDates));
       }
 
-      return { master: loadedMaster, transmitted: loadedTrans };
+      return { master: loadedMaster, transmitted: loadedTrans, dates: loadedDates };
     } catch (err) {
       console.warn('[PagoDotacion] Error cargando pagos:', err);
       set({ isLoading: false });
-      return { master: [], transmitted: [] };
+      return { master: [], transmitted: [], dates: {} };
     }
   },
 
@@ -174,6 +237,33 @@ export const usePagoDotacionStore = create((set, get) => ({
     }
   },
 
+  // Guardar fechas de última carga por contrato
+  saveContractUploadDates: async (dates) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem(STORAGE_KEY_CONTRACT_DATES, JSON.stringify(dates));
+      }
+      const { error } = await supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__pago_dotacion_contract_dates__',
+          assignments: dates,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' });
+
+      if (error) {
+        console.warn('[PagoDotacion] Advertencia guardando fechas de carga en Supabase:', error);
+      }
+
+      set({ contractUploadDates: dates });
+      return true;
+    } catch (err) {
+      console.error('[PagoDotacion] Error persistiendo fechas de carga:', err);
+      set({ contractUploadDates: dates });
+      return false;
+    }
+  },
+
   // Agregar registros masivos a la lista maestra
   addBatchPayments: async (records) => {
     if (!records || records.length === 0) return false;
@@ -188,7 +278,9 @@ export const usePagoDotacionStore = create((set, get) => ({
 
   // Transmitir y conciliar con Disponibilización:
   // Cruza por Fecha y RUT contra lo disponibilizado en la plataforma.
-  // Elimina los que no corresponden de la vista de transmisión, pero conserva todo en la lista maestra.
+  // Regla de reemplazo: Cada vez que se sube un contrato nuevo, este pisa (sobrescribe)
+  // al anterior para los viajes provenientes de los Excel de ese contrato.
+  // TODOS los viajes asignados por la plataforma con glosa "Eventualidad_Key" SE MANTIENEN SIEMPRE.
   transmitRecords: async ({ records, transmittedAssignments, staffList }) => {
     if (!records || records.length === 0) {
       toast.error('No hay registros cargados para transmitir.');
@@ -197,8 +289,17 @@ export const usePagoDotacionStore = create((set, get) => ({
 
     set({ isLoading: true });
 
+    // 1. Detectar qué tipos de contratos están presentes en este nuevo lote de subida
+    const incomingContractTypes = new Set();
+    records.forEach(r => {
+      const cName = cleanStr(r.contratoOrigen || r.origen);
+      if (cName && cName !== 'Eventualidad_Key' && cName !== 'Manual' && cName !== 'Asignación Manual') {
+        incomingContractTypes.add(cName);
+      }
+    });
+
     const matchedTransmitted = [];
-    const allMasterToMerge = [...records];
+    const nowIso = new Date().toISOString();
 
     records.forEach(item => {
       const fecha = normalizeDate(item.fechaDespacho || item.fecha);
@@ -225,27 +326,70 @@ export const usePagoDotacionStore = create((set, get) => ({
           fechaDespacho: fecha,
           rutCond1: rut || item.rutCond1 || item.rut,
           nomCond1: item.nomCond1 || item.nombre,
-          transmittedAt: new Date().toISOString(),
+          transmittedAt: nowIso,
           isTransmittedMatch: true
         });
       }
     });
 
-    // 1. Actualizar lista de viajes transmitidos
-    const currentTrans = get().transmittedTripsList || [];
-    // Evitar duplicados por id o combinación (fecha + rut + ruta)
-    const existingTransKeys = new Set(currentTrans.map(t => `${t.fechaDespacho}_${cleanRut(t.rutCond1)}_${t.rutas}`));
-    const newTransFiltered = matchedTransmitted.filter(t => !existingTransKeys.has(`${t.fechaDespacho}_${cleanRut(t.rutCond1)}_${t.rutas}`));
-    const updatedTrans = [...newTransFiltered, ...currentTrans];
+    // Función auxiliar para determinar si un registro antiguo debe ser pisado por el nuevo archivo
+    const isRecordFromIncomingContract = (item) => {
+      const origin = cleanStr(item.contratoOrigen || item.origen);
+      const glosa = cleanStr(item.glosa);
+      // Los registros manuales de la plataforma ("Eventualidad_Key") SIEMPRE se conservan intactos
+      if (
+        item.isManuallyAssigned ||
+        origin === 'Eventualidad_Key' ||
+        glosa === 'Eventualidad_Key' ||
+        origin === 'Manual' ||
+        origin === 'Asignación Manual'
+      ) {
+        return false;
+      }
 
-    // 2. Actualizar lista maestra (conserva todos los registros)
+      for (const inc of incomingContractTypes) {
+        const oLower = origin.toLowerCase();
+        const incLower = inc.toLowerCase();
+        if (oLower === incLower) return true;
+        if (incLower.includes('colectivo') && oLower.includes('colectivo')) return true;
+        if (incLower.includes('8') && oLower.includes('8')) return true;
+        if (incLower.includes('9') && oLower.includes('9')) return true;
+        if (incLower.includes('13') && oLower.includes('13')) return true;
+      }
+      return false;
+    };
+
+    // 1. Actualizar lista de viajes transmitidos:
+    // Pisar los registros anteriores del contrato subido, conservando otros contratos y TODOS los de Eventualidad_Key
+    const currentTrans = get().transmittedTripsList || [];
+    const preservedTrans = currentTrans.filter(t => !isRecordFromIncomingContract(t));
+    const updatedTrans = [...matchedTransmitted, ...preservedTrans];
+
+    // 2. Actualizar lista maestra (conserva totales generales pero actualiza el contrato cargado)
     const currentMaster = get().paymentsList || [];
-    const existingMasterKeys = new Set(currentMaster.map(m => `${m.fechaDespacho}_${cleanRut(m.rutCond1)}_${m.rutas}`));
-    const newMasterFiltered = allMasterToMerge.filter(m => !existingMasterKeys.has(`${m.fechaDespacho}_${cleanRut(m.rutCond1 || m.rut)}_${m.rutas || m.ruta}`));
-    const updatedMaster = [...newMasterFiltered, ...currentMaster];
+    const preservedMaster = currentMaster.filter(m => !isRecordFromIncomingContract(m));
+    const updatedMaster = [...records, ...preservedMaster];
+
+    // 3. Actualizar fechas de última carga por contrato
+    const nowFormatted = formatChileanDateTime(new Date());
+    const updatedDates = { ...(get().contractUploadDates || {}) };
+
+    for (const inc of incomingContractTypes) {
+      const incLower = inc.toLowerCase();
+      if (incLower.includes('colectivo')) {
+        updatedDates.colectivo = nowFormatted;
+      } else if (incLower.includes('8')) {
+        updatedDates.contrato8 = nowFormatted;
+      } else if (incLower.includes('9')) {
+        updatedDates.contrato9 = nowFormatted;
+      } else if (incLower.includes('13')) {
+        updatedDates.contrato13 = nowFormatted;
+      }
+    }
 
     await get().saveTransmittedTripsToDb(updatedTrans);
     await get().savePaymentsToDb(updatedMaster);
+    await get().saveContractUploadDates(updatedDates);
 
     set({ isLoading: false });
 
@@ -257,7 +401,7 @@ export const usePagoDotacionStore = create((set, get) => ({
   },
 
   // Asignar nuevo viaje manual en la vista Excel transmitida
-  // (se ordenará por fecha y se destacará en amarillo pastel)
+  // Registra glosa "Eventualidad_Key", se ordena por fecha cronológicamente y se destaca en amarillo pastel
   addTransmittedTrip: async (newTrip) => {
     if (!newTrip) return false;
     const currentTrans = get().transmittedTripsList || [];
@@ -266,9 +410,11 @@ export const usePagoDotacionStore = create((set, get) => ({
     const tripEntry = {
       ...newTrip,
       id: newTrip.id || `trans-manual-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-      createdAt: new Date().toISOString(),
+      contratoOrigen: 'Eventualidad_Key',
+      glosa: 'Eventualidad_Key',
       origen: 'Manual',
-      isManuallyAssigned: true // Activa el resaltado amarillo pastel
+      isManuallyAssigned: true, // Activa el resaltado amarillo pastel
+      createdAt: new Date().toISOString()
     };
 
     const updatedTrans = [tripEntry, ...currentTrans];
@@ -277,7 +423,6 @@ export const usePagoDotacionStore = create((set, get) => ({
     await get().saveTransmittedTripsToDb(updatedTrans);
     await get().savePaymentsToDb(updatedMaster);
 
-    toast.success(`Viaje asignado exitosamente al ${tripEntry.fechaDespacho}`);
     return tripEntry;
   },
 
