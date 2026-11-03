@@ -519,22 +519,67 @@ export default function RuteoView() {
   // Filas expandidas para ver sub-paradas
   const [expandedKeys, setExpandedKeys] = useState({});
 
-  // Rutas de la fecha activa
+  // Rutas de la fecha activa con deduplicación estricta
   const currentRoutes = useMemo(() => {
-    let routes = [];
+    let rawRoutes = [];
     const normDate = normalizeDate(activeDate) || activeDate;
     if (transmittedAssignments && transmittedAssignments[normDate] && transmittedAssignments[normDate].length > 0) {
-      routes = transmittedAssignments[normDate];
+      rawRoutes = transmittedAssignments[normDate];
     } else if (savedRuteoByDate && savedRuteoByDate[normDate] && savedRuteoByDate[normDate].length > 0) {
-      routes = savedRuteoByDate[normDate];
+      rawRoutes = savedRuteoByDate[normDate];
     } else if (transmittedAssignments && transmittedAssignments[activeDate]) {
-      routes = transmittedAssignments[activeDate];
+      rawRoutes = transmittedAssignments[activeDate];
     } else if (savedRuteoByDate && savedRuteoByDate[activeDate]) {
-      routes = savedRuteoByDate[activeDate];
+      rawRoutes = savedRuteoByDate[activeDate];
     } else {
-      routes = [];
+      rawRoutes = [];
     }
-    return routes.map(r => ({
+
+    // Deduplicación estricta por número de ruta y vuelta
+    const dedupedMap = new Map();
+    rawRoutes.forEach(r => {
+      const rutaKey = String(r.ruta || '').trim();
+      if (!rutaKey) return;
+      const vKey = String(r.n_vuelta || '1').trim().replace(/vuelta\s*/i, '') || '1';
+      const uniqueKey = `${rutaKey}:::${vKey}`;
+
+      if (!dedupedMap.has(uniqueKey)) {
+        dedupedMap.set(uniqueKey, r);
+      } else {
+        const existing = dedupedMap.get(uniqueKey);
+        // Priorizar el registro que tiene asignación real (conductor y camión)
+        const existingHasAssign = Boolean(
+          existing.camion && 
+          existing.camion.trim() !== '' && 
+          existing.camion.toLowerCase() !== 'sin camión' && 
+          existing.camion.toLowerCase() !== 'sin camion' &&
+          existing.conductor_name && 
+          existing.conductor_name.trim() !== '' && 
+          existing.conductor_name.toLowerCase() !== 'sin asignar'
+        );
+        const newHasAssign = Boolean(
+          r.camion && 
+          r.camion.trim() !== '' && 
+          r.camion.toLowerCase() !== 'sin camión' && 
+          r.camion.toLowerCase() !== 'sin camion' &&
+          r.conductor_name && 
+          r.conductor_name.trim() !== '' && 
+          r.conductor_name.toLowerCase() !== 'sin asignar'
+        );
+
+        if (newHasAssign && !existingHasAssign) {
+          dedupedMap.set(uniqueKey, r);
+        } else if (newHasAssign === existingHasAssign) {
+          const existingStops = existing.paradas?.length || 0;
+          const newStops = r.paradas?.length || 0;
+          if (newStops > existingStops) {
+            dedupedMap.set(uniqueKey, r);
+          }
+        }
+      }
+    });
+
+    return Array.from(dedupedMap.values()).map(r => ({
       ...r,
       fecha: normalizeDate(r.fecha) || normDate,
       transportista: r.transportista || ensureRowTransportista(r)
@@ -962,14 +1007,32 @@ export default function RuteoView() {
     });
 
     const tripMap = new Map();
+    const seenRoutesByVuelta = new Set();
 
     normalizedFilteredRoutes.forEach(row => {
-      const hasAssignment = !!(row.camion && row.conductor_name);
-      const vueltaKey = row.n_vuelta ? String(row.n_vuelta).trim() : '1';
+      const rutaClean = String(row.ruta || '').trim();
+      const vueltaClean = row.n_vuelta ? String(row.n_vuelta).trim().replace(/vuelta\s*/i, '') || '1' : '1';
+      const routeVueltaKey = `${rutaClean}:::${vueltaClean}`;
+
+      // Evitar que la misma ruta aparezca dos veces en Ruteo
+      if (seenRoutesByVuelta.has(routeVueltaKey)) {
+        return;
+      }
+      seenRoutesByVuelta.add(routeVueltaKey);
+
+      const hasAssignment = Boolean(
+        row.camion && 
+        row.camion.trim() !== '' && 
+        row.camion.toLowerCase() !== 'sin camión' && 
+        row.camion.toLowerCase() !== 'sin camion' &&
+        row.conductor_name && 
+        row.conductor_name.trim() !== '' && 
+        row.conductor_name.toLowerCase() !== 'sin asignar'
+      );
       
       const key = hasAssignment
-        ? `${row.camion.trim()}:::${row.conductor_name.trim()}:::${vueltaKey}`
-        : `single:::${row.ruta}:::${row.id}`;
+        ? `${row.camion.trim()}:::${row.conductor_name.trim()}:::${vueltaClean}`
+        : `single:::${rutaClean}:::${vueltaClean}:::${row.id || Math.random()}`;
 
       if (!tripMap.has(key)) {
         tripMap.set(key, {
@@ -992,28 +1055,36 @@ export default function RuteoView() {
       }
 
       const t = tripMap.get(key);
-      t.totalM3 += parseFloat(row.m3) || 0;
-      t.totalPeso += parseFloat(row.peso) || 0;
-      t.totalLocales += parseInt(row.locales, 10) || 0;
-      t.totalCajas += parseInt(row.cantCJ, 10) || 0;
+      if (!t.rutas.some(existingR => String(existingR.ruta).trim() === rutaClean)) {
+        t.totalM3 += parseFloat(row.m3) || 0;
+        t.totalPeso += parseFloat(row.peso) || 0;
+        t.totalLocales += parseInt(row.locales, 10) || 0;
+        t.totalCajas += parseInt(row.cantCJ, 10) || 0;
 
-      if (row.aux1_name && !t.auxiliares.includes(row.aux1_name)) t.auxiliares.push(row.aux1_name);
-      if (row.aux2_name && !t.auxiliares.includes(row.aux2_name)) t.auxiliares.push(row.aux2_name);
-      if (!t.transportista && row.transportista) t.transportista = row.transportista;
-      if (t.camion === 'Sin Camión' && row.camion) t.camion = row.camion;
-      if (t.conductor_name === 'Sin Asignar' && row.conductor_name) t.conductor_name = row.conductor_name;
+        if (row.aux1_name && !t.auxiliares.includes(row.aux1_name)) t.auxiliares.push(row.aux1_name);
+        if (row.aux2_name && !t.auxiliares.includes(row.aux2_name)) t.auxiliares.push(row.aux2_name);
+        if (!t.transportista && row.transportista) t.transportista = row.transportista;
+        if (t.camion === 'Sin Camión' && row.camion) t.camion = row.camion;
+        if (t.conductor_name === 'Sin Asignar' && row.conductor_name) t.conductor_name = row.conductor_name;
 
-      t.rutas.push(row);
+        t.rutas.push(row);
+      }
     });
 
     return Array.from(tripMap.values()).map(trip => {
       const rutasStr = trip.rutas.map(r => r.ruta).join('+');
       
-      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación y combinaciones)
-      const opsSet = new Set([
-        ...trip.rutas.map(r => getBriefingOperation(r)),
-        ...trip.rutas.flatMap(r => getAllOperationsForRoute(r))
-      ].map(op => canonicalizeOperation(op)).filter(Boolean));
+      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación y combinaciones de viajes)
+      const opsSet = new Set();
+      trip.rutas.forEach(r => {
+        const op = getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente);
+        if (op) {
+          splitOperationNames(op).forEach(o => {
+            const canon = canonicalizeOperation(o);
+            if (canon) opsSet.add(canon);
+          });
+        }
+      });
       const operacionStr = Array.from(opsSet).join(' + ') || 'FAST FOOD';
 
       // Zona detallada: [Ruta], [Operación/Cliente], [Comuna más lejana], [Locales] LC, [m³] m³

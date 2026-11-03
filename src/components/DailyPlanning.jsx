@@ -364,7 +364,7 @@ export default function DailyPlanning() {
       const horaFin = row.HoraFin || row.hora_fin || '';
       const transportista = String(row.Transportista || row.transportista || row.Transp || '').trim();
 
-      const groupKey = `${ruta}:::${nombreRuta || 'Sin Nombre'}`;
+      const groupKey = String(ruta).trim();
       if (!groups.has(groupKey)) {
         groups.set(groupKey, {
           id: `special-${ruta}-${Date.now()}-${idx}`,
@@ -381,6 +381,9 @@ export default function DailyPlanning() {
       }
 
       const g = groups.get(groupKey);
+      if (nombreRuta && (!g.nombreRuta || g.nombreRuta === `Ruta ${ruta}`)) {
+        g.nombreRuta = nombreRuta;
+      }
       if (destino) g.destinosSet.add(destino);
       if (transportista) g.transportistasSet.add(transportista);
       g.sumaVolumen += volumen;

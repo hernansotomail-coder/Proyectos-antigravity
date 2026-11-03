@@ -8366,9 +8366,18 @@ export function canonicalizeOperation(name) {
   // 1. El Golfo (incluye rutas de congelados)
   if (upper.includes('GOLFO') || upper.includes('CONGELADO')) return 'El Golfo';
   // 2. Streat Burguer (con o sin 'u')
-  if (upper.includes('STREAT') || upper.includes('BURGUER') || upper.includes('BURGER')) return 'Streat Burguer';
-  // 3. Carls Jr (soporta Carls, Carl's, Especiales Carls)
-  if (upper.includes('CARL')) return 'Carls Jr';
+  if (upper.includes('STREAT')) return 'Streat Burguer';
+  // 3. Carls Jr (soporta Carls, Carl's, Especiales Carls, Carl Jr, Carls Junior)
+  if (
+    upper.startsWith('ESPECIALES CARLS') ||
+    upper.includes('CARLS JR') ||
+    upper.includes('CARL JR') ||
+    upper.includes("CARL'S") ||
+    upper.includes('CARLS') ||
+    upper.includes('CARL JUNIOR')
+  ) {
+    return 'Carls Jr';
+  }
   // 4. Oxxo (soporta Oxxo, Especiales Oxxo)
   if (upper.includes('OXXO')) return 'Oxxo';
   // 5. Subway (soporta Subway, SBW, SBW Redespacho)
@@ -8528,17 +8537,11 @@ export function getAllOperationsForRoute(r) {
     splitOperationNames(r.nombreRuta).forEach(o => ops.add(o));
   }
 
-  // 4. Paradas de la ruta
+  // 4. Paradas de la ruta (solo campos de operacion y cliente explícitos, nunca destinos/direcciones)
   if (Array.isArray(r.paradas)) {
     r.paradas.forEach(p => {
       if (p.operacion) splitOperationNames(p.operacion).forEach(o => ops.add(o));
       if (p.cliente) splitOperationNames(p.cliente).forEach(o => ops.add(o));
-      if (p.destino) {
-        const canonDest = canonicalizeOperation(p.destino);
-        if (canonDest && ALL_OPERACIONES.includes(canonDest)) {
-          ops.add(canonDest);
-        }
-      }
     });
   }
 
