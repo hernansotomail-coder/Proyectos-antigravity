@@ -43,8 +43,8 @@ export const getUniqueParadas = (paradas) => {
   const seen = new Set();
   const unique = [];
   paradas.forEach((p) => {
-    const dest = String(p.destino || '').trim();
-    const com = String(p.comuna || '').trim();
+    const dest = String(p.destino || p.direccion || p.local || '').trim().replace(/\s+/g, ' ');
+    const com = String(p.comuna || '').trim().replace(/\s+/g, ' ');
     const key = `${dest.toLowerCase()}:::${com.toLowerCase()}`;
     if (!key || key === ':::') {
       unique.push(p);
@@ -52,7 +52,11 @@ export const getUniqueParadas = (paradas) => {
     }
     if (!seen.has(key)) {
       seen.add(key);
-      unique.push(p);
+      unique.push({
+        ...p,
+        destino: dest || p.destino,
+        comuna: com || p.comuna
+      });
     }
   });
   return unique;
@@ -179,6 +183,15 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   if (row.destino_prioritario) {
     msg += `      ⭐ *Prioritario:* ${row.destino_prioritario}\n`;
   }
+  if (uniqueParadas && uniqueParadas.length > 0) {
+    msg += `      📍 *Destinos (${uniqueParadas.length} locales):*\n`;
+    uniqueParadas.forEach((p, pIdx) => {
+      const destText = p.destino || 'Local';
+      const comText = p.comuna ? ` (${p.comuna})` : '';
+      const prioMark = row.destino_prioritario && destText.toLowerCase().includes(row.destino_prioritario.toLowerCase()) ? ' ⭐' : '';
+      msg += `         ${pIdx + 1}. ${destText}${comText}${prioMark}\n`;
+    });
+  }
   msg += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `_Favor confirmar recepción del itinerario._`;
 
@@ -266,6 +279,17 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
       msg += `\n`;
       if (r.destino_prioritario) {
         msg += `      ⭐ *Prioritario:* ${r.destino_prioritario}\n`;
+      }
+
+      // Desglose de todos los destinos por vuelta (no por ambiente sino por destino)
+      if (uParadas && uParadas.length > 0) {
+        msg += `      📍 *Destinos (${uParadas.length} locales):*\n`;
+        uParadas.forEach((p, pIdx) => {
+          const destText = p.destino || 'Local';
+          const comText = p.comuna ? ` (${p.comuna})` : '';
+          const prioMark = r.destino_prioritario && destText.toLowerCase().includes(r.destino_prioritario.toLowerCase()) ? ' ⭐' : '';
+          msg += `         ${pIdx + 1}. ${destText}${comText}${prioMark}\n`;
+        });
       }
     });
 
@@ -1464,17 +1488,17 @@ export default function RouteDispatch({ onlyExternal = false }) {
                                 {(parseFloat(row.m3) || 0).toFixed(3)}
                               </td>
 
-                              {/* Paradas / Destinos con expandir/contraer paradas */}
-                              <td className="py-2 px-3 text-[11px] text-slate-600 max-w-[280px]">
+                              {/* Paradas / Destinos con expandir/contraer paradas (en envíos externos se desglosan todos los destinos) */}
+                              <td className="py-2 px-3 text-[11px] text-slate-600 min-w-[250px] max-w-[420px]">
                                 {uniqueParadas && uniqueParadas.length > 0 ? (
                                   <div>
                                     <div className="flex flex-wrap gap-1">
-                                      {(isParadasExpanded ? uniqueParadas : uniqueParadas.slice(0, 3)).map((p, pI) => {
+                                      {(onlyExternal || isParadasExpanded ? uniqueParadas : uniqueParadas.slice(0, 3)).map((p, pI) => {
                                         const isDestPrio = row.destino_prioritario && p.destino?.toLowerCase().includes(row.destino_prioritario.toLowerCase());
                                         return (
                                           <span
                                             key={pI}
-                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] border ${
+                                            className={`inline-block px-1.5 py-0.5 rounded text-[10px] border shadow-2xs ${
                                               isDestPrio
                                                 ? 'bg-red-50 text-red-700 border-red-200 font-bold'
                                                 : 'bg-slate-100 text-slate-700 border-slate-200'
@@ -1485,7 +1509,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
                                         );
                                       })}
                                     </div>
-                                    {uniqueParadas.length > 3 && (
+                                    {!onlyExternal && uniqueParadas.length > 3 && (
                                       <button
                                         type="button"
                                         onClick={() => toggleParadasRow(rowKey)}
