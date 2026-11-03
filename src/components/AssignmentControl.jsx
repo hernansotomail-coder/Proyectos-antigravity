@@ -4,7 +4,7 @@ import {
   Filter, Search, RefreshCw, User, Users, Truck, MapPin, 
   ChevronUp, ChevronDown, ChevronRight, CheckCircle2, Circle, Check,
   Calendar, Layers, Trash2, ArrowRight, UserCheck, Shield, Sparkles,
-  Save, Eye, Download, Send, AlertTriangle, X, Scissors, History, CheckSquare, Plus
+  Save, Eye, Download, Send, AlertTriangle, X, Scissors, History, CheckSquare, Plus, UploadCloud
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStaffStore } from '../store/staffStore';
@@ -317,6 +317,7 @@ export default function AssignmentControl() {
     recordChangeAudit,
     aperturarRutaEnDisponibilizacion,
     addExtraServices,
+    syncActiveDateToCloud,
     initPlanningFromDb
   } = usePlanningStore();
 
@@ -1318,7 +1319,7 @@ export default function AssignmentControl() {
     setIsAuditModalOpen(true);
   };
 
-  const confirmAuditAndSave = () => {
+  const confirmAuditAndSave = async () => {
     // Filtrar solo las filas que efectivamente sufrieron modificaciones respecto a la base anterior
     const entriesToRecord = auditData.changes.filter(c => c.isDiff);
     
@@ -1326,15 +1327,17 @@ export default function AssignmentControl() {
       recordChangeAudit(entriesToRecord);
     }
     
-    saveDisponibilizacion(activeDate);
+    const ok = await saveDisponibilizacion(activeDate);
     setIsAuditModalOpen(false);
 
-    toast.success('¡Disponibilización guardada y registrada en Histórico de cambios!', {
-      action: {
-        label: 'Ver Histórico',
-        onClick: () => navigate('/change-history')
-      }
-    });
+    if (ok) {
+      toast.success('¡Disponibilización guardada y registrada en Histórico de cambios!', {
+        action: {
+          label: 'Ver Histórico',
+          onClick: () => navigate('/change-history')
+        }
+      });
+    }
   };
 
   // Drag and drop handlers compatibles con cualquier navegador y sistema operativo
@@ -1686,6 +1689,16 @@ export default function AssignmentControl() {
             >
               <Plus size={13} />
               Servicio Extra
+            </Button>
+
+            {/* Botón Sincronizar Nube */}
+            <Button 
+              onClick={() => syncActiveDateToCloud(activeDate)}
+              className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+              title="Sincronizar y forzar subida a la base de datos en la nube para que todos los notebooks vean los cambios de esta fecha"
+            >
+              <UploadCloud size={13} />
+              Sincronizar Nube
             </Button>
 
             {/* Botón Guardar Disponibilización */}
@@ -2427,7 +2440,7 @@ export default function AssignmentControl() {
                                 )}
                               </span>
                               <button 
-                                onClick={() => updateAssignmentField(activeDate, row.id, 'conductor_name', '')}
+                                onClick={() => clearSlotFromRows(activeDate, [row.id], 'conductor')}
                                 className="text-slate-400 hover:text-red-500 text-[10px]"
                                 title="Quitar conductor"
                               >
@@ -2465,7 +2478,7 @@ export default function AssignmentControl() {
                                 )}
                               </span>
                               <button 
-                                onClick={() => updateAssignmentField(activeDate, row.id, 'aux1_name', '')}
+                                onClick={() => clearSlotFromRows(activeDate, [row.id], 'auxiliar')}
                                 className="text-slate-400 hover:text-red-500 text-[10px]"
                                 title="Quitar auxiliar"
                               >
@@ -2496,7 +2509,7 @@ export default function AssignmentControl() {
                             <span className="flex items-center justify-between gap-1 pointer-events-auto">
                               <span className="truncate font-medium">{row.aux2_name}</span>
                               <button 
-                                onClick={() => updateAssignmentField(activeDate, row.id, 'aux2_name', '')}
+                                onClick={() => clearSlotFromRows(activeDate, [row.id], 'auxiliar2')}
                                 className="text-slate-400 hover:text-red-500 text-[10px]"
                                 title="Quitar auxiliar 2"
                               >
@@ -2531,7 +2544,7 @@ export default function AssignmentControl() {
                                 {row.camion}
                               </span>
                               <button 
-                                onClick={() => updateAssignmentField(activeDate, row.id, 'camion', '')}
+                                onClick={() => clearSlotFromRows(activeDate, [row.id], 'camion')}
                                 className="text-slate-400 hover:text-red-500 text-[10px]"
                                 title="Quitar camión"
                               >

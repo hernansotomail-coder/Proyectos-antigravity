@@ -6,7 +6,7 @@ import { findOperationForRoute, getOperacionName } from '../data/operacionesMast
 import { useStaffStore } from './staffStore';
 
 // Cache invalidation version for cross-computer synchronization
-const CURRENT_STORAGE_VERSION = 'v2026_10_29_prod_sync_v10';
+const CURRENT_STORAGE_VERSION = 'v2026_11_02_prod_sync_v12';
 try {
   if (typeof window !== 'undefined' && window.localStorage) {
     const savedVer = localStorage.getItem('keylogistics_storage_version');
@@ -302,23 +302,35 @@ export const ensureRowTransportista = (row) => {
   return 'T300';
 };
 
-export const persistAssignmentsToDb = async (fecha, assignments) => {
+export const persistAssignmentsToDb = async (fecha, assignments, silent = false) => {
   try {
     if (!fecha || !assignments) return false;
+    const cleanFecha = normalizeDate(fecha) || fecha;
+    if (!cleanFecha || cleanFecha.startsWith('__') || cleanFecha === 'Sin Fecha') return false;
+
+    // Sanitizar datos para asegurar serialización JSON limpia sin referencias circulares ni campos inválidos
+    const sanitized = JSON.parse(JSON.stringify(assignments));
+
     const { error } = await supabase
       .from('planning_assignments')
       .upsert({
-        fecha,
-        assignments,
+        fecha: cleanFecha,
+        assignments: sanitized,
         updated_at: new Date().toISOString()
       }, { onConflict: 'fecha' });
     if (error) {
-      console.warn(`[Supabase] Error guardando asignaciones para fecha ${fecha}:`, error);
+      console.warn(`[Supabase] Error guardando asignaciones para fecha ${cleanFecha}:`, error);
+      if (!silent) {
+        toast.error(`Error guardando en la nube (${cleanFecha}): ${error.message || 'Error en servidor'}`);
+      }
       return false;
     }
     return true;
   } catch (e) {
     console.warn('[Supabase] Excepción guardando asignaciones:', e);
+    if (!silent) {
+      toast.error(`Error de red al guardar fecha ${fecha} en la nube.`);
+    }
     return false;
   }
 };
@@ -608,21 +620,12 @@ const loadPersistedAssignments = () => {
   }
 };
 
-export const persistAssignments = async (data) => {
+export const persistAssignments = (data) => {
   try {
     localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(data));
-    if (data && typeof data === 'object') {
-      const promises = Object.entries(data).map(([fecha, rows]) => {
-        if (fecha && !fecha.startsWith('__')) {
-          return persistAssignmentsToDb(fecha, rows);
-        }
-        return Promise.resolve(true);
-      });
-      await Promise.all(promises);
-    }
     return true;
   } catch (e) {
-    console.error('Error saving transmitted assignments to localStorage/DB:', e);
+    console.error('Error saving transmitted assignments to localStorage:', e);
     return false;
   }
 };
@@ -1217,8 +1220,9 @@ export const usePlanningStore = create((set, get) => ({
     });
 
     // Guardar en localStorage y Supabase (esperar a que la BD confirme)
-    await persistAssignments(newAssignmentsByDate);
+    persistAssignments(newAssignmentsByDate);
     await persistTransformedRoutesToDb(transformedRoutes, { fileName, date: transformedRoutes[0]?.fecha });
+    await Promise.all(Object.entries(newAssignmentsByDate).map(([f, rows]) => persistAssignmentsToDb(f, rows)));
 
     const dates = Object.keys(newAssignmentsByDate);
     const targetDate = transformedRoutes[0]?.fecha || dates[0] || '';
@@ -1420,7 +1424,8 @@ export const usePlanningStore = create((set, get) => ({
     });
 
     persistTransformedRoutes(nextTransformed, { fileName, date: nextTransformed[0]?.fecha });
-    await persistAssignments(newAssignmentsByDate);
+    persistAssignments(newAssignmentsByDate);
+    await Promise.all(Object.entries(newAssignmentsByDate).map(([f, rows]) => persistAssignmentsToDb(f, rows)));
 
     const targetDate = targetRoutes[0]?.fecha || Object.keys(newAssignmentsByDate)[0] || '14-10-2026';
     const synced = syncHistoryAndSavedForDate(get(), targetDate, newAssignmentsByDate[targetDate] || []);
@@ -1571,21 +1576,22 @@ export const usePlanningStore = create((set, get) => ({
               const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
               const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
               if (lr) {
-                // Si el local tiene conductor/camión y el de la DB está vacío, mantener local
+                // Si la BD tiene asignación, la BD es la autoridad compartida.
+                // Si la BD viene vacía pero localmente ya había una asignación, preservar local.
                 return {
                   ...dbR,
-                  conductor_name: dbR.conductor_name || lr.conductor_name || '',
-                  conductor_rut: dbR.conductor_rut || lr.conductor_rut || '',
-                  camion: dbR.camion || lr.camion || '',
-                  tipo_equipo: dbR.tipo_equipo || lr.tipo_equipo || '',
-                  rampla: dbR.rampla || lr.rampla || '',
-                  n_vuelta: dbR.n_vuelta || lr.n_vuelta || '',
-                  aux1_name: dbR.aux1_name || lr.aux1_name || '',
-                  aux1_rut: dbR.aux1_rut || lr.aux1_rut || '',
-                  aux2_name: dbR.aux2_name || lr.aux2_name || '',
-                  aux2_rut: dbR.aux2_rut || lr.aux2_rut || '',
-                  turno: dbR.turno || lr.turno || '',
-                  hora_cita: dbR.hora_cita || lr.hora_cita || '',
+                  conductor_name: (dbR.conductor_name !== undefined && dbR.conductor_name !== '') ? dbR.conductor_name : (lr.conductor_name || ''),
+                  conductor_rut: (dbR.conductor_rut !== undefined && dbR.conductor_rut !== '') ? dbR.conductor_rut : (lr.conductor_rut || ''),
+                  camion: (dbR.camion !== undefined && dbR.camion !== '') ? dbR.camion : (lr.camion || ''),
+                  tipo_equipo: (dbR.tipo_equipo !== undefined && dbR.tipo_equipo !== '') ? dbR.tipo_equipo : (lr.tipo_equipo || ''),
+                  rampla: (dbR.rampla !== undefined && dbR.rampla !== '') ? dbR.rampla : (lr.rampla || ''),
+                  n_vuelta: (dbR.n_vuelta !== undefined && dbR.n_vuelta !== '') ? dbR.n_vuelta : (lr.n_vuelta || ''),
+                  aux1_name: (dbR.aux1_name !== undefined && dbR.aux1_name !== '') ? dbR.aux1_name : (lr.aux1_name || ''),
+                  aux1_rut: (dbR.aux1_rut !== undefined && dbR.aux1_rut !== '') ? dbR.aux1_rut : (lr.aux1_rut || ''),
+                  aux2_name: (dbR.aux2_name !== undefined && dbR.aux2_name !== '') ? dbR.aux2_name : (lr.aux2_name || ''),
+                  aux2_rut: (dbR.aux2_rut !== undefined && dbR.aux2_rut !== '') ? dbR.aux2_rut : (lr.aux2_rut || ''),
+                  turno: (dbR.turno !== undefined && dbR.turno !== '') ? dbR.turno : (lr.turno || ''),
+                  hora_cita: (dbR.hora_cita !== undefined && dbR.hora_cita !== '') ? dbR.hora_cita : (lr.hora_cita || ''),
                   prioridad: dbR.prioridad || lr.prioridad || 'Normal',
                   destino_prioritario: dbR.destino_prioritario || lr.destino_prioritario || '',
                   // La DB es la autoridad absoluta de paradas, destinos y métricas
@@ -1990,7 +1996,7 @@ export const usePlanningStore = create((set, get) => ({
   },
 
   // GUARDAR DISPONIBILIZACIÓN: Transmite devuelta al sub-menú "Ruteo" y a "Envío de rutas", actualiza baseline y guarda en histórico
-  saveDisponibilizacion: (fecha) => {
+  saveDisponibilizacion: async (fecha) => {
     const { transmittedAssignments, savedRuteoBaseline, ruteoOverrides } = get();
     const rows = transmittedAssignments[fecha] || [];
 
@@ -2031,10 +2037,10 @@ export const usePlanningStore = create((set, get) => ({
     persistAssignments(updatedAssignments);
 
     // Sincronizar inmediatamente con Supabase DB para todos los notebooks
-    persistAssignmentsToDb(fecha, enrichedRows);
-    persistRuteoOverridesToDb(ruteoOverrides);
+    const dbOk = await persistAssignmentsToDb(fecha, enrichedRows);
+    await persistRuteoOverridesToDb(ruteoOverrides);
     if (synced?.savedHistoryList) {
-      persistHistoryToDb(synced.savedHistoryList);
+      await persistHistoryToDb(synced.savedHistoryList);
     }
     // Sincronizar automáticamente con Asistencia (Requisito 1: Marcar Trabajado si tiene Ruta asignada)
     syncDisponibilizacionToAttendance(fecha, enrichedRows);
@@ -2046,8 +2052,32 @@ export const usePlanningStore = create((set, get) => ({
       selectedRuteoDate: fecha
     });
 
-    toast.success(`¡Disponibilización del ${fecha} guardada y transmitida a Envío de rutas!`);
-    return true;
+    if (dbOk) {
+      toast.success(`¡Disponibilización del ${fecha} guardada y sincronizada en el servidor!`);
+    } else {
+      toast.warning(`Disponibilización guardada localmente. Hubo un error de conexión con la nube. Usa "Sincronizar Nube" para reintentar.`);
+    }
+    return dbOk;
+  },
+
+  // Sincronizar manualmente la fecha activa con la nube
+  syncActiveDateToCloud: async (fecha) => {
+    const { transmittedAssignments, ruteoOverrides, savedHistoryList } = get();
+    const rows = transmittedAssignments[fecha];
+    if (!rows || rows.length === 0) {
+      toast.warning(`No hay datos en la fecha ${fecha} para sincronizar.`);
+      return false;
+    }
+    toast.loading(`Sincronizando ${fecha} con la nube...`, { id: 'cloud-sync' });
+    const ok = await persistAssignmentsToDb(fecha, rows);
+    if (ruteoOverrides) await persistRuteoOverridesToDb(ruteoOverrides);
+    if (savedHistoryList) await persistHistoryToDb(savedHistoryList);
+    if (ok) {
+      toast.success(`¡Fecha ${fecha} sincronizada exitosamente con la nube! Tus colegas ya la ven reflejada.`, { id: 'cloud-sync' });
+    } else {
+      toast.error(`Error al sincronizar con la nube. Comprueba tu conexión a internet o intenta nuevamente.`, { id: 'cloud-sync' });
+    }
+    return ok;
   },
 
   // REGISTRAR AUDITORÍA DE CAMBIOS (Requisito 2)
@@ -2218,6 +2248,7 @@ export const usePlanningStore = create((set, get) => ({
     nextAssignments[fecha] = nextRows;
 
     persistAssignments(nextAssignments);
+    persistAssignmentsToDb(fecha, nextRows);
 
     // Sincronizar en tiempo real con savedRuteo y savedHistory
     const synced = syncHistoryAndSavedForDate(get(), fecha, nextRows);
@@ -2284,6 +2315,9 @@ export const usePlanningStore = create((set, get) => ({
     });
 
     persistAssignments(nextAssignments);
+    affectedDates.forEach(f => {
+      persistAssignmentsToDb(f, nextAssignments[f]);
+    });
 
     // Sincronizar cada fecha afectada con savedRuteo y savedHistory
     let currentStoreState = { ...get(), transmittedAssignments: nextAssignments };

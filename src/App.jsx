@@ -32,16 +32,21 @@ function App() {
     initPlanningFromDb?.();
 
     // Suscripción Realtime a Supabase: sincroniza automáticamente entre notebooks cuando cualquiera guarde o transmita
+    let debounceTimer = null;
     try {
       const channel = supabase
         .channel('realtime:planning_assignments')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'planning_assignments' }, (payload) => {
-          console.log('[Realtime] Notificación de actualización en planning_assignments:', payload);
-          initPlanningFromDb?.();
+          console.log('[Realtime] Notificación de actualización en planning_assignments:', payload?.new?.fecha || payload);
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            initPlanningFromDb?.();
+          }, 600);
         })
         .subscribe();
 
       return () => {
+        if (debounceTimer) clearTimeout(debounceTimer);
         try {
           supabase.removeChannel(channel);
         } catch (e) {}
