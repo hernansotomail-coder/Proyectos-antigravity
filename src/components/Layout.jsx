@@ -32,6 +32,7 @@ export default function Layout() {
     { key: 'ruteo', name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
     { key: 'change-history', name: 'Histórico de cambios', path: '/change-history', icon: History },
     { key: 'briefing', name: 'Briefing', path: '/briefing', icon: FileText },
+    { key: 'route-dispatch-external', name: 'Envío de rutas externos', path: '/route-dispatch-external', icon: Send },
   ];
 
   // 2. Menú Transporte (Operacional)

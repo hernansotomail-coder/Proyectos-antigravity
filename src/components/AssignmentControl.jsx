@@ -361,8 +361,11 @@ export default function AssignmentControl() {
     if (isoActiveDate && isoActiveDate.includes('-')) {
       const parts = isoActiveDate.split('-');
       if (parts.length === 3) {
+        const yearNum = Number(parts[0]);
+        const monthNum = Number(parts[1]);
+        const lastDay = new Date(yearNum, monthNum, 0).getDate();
         const startOfMonth = `${parts[0]}-${parts[1]}-01`;
-        const endOfMonth = `${parts[0]}-${parts[1]}-31`;
+        const endOfMonth = `${parts[0]}-${parts[1]}-${String(lastDay).padStart(2, '0')}`;
         fetchAttendanceByDateRange(startOfMonth, endOfMonth);
       }
     }
@@ -371,10 +374,15 @@ export default function AssignmentControl() {
   useEffect(() => {
     if (availableDates.length > 0) {
       if (!selectedDisponibilizarDate || !availableDates.includes(selectedDisponibilizarDate) || selectedDisponibilizarDate === '14-10-2026') {
-        setSelectedDisponibilizarDate(availableDates[0]);
+        // Priorizar la fecha más reciente que tenga asignaciones reales realizadas
+        const dateWithAssignments = availableDates.find(d => {
+          const rows = transmittedAssignments[d] || [];
+          return rows.some(r => r.conductor_name || r.camion);
+        });
+        setSelectedDisponibilizarDate(dateWithAssignments || availableDates[0]);
       }
     }
-  }, [availableDates, selectedDisponibilizarDate, setSelectedDisponibilizarDate]);
+  }, [availableDates, selectedDisponibilizarDate, setSelectedDisponibilizarDate, transmittedAssignments]);
 
   // Mapa de estado de asistencia para la fecha activa (staff_id -> service_type)
   const attendanceMap = useMemo(() => {

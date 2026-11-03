@@ -701,18 +701,22 @@ export default function DailyPlanning() {
   }, [transformedRoutes]);
   const specialRoutesCount = transformedRoutes.length - standardRoutesCount;
 
-  // Aggregated KPI numbers for Ruteo (Requisito 7: TOTAL LOCALES = suma de todos los "Recuento distinto de destino" cargados)
-  const totalRutas = transformedRoutes.length;
+  // Aggregated KPI numbers for Ruteo calculados sobre las rutas filtradas (Requisito: se actualizan dinámicamente según "4 Dígitos" o "Sin Ruteo")
+  const totalRutas = filteredRoutes.length;
   const totalLocales = useMemo(() => {
-    return transformedRoutes.reduce((acc, r) => {
+    return filteredRoutes.reduce((acc, r) => {
       const count = (r.recuentoDestino !== undefined && r.recuentoDestino !== null)
         ? Number(r.recuentoDestino)
         : (new Set((r.paradas || []).map(p => p.destino).filter(Boolean)).size || 1);
       return acc + (isNaN(count) ? 0 : count);
     }, 0);
-  }, [transformedRoutes]);
-  const totalVolumen = transformedRoutes.reduce((acc, r) => acc + (parseFloat(r.sumaVolumen) || 0), 0).toFixed(2);
-  const totalCajas = transformedRoutes.reduce((acc, r) => acc + (parseInt(r.sumaCantCJ, 10) || 0), 0);
+  }, [filteredRoutes]);
+  const totalVolumen = useMemo(() => {
+    return filteredRoutes.reduce((acc, r) => acc + (parseFloat(r.sumaVolumen) || 0), 0).toFixed(2);
+  }, [filteredRoutes]);
+  const totalCajas = useMemo(() => {
+    return filteredRoutes.reduce((acc, r) => acc + (parseInt(r.sumaCantCJ, 10) || 0), 0);
+  }, [filteredRoutes]);
   const countModified = transformedRoutes.filter(r => r.isModified).length;
 
   return (

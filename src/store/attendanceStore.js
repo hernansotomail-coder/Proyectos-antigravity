@@ -9,6 +9,26 @@ export const useAttendanceStore = create((set) => ({
   fetchAttendanceByDateRange: async (startDate, endDate) => {
     set({ isLoading: true });
     try {
+      // Helper para normalizar fecha YYYY-MM-DD y asegurar que el día no desborde el mes (ej: 2026-11-31 -> 2026-11-30)
+      const sanitizeIsoDate = (dStr) => {
+        if (!dStr || typeof dStr !== 'string') return dStr;
+        const parts = dStr.split('-');
+        if (parts.length === 3) {
+          const y = Number(parts[0]);
+          const m = Number(parts[1]);
+          const d = Number(parts[2]);
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d) && m >= 1 && m <= 12) {
+            const maxDays = new Date(y, m, 0).getDate();
+            const safeD = Math.min(Math.max(1, d), maxDays);
+            return `${parts[0]}-${String(m).padStart(2, '0')}-${String(safeD).padStart(2, '0')}`;
+          }
+        }
+        return dStr;
+      };
+
+      const cleanStart = sanitizeIsoDate(startDate);
+      const cleanEnd = sanitizeIsoDate(endDate);
+
       let allData = [];
       let from = 0;
       const limit = 1000;
@@ -18,8 +38,8 @@ export const useAttendanceStore = create((set) => ({
         const { data, error } = await supabase
           .from('attendance')
           .select('*')
-          .gte('date', startDate)
-          .lte('date', endDate)
+          .gte('date', cleanStart)
+          .lte('date', cleanEnd)
           .order('id', { ascending: true })
           .range(from, from + limit - 1);
 

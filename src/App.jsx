@@ -64,6 +64,7 @@ function App() {
           <Route path="assignment" element={<Login><AssignmentControl /></Login>} />
           <Route path="historical-assignment" element={<Login><HistoricalAssignment /></Login>} />
           <Route path="route-dispatch" element={<Login><RouteDispatch /></Login>} />
+          <Route path="route-dispatch-external" element={<Login><RouteDispatch onlyExternal={true} /></Login>} />
           <Route path="fleet-dashboard" element={<Login><FleetDashboard /></Login>} />
           <Route path="wash-dashboard" element={<Login><WashDashboard /></Login>} />
           <Route path="fleet" element={<Login><AddFleet /></Login>} />

@@ -545,6 +545,7 @@ export default function RuteoView() {
   // FILTRO RÁPIDO GLOBAL Y FILTROS COMBINADOS (Requisitos 1 y 2)
   // ==========================================
   const [quickSearch, setQuickSearch] = useState('');
+  const [routeTypeFilter, setRouteTypeFilter] = useState('all'); // 'all' | 'standard' | 'special'
 
   const [selectedTransportistas, setSelectedTransportistas] = useState([]);
   const [selectedClientes, setSelectedClientes] = useState([]);
@@ -649,8 +650,21 @@ export default function RuteoView() {
     return map;
   }, [currentRoutes]);
 
+  // Conteo de rutas estándar (4 dígitos) vs especiales / sin ruteo tradicional
+  const standardRoutesCount = useMemo(() => {
+    return currentRoutes.filter(r => /^[1-9]\d{3}$/.test(String(r.ruta).trim())).length;
+  }, [currentRoutes]);
+  const specialRoutesCount = currentRoutes.length - standardRoutesCount;
+
   // Función unificada para verificar si una ruta cumple los filtros (excluyendo un filtro para cálculo de opciones combinadas)
   const isRouteMatching = useCallback((r, excludeFilter = null) => {
+    // 0. Tipo de ruta (4 Dígitos vs Sin Ruteo / Especiales)
+    if (routeTypeFilter !== 'all') {
+      const isStandard = /^[1-9]\d{3}$/.test(String(r.ruta).trim());
+      if (routeTypeFilter === 'standard' && !isStandard) return false;
+      if (routeTypeFilter === 'special' && isStandard) return false;
+    }
+
     // 1. Filtro Rápido global
     if (normalizedQuickTerm) {
       if (!matchRouteQuickSearch(r, normalizedQuickTerm)) return false;
@@ -729,7 +743,8 @@ export default function RuteoView() {
     selectedAuxiliares,
     selectedVueltas,
     selectedOperations,
-    truckToOperationsMap
+    truckToOperationsMap,
+    routeTypeFilter
   ]);
 
   // Listas de opciones dinámicas y combinadas (Requisito 2)
@@ -1786,11 +1801,50 @@ export default function RuteoView() {
       {/* Filtro por Mini-Etiquetas de Operación Multi-selección (Igual que Briefing) */}
       <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 p-3.5 space-y-2.5 shrink-0">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Filter size={15} className="text-blue-600" />
-            <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
-              Filtrar por Operación (Multi-selección):
-            </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <Filter size={15} className="text-blue-600" />
+              <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                Operación:
+              </span>
+            </div>
+
+            {/* Selector de tipo de ruta: Todos / 4 Dígitos / Sin Ruteo */}
+            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setRouteTypeFilter('all')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  routeTypeFilter === 'all'
+                    ? 'bg-white text-slate-800 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Todos ({currentRoutes.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRouteTypeFilter('standard')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  routeTypeFilter === 'standard'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                4 Dígitos ({standardRoutesCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setRouteTypeFilter('special')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  routeTypeFilter === 'special'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Sin Ruteo ({specialRoutesCount})
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {selectedOperations.length > 0 && (

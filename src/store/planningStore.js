@@ -1565,45 +1565,30 @@ export const usePlanningStore = create((set, get) => ({
           if (!localRows || localRows.length === 0) {
             mergedAssignments[cleanFecha] = dbRows;
           } else {
-            // Fusionar respetando filas ya asignadas localmente pero con DB autoritativa en rutas, métricas y paradas
-            const localRowMap = new Map();
-            localRows.forEach(lr => {
-              const k = `${lr.ruta || ''}:::${lr.id || ''}`;
-              localRowMap.set(k, lr);
-            });
+            // La BD es la autoridad central sincronizada entre todos los computadores
+            // Preservar la lista de la BD directamente para reflejar inmediatamente asignaciones y desasignaciones
+            const dbHasAssignments = dbRows.some(r => r.conductor_name || r.camion);
             
-            mergedAssignments[cleanFecha] = dbRows.map(dbR => {
-              const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
-              const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
-              if (lr) {
-                // Si la BD tiene asignación, la BD es la autoridad compartida.
-                // Si la BD viene vacía pero localmente ya había una asignación, preservar local.
-                return {
-                  ...dbR,
-                  conductor_name: (dbR.conductor_name !== undefined && dbR.conductor_name !== '') ? dbR.conductor_name : (lr.conductor_name || ''),
-                  conductor_rut: (dbR.conductor_rut !== undefined && dbR.conductor_rut !== '') ? dbR.conductor_rut : (lr.conductor_rut || ''),
-                  camion: (dbR.camion !== undefined && dbR.camion !== '') ? dbR.camion : (lr.camion || ''),
-                  tipo_equipo: (dbR.tipo_equipo !== undefined && dbR.tipo_equipo !== '') ? dbR.tipo_equipo : (lr.tipo_equipo || ''),
-                  rampla: (dbR.rampla !== undefined && dbR.rampla !== '') ? dbR.rampla : (lr.rampla || ''),
-                  n_vuelta: (dbR.n_vuelta !== undefined && dbR.n_vuelta !== '') ? dbR.n_vuelta : (lr.n_vuelta || ''),
-                  aux1_name: (dbR.aux1_name !== undefined && dbR.aux1_name !== '') ? dbR.aux1_name : (lr.aux1_name || ''),
-                  aux1_rut: (dbR.aux1_rut !== undefined && dbR.aux1_rut !== '') ? dbR.aux1_rut : (lr.aux1_rut || ''),
-                  aux2_name: (dbR.aux2_name !== undefined && dbR.aux2_name !== '') ? dbR.aux2_name : (lr.aux2_name || ''),
-                  aux2_rut: (dbR.aux2_rut !== undefined && dbR.aux2_rut !== '') ? dbR.aux2_rut : (lr.aux2_rut || ''),
-                  turno: (dbR.turno !== undefined && dbR.turno !== '') ? dbR.turno : (lr.turno || ''),
-                  hora_cita: (dbR.hora_cita !== undefined && dbR.hora_cita !== '') ? dbR.hora_cita : (lr.hora_cita || ''),
-                  prioridad: dbR.prioridad || lr.prioridad || 'Normal',
-                  destino_prioritario: dbR.destino_prioritario || lr.destino_prioritario || '',
-                  // La DB es la autoridad absoluta de paradas, destinos y métricas
-                  paradas: (dbR.paradas && dbR.paradas.length > 0) ? dbR.paradas : (lr.paradas || []),
-                  locales: dbR.locales != null ? dbR.locales : lr.locales,
-                  m3: dbR.m3 != null ? dbR.m3 : lr.m3,
-                  peso: dbR.peso != null ? dbR.peso : lr.peso,
-                  cantCJ: dbR.cantCJ != null ? dbR.cantCJ : lr.cantCJ
-                };
+            if (dbHasAssignments) {
+              mergedAssignments[cleanFecha] = [...dbRows];
+            } else {
+              // Si la BD para esta fecha aún no tiene asignaciones, pero el usuario local ya tiene asignaciones en curso
+              const localHasAssignments = localRows.some(r => r.conductor_name || r.camion);
+              if (localHasAssignments) {
+                const localRowMap = new Map();
+                localRows.forEach(lr => {
+                  const k = `${lr.ruta || ''}:::${lr.id || ''}`;
+                  localRowMap.set(k, lr);
+                });
+                mergedAssignments[cleanFecha] = dbRows.map(dbR => {
+                  const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
+                  const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
+                  return lr ? { ...dbR, ...lr } : dbR;
+                });
+              } else {
+                mergedAssignments[cleanFecha] = [...dbRows];
               }
-              return dbR;
-            });
+            }
 
             // Preservar rutas aperturadas localmente si aún no existen en DB
             const dbRouteKeys = new Set(dbRows.map(dr => String(dr.ruta).trim()));

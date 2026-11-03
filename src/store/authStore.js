@@ -32,6 +32,9 @@ export const canUserViewMenu = (user, menuKey) => {
   if (userMenus && userMenus[menuKey] !== undefined) {
     return !!userMenus[menuKey].view;
   }
+  if (menuKey === 'route-dispatch-external' && userMenus && userMenus['route-dispatch'] !== undefined) {
+    return !!userMenus['route-dispatch'].view;
+  }
 
   try {
     const saved = localStorage.getItem('keylogistics_user_permissions');
@@ -40,6 +43,9 @@ export const canUserViewMenu = (user, menuKey) => {
       const userPerm = perms[username] || (user.id && perms[user.id]);
       if (userPerm?.menus && userPerm.menus[menuKey] !== undefined) {
         return !!userPerm.menus[menuKey].view;
+      }
+      if (menuKey === 'route-dispatch-external' && userPerm?.menus && userPerm.menus['route-dispatch'] !== undefined) {
+        return !!userPerm.menus['route-dispatch'].view;
       }
     }
   } catch (e) {}
@@ -68,6 +74,9 @@ export const canUserEditMenu = (user, menuKey) => {
   if (userMenus && userMenus[menuKey] !== undefined) {
     return !!userMenus[menuKey].edit;
   }
+  if (menuKey === 'route-dispatch-external' && userMenus && userMenus['route-dispatch'] !== undefined) {
+    return !!userMenus['route-dispatch'].edit;
+  }
 
   try {
     const saved = localStorage.getItem('keylogistics_user_permissions');
@@ -76,6 +85,9 @@ export const canUserEditMenu = (user, menuKey) => {
       const userPerm = perms[username] || (user.id && perms[user.id]);
       if (userPerm?.menus && userPerm.menus[menuKey] !== undefined) {
         return !!userPerm.menus[menuKey].edit;
+      }
+      if (menuKey === 'route-dispatch-external' && userPerm?.menus && userPerm.menus['route-dispatch'] !== undefined) {
+        return !!userPerm.menus['route-dispatch'].edit;
       }
     }
   } catch (e) {}

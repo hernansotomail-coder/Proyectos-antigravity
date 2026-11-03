@@ -11,6 +11,7 @@ export const APP_MODULES = [
       { key: 'ruteo', label: 'Ruteo', path: '/ruteo' },
       { key: 'change-history', label: 'Histórico de cambios', path: '/change-history' },
       { key: 'briefing', label: 'Briefing', path: '/briefing' },
+      { key: 'route-dispatch-external', label: 'Envío de rutas externos', path: '/route-dispatch-external' },
     ]
   },
   {
@@ -38,6 +39,7 @@ export const APP_MODULES = [
       { key: 'add-staff', label: 'Agregar Dotación', path: '/add-staff' },
       { key: 'manage-staff', label: 'Gestión Dotación', path: '/manage-staff' },
       { key: 'attendance', label: 'Asistencia', path: '/attendance' },
+      { key: 'pago-dotacion', label: 'Pago dotación', path: '/pago-dotacion' },
       { key: 'users', label: 'Usuarios (Mantenedor)', path: '/users' },
     ]
   }

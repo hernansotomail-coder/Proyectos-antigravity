@@ -12,6 +12,7 @@ import { useStaffStore } from '../store/staffStore';
 import { useFleetStore } from '../store/fleetStore';
 import { findFarthestComunaForRoute, getComunaDistance } from './RuteoView';
 import { matchVehicleByCode } from '../lib/vehicleMatcher';
+import { isAssignmentExternal } from './Briefing';
 import { Button } from './ui/Button';
 
 // Persistencia local para teléfonos de conductores (para compatibilidad de envíos por WhatsApp Personal)
@@ -312,7 +313,7 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinuto
   return msg;
 };
 
-export default function RouteDispatch() {
+export default function RouteDispatch({ onlyExternal = false }) {
   const { fleetList } = useFleetStore();
   const { savedHistoryList, savedRuteoByDate, transmittedAssignments, ruteoOverrides, initPlanningFromDb } = usePlanningStore();
   const { staffList, fetchStaff, updateStaffPhone } = useStaffStore();
@@ -528,6 +529,10 @@ export default function RouteDispatch() {
   // Filtrado de filas
   const filteredRows = useMemo(() => {
     let list = rawRows;
+
+    if (onlyExternal) {
+      list = list.filter(r => isAssignmentExternal(r, fleetList, staffList));
+    }
 
     if (vueltaFilter !== 'Todas') {
       list = list.filter(r => String(r.n_vuelta || '1') === String(vueltaFilter));
@@ -805,14 +810,21 @@ export default function RouteDispatch() {
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div>
           <div className="flex items-center gap-2">
-            <span className="bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded-full text-xs flex items-center gap-1">
+            <span className={`font-bold px-2.5 py-0.5 rounded-full text-xs flex items-center gap-1 ${
+              onlyExternal ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+            }`}>
               <Send size={12} />
-              Transporte
+              {onlyExternal ? 'Flota y Dotación Externa' : 'Transporte'}
             </span>
-            <h1 className="text-xl font-bold text-slate-800">Envío de Rutas</h1>
+            <h1 className="text-xl font-bold text-slate-800">
+              {onlyExternal ? 'Envío de Rutas Externos' : 'Envío de Rutas'}
+            </h1>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Información guardada desde Disponibilización formateada para envío por WhatsApp personal (Conductor y Auxiliar consolidados).
+            {onlyExternal 
+              ? 'Rutas asignadas a terceros y flota externa formateadas para coordinación y envío por WhatsApp.'
+              : 'Información guardada desde Disponibilización formateada para envío por WhatsApp personal (Conductor y Auxiliar consolidados).'
+            }
           </p>
         </div>
 
