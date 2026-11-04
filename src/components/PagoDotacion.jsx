@@ -266,7 +266,9 @@ export default function PagoDotacion() {
       }
       const monto = parseFloat(p.total) || 0;
       agg[pKey].totalMonto += monto;
-      agg[pKey].tripsCount += 1;
+      if (!p.isRmAdjustment) {
+        agg[pKey].tripsCount += 1;
+      }
     });
 
     const list = Object.values(agg).map(item => ({
@@ -355,10 +357,23 @@ export default function PagoDotacion() {
 
   // KPIs Dinámicos (Requisitos 3.2, 3.3, 3.4, 10.3)
   const kpiData = useMemo(() => {
+    // Monto total considerando el total con descuentos y ajustes
     const totalMonto = filteredPayments.reduce((acc, p) => acc + (parseFloat(p.total) || 0), 0);
 
-    // 3.2 y 10.3: Total de viajes en base a cantidad de vueltas/rutas realizadas (sin colapsar vueltas)
-    const totalViajes = filteredPayments.length;
+    // Total de viajes: solo la relación Fecha, Conductor/Auxiliar, Ruta (excluyendo filas de ajuste de monto RM)
+    const realTripRows = filteredPayments.filter(p => !p.isRmAdjustment);
+    const distinctTripSet = new Set();
+    realTripRows.forEach(p => {
+      const f = (p.fechaDespacho || p.fecha || '').trim();
+      const c = (cleanRut(p.rutCond1) || p.nomCond1 || '').trim().toUpperCase();
+      const r = (p.rutas || p.tipoPunto || '').trim().toUpperCase();
+      if (f && c && r) {
+        distinctTripSet.add(`${f}:::${c}:::${r}`);
+      } else {
+        distinctTripSet.add(p.id);
+      }
+    });
+    const totalViajes = distinctTripSet.size;
 
     // 3.3: Total Pagado Periodo Anterior y Fluctuación
     let previousPeriodTotal = 0;
@@ -406,7 +421,7 @@ export default function PagoDotacion() {
         return (info?.key === targetKey) || (p.periodo === targetKey);
       });
       const monto = rows.reduce((acc, r) => acc + (parseFloat(r.total) || 0), 0);
-      const trips = rows.length; // Conteo real de viajes / vueltas
+      const trips = rows.filter(r => !r.isRmAdjustment).length; // Conteo real de viajes / vueltas excluyendo ajustes RM
       const countStaff = new Set(rows.map(r => cleanRut(r.rutCond1 || r.rut) || r.nomCond1)).size;
       return { monto, trips, countStaff, rowsCount: rows.length };
     };
@@ -458,7 +473,9 @@ export default function PagoDotacion() {
       }
       const entry = targetMap.get(key);
       entry.totalMonto += monto;
-      entry.totalViajes += 1; // Cada registro representa una vuelta real
+      if (!p.isRmAdjustment) {
+        entry.totalViajes += 1; // Solo se contabilizan viajes reales excluyendo ajustes
+      }
     });
 
     const formatTop = (map) => {
@@ -651,36 +668,41 @@ export default function PagoDotacion() {
           );
 
           // Si el valor calculado difiere del que viene en el Excel, se ingresa como una fila diferente con color diferenciado (Morado pastel)
+          // La nueva fila contiene SOLO la diferencia (+ o -) para llegar al valor oficial, ej: -1400
           if (calcRmMonto !== null && Math.round(calcRmMonto) !== Math.round(totalVal)) {
-            parsedRows.push({
-              id: `colectivo-ajuste-rm-${Date.now()}-${r}-${Math.random().toString(36).substr(2, 4)}`,
-              contratoOrigen: 'Colectivo',
-              periodo: baseItem.periodo,
-              periodoLabel: baseItem.periodoLabel,
-              fechaDespacho: normFecha,
-              rutCond1: cRut,
-              nomCond1: baseItem.nomCond1,
-              tipoCond1: baseItem.tipoCond1,
-              rutas: `${rutas || 'Ruta'} [Ajuste Escala RM: ${puntosVal} pts, ${m3Val} m³]`,
-              transportistas: baseItem.transportistas,
-              total: calcRmMonto,
-              originalExcelTotal: totalVal,
-              diferenciaMonto: calcRmMonto - totalVal,
-              pagoCond1: calcRmMonto,
-              tipoPago: 'RM',
-              tipoCalculo: 'Escala Oficial RM',
-              segundaVuelta: segundaVueltaVal,
-              totalPuntosViaje: puntosVal,
-              totalM3Viaje: m3Val,
-              totalCajasViaje: cajasVal,
-              contCond1: baseItem.contCond1,
-              tipoServicio: 'Ajuste Escala RM',
-              glosa: 'Ajuste_RM_Puntos',
-              origen: 'Colectivo (Ajuste RM)',
-              isRmAdjustment: true, // Color morado/violeta pastel
-              isEventualidad: false,
-              matchedStaffInAttendance: !!matchedStaff
-            });
+            const deltaMonto = Math.round(calcRmMonto) - Math.round(totalVal);
+            if (deltaMonto !== 0) {
+              parsedRows.push({
+                id: `colectivo-ajuste-rm-${Date.now()}-${r}-${Math.random().toString(36).substr(2, 4)}`,
+                contratoOrigen: 'Colectivo',
+                periodo: baseItem.periodo,
+                periodoLabel: baseItem.periodoLabel,
+                fechaDespacho: normFecha,
+                rutCond1: cRut,
+                nomCond1: baseItem.nomCond1,
+                tipoCond1: baseItem.tipoCond1,
+                rutas: `${rutas || 'Ruta'} [Diferencia Escala RM: ${deltaMonto > 0 ? '+' : ''}${deltaMonto.toLocaleString('es-CL')}]`,
+                transportistas: baseItem.transportistas,
+                total: deltaMonto,
+                pagoCond1: deltaMonto,
+                diferenciaMonto: deltaMonto,
+                originalExcelTotal: totalVal,
+                expectedScaleTotal: calcRmMonto,
+                tipoPago: 'RM',
+                tipoCalculo: 'Diferencia Escala Oficial RM',
+                segundaVuelta: segundaVueltaVal,
+                totalPuntosViaje: puntosVal,
+                totalM3Viaje: m3Val,
+                totalCajasViaje: cajasVal,
+                contCond1: baseItem.contCond1,
+                tipoServicio: 'Ajuste Escala RM',
+                glosa: 'Ajuste_RM_Puntos',
+                origen: 'Colectivo (Ajuste RM)',
+                isRmAdjustment: true, // Color morado/violeta pastel
+                isEventualidad: false,
+                matchedStaffInAttendance: !!matchedStaff
+              });
+            }
           }
         }
 
@@ -1245,14 +1267,14 @@ export default function PagoDotacion() {
     }
 
     const totalMonto = items.reduce((acc, t) => acc + (parseFloat(t.total) || 0), 0);
-    const totalViajes = items.length;
+    const totalViajes = items.filter(t => !t.isRmAdjustment).length;
     const staffSet = new Set(items.map(t => cleanRut(t.rutCond1) || t.nomCond1));
 
     const byContract = {};
     items.forEach(t => {
       const c = t.contratoOrigen || t.origen || 'Otros';
       if (!byContract[c]) byContract[c] = { name: c, count: 0, monto: 0 };
-      byContract[c].count += 1;
+      if (!t.isRmAdjustment) byContract[c].count += 1;
       byContract[c].monto += (parseFloat(t.total) || 0);
     });
 
@@ -1268,7 +1290,7 @@ export default function PagoDotacion() {
           monto: 0
         };
       }
-      byStaff[k].count += 1;
+      if (!t.isRmAdjustment) byStaff[k].count += 1;
       byStaff[k].monto += (parseFloat(t.total) || 0);
     });
 
@@ -1491,7 +1513,7 @@ export default function PagoDotacion() {
   }, []);
 
   return (
-    <div className="bg-white p-5 md:p-7 rounded-2xl shadow-sm border border-slate-100 max-w-7xl mx-auto space-y-6">
+    <div className="w-full bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 space-y-6">
       
       {/* Cabecera Principal */}
       <div className="flex items-center justify-between flex-wrap gap-4 border-b border-slate-100 pb-5">
@@ -2893,8 +2915,9 @@ export default function PagoDotacion() {
                         }`}>
                           <div>{formatCLP(row.total)}</div>
                           {row.originalExcelTotal !== undefined && (
-                            <div className="text-[10px] text-purple-700 font-normal">
+                            <div className="text-[10px] text-purple-800 font-semibold">
                               Excel: {formatCLP(row.originalExcelTotal)}
+                              {row.expectedScaleTotal !== undefined && ` → Escala: ${formatCLP(row.expectedScaleTotal)}`}
                             </div>
                           )}
                         </td>

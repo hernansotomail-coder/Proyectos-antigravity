@@ -122,6 +122,28 @@ export const usePagoDotacionStore = create((set, get) => ({
         }
       }
 
+      // Normalizar registros de ajuste RM si venían guardados con valor absoluto en vez de diferencia neta (+ o -)
+      const normalizeAdjustment = (item) => {
+        if (
+          item &&
+          item.isRmAdjustment && 
+          item.originalExcelTotal !== undefined && 
+          item.diferenciaMonto !== undefined &&
+          item.expectedScaleTotal === undefined &&
+          item.total > 0
+        ) {
+          return {
+            ...item,
+            total: item.diferenciaMonto,
+            pagoCond1: item.diferenciaMonto,
+            expectedScaleTotal: item.total
+          };
+        }
+        return item;
+      };
+      loadedMaster = loadedMaster.map(normalizeAdjustment);
+      loadedTrans = loadedTrans.map(normalizeAdjustment);
+
       // 3. Cargar fechas de última carga por contrato
       const { data: datesData, error: datesErr } = await supabase
         .from('planning_assignments')
