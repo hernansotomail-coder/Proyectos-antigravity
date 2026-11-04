@@ -8515,26 +8515,26 @@ export function getAllOperationsForRoute(r) {
     ops.add('PETROLERAS');
   }
 
-  // 1. Catálogo maestro por número de ruta
+  // 1. Catálogo maestro por número de ruta (Prioridad máxima para evitar mezclas con otros clientes)
   const found = findOperationForRoute(r.ruta);
   if (found && found.operacion && found.operacion !== 'Sin Operación') {
     splitOperationNames(found.operacion).forEach(o => ops.add(o));
   }
 
-  // 2. Campo r.operacion
-  if (r.operacion && typeof r.operacion === 'string') {
-    splitOperationNames(r.operacion).forEach(o => ops.add(o));
-  }
-
-  // 3. Campo r.cliente o r.denominacion o r.nombreRuta
-  if (r.cliente && typeof r.cliente === 'string') {
-    splitOperationNames(r.cliente).forEach(o => ops.add(o));
-  }
-  if (r.denominacion && typeof r.denominacion === 'string') {
-    splitOperationNames(r.denominacion).forEach(o => ops.add(o));
-  }
-  if (r.nombreRuta && typeof r.nombreRuta === 'string') {
-    splitOperationNames(r.nombreRuta).forEach(o => ops.add(o));
+  // 2. Si no está en el catálogo maestro, resolver por campos del registro
+  if (ops.size === 0) {
+    if (r.operacion && typeof r.operacion === 'string') {
+      splitOperationNames(r.operacion).forEach(o => ops.add(o));
+    }
+    if (r.cliente && typeof r.cliente === 'string') {
+      splitOperationNames(r.cliente).forEach(o => ops.add(o));
+    }
+    if (r.denominacion && typeof r.denominacion === 'string') {
+      splitOperationNames(r.denominacion).forEach(o => ops.add(o));
+    }
+    if (r.nombreRuta && typeof r.nombreRuta === 'string') {
+      splitOperationNames(r.nombreRuta).forEach(o => ops.add(o));
+    }
   }
 
   // 4. Paradas de la ruta (solo campos de operacion y cliente explícitos, nunca destinos/direcciones)

@@ -129,10 +129,10 @@ export default function UsersManager() {
   };
 
   return (
-    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full overflow-hidden">
+    <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col space-y-4">
       
       {/* Encabezado */}
-      <div className="flex justify-between items-center mb-4 shrink-0 pb-3 border-b border-slate-100">
+      <div className="flex justify-between items-center shrink-0 pb-3 border-b border-slate-100">
         <div>
           <div className="flex items-center gap-2">
             <span className="bg-purple-100 text-purple-800 text-xs font-black px-2.5 py-0.5 rounded-full">
@@ -146,11 +146,11 @@ export default function UsersManager() {
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-12 gap-5 flex-1 min-h-0 overflow-hidden">
+      <div className="grid lg:grid-cols-12 gap-5 items-start">
         
         {/* Formulario de Creación / Edición (5 columnas en pantallas grandes) */}
-        <div className="lg:col-span-5 bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col min-h-0 overflow-y-auto">
-          <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-200">
+        <div className="lg:col-span-5 bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col space-y-3 lg:sticky lg:top-4">
+          <div className="flex items-center justify-between pb-2 mb-1 border-b border-slate-200">
             <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">
               <User size={16} className="text-blue-600" />
               <span>{editingId ? 'Editar Credenciales y Permisos' : 'Crear Nuevo Usuario'}</span>
@@ -162,7 +162,7 @@ export default function UsersManager() {
             )}
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-3 flex-1 flex flex-col">
+          <form onSubmit={handleSubmit} className="space-y-3 flex flex-col">
             <div className="grid grid-cols-2 gap-2.5">
               <Input 
                 label="Usuario (Login)" 
@@ -193,7 +193,7 @@ export default function UsersManager() {
             />
 
             {/* Selector de Permisos de Menú (Requisito 4) */}
-            <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2.5 flex-1 flex flex-col">
+            <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2.5 flex flex-col">
               <div className="flex items-center justify-between pb-1 border-b border-slate-100">
                 <span className="text-xs font-black text-slate-800 uppercase tracking-wide">
                   Permisos por Menú (Ver / Editar)
@@ -202,7 +202,7 @@ export default function UsersManager() {
                   <button
                     type="button"
                     onClick={() => handleSetAllMenus(true, true)}
-                    className="text-blue-600 hover:underline font-bold"
+                    className="text-blue-600 hover:underline font-bold cursor-pointer"
                   >
                     Todos
                   </button>
@@ -210,7 +210,7 @@ export default function UsersManager() {
                   <button
                     type="button"
                     onClick={() => handleSetAllMenus(true, false)}
-                    className="text-amber-600 hover:underline font-bold"
+                    className="text-amber-600 hover:underline font-bold cursor-pointer"
                   >
                     Solo Ver
                   </button>
@@ -218,7 +218,7 @@ export default function UsersManager() {
                   <button
                     type="button"
                     onClick={() => handleSetAllMenus(false, false)}
-                    className="text-red-600 hover:underline font-bold"
+                    className="text-red-600 hover:underline font-bold cursor-pointer"
                   >
                     Ninguno
                   </button>
@@ -226,7 +226,7 @@ export default function UsersManager() {
               </div>
 
               {/* Matriz de módulos completa sin cortes ni truncamiento */}
-              <div className="space-y-3 pr-1 text-xs">
+              <div className="space-y-3 pr-1 text-xs max-h-[340px] overflow-y-auto">
                 {APP_MODULES.map(mod => (
                   <div key={mod.module} className="border border-slate-100 rounded-lg p-2 bg-slate-50/60 space-y-1.5">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
@@ -311,13 +311,13 @@ export default function UsersManager() {
         </div>
 
         {/* Lista de Usuarios Registrados (7 columnas en pantallas grandes) */}
-        <div className="lg:col-span-7 border border-slate-200 rounded-2xl bg-white flex flex-col min-h-0 overflow-hidden shadow-2xs">
+        <div className="lg:col-span-7 border border-slate-200 rounded-2xl bg-white flex flex-col shadow-2xs overflow-hidden">
           <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between shrink-0">
             <span className="font-bold text-xs text-slate-700">Usuarios Registrados en Sistema</span>
             <span className="text-[11px] text-slate-500 font-semibold">{users.length} cuentas activas</span>
           </div>
 
-          <div className="flex-1 overflow-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 border-b border-slate-200 text-[10px] uppercase font-bold tracking-wider select-none">
                 <tr>

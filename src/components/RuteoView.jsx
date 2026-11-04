@@ -1077,7 +1077,11 @@ export default function RuteoView() {
       // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación y combinaciones de viajes)
       const opsSet = new Set();
       trip.rutas.forEach(r => {
-        const op = getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente);
+        // Consultar primero el catálogo maestro por número de ruta para evitar contaminaciones indebidas
+        const masterOp = getOperacionName(r.ruta);
+        const op = masterOp && masterOp !== 'Sin Operación'
+          ? masterOp
+          : (getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente));
         if (op) {
           splitOperationNames(op).forEach(o => {
             const canon = canonicalizeOperation(o);
@@ -1091,7 +1095,11 @@ export default function RuteoView() {
       const zonaItems = trip.rutas.map(r => {
         const farthest = findFarthestComunaForRoute(r);
         const m3Fmt = (parseFloat(r.m3) || 0).toFixed(4);
-        const opName = canonicalizeOperation(getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente));
+        const masterOp = getOperacionName(r.ruta);
+        const rawOp = masterOp && masterOp !== 'Sin Operación'
+          ? masterOp
+          : (getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente));
+        const opName = canonicalizeOperation(rawOp);
         return {
           ruta: r.ruta,
           cliente: opName,
