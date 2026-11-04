@@ -7,11 +7,13 @@ import {
   Search, Filter, Download, DollarSign, Calendar, Truck, 
   Users, Edit3, X, RefreshCw, FileText, ArrowUpDown,
   TrendingUp, TrendingDown, Award, Sparkles, Send,
-  ChevronRight, Layers, FileSpreadsheet
+  ChevronRight, Layers, FileSpreadsheet, Mail, History,
+  CheckSquare, Square, Copy, ExternalLink, Check, Info, Eye
 } from 'lucide-react';
 import { Button } from './ui/Button';
 import { useStaffStore } from '../store/staffStore';
 import { useAttendanceStore } from '../store/attendanceStore';
+import { useAuthStore } from '../store/authStore';
 import { usePlanningStore, normalizeDate, parseDateStrToTimestamp } from '../store/planningStore';
 import { 
   usePagoDotacionStore, 
@@ -44,6 +46,51 @@ export const SERVICE_TYPE_OPTIONS = [
   'Otro'
 ];
 
+// Opciones de contratos para el filtro múltiple (Requisito 10.4)
+export const CONTRACT_FILTER_OPTIONS = [
+  { id: 'Colectivo', label: 'Colectivo', match: (str) => str.toLowerCase().includes('colectivo') },
+  { id: 'Contrato 8', label: 'Contrato 8', match: (str) => str.includes('8') },
+  { id: 'Contrato 9', label: 'Contrato 9', match: (str) => str.includes('9') },
+  { id: 'Contrato 13', label: 'Contrato 13', match: (str) => str.includes('13') },
+  { id: 'Eventualidad_Key', label: 'Eventualidad_Key', match: (str, isMan, isEv) => isMan || str.toLowerCase().includes('eventualidad') || isEv }
+];
+
+// Validación y cálculo de escala oficial RM por Puntos y M3 para Contratos Colectivos (Requisito 10.2)
+export const calculateColectivoRmMonto = (contCond, tipoPago, puntosRaw, m3Raw) => {
+  if (cleanStr(tipoPago).toUpperCase() !== 'RM') return null;
+  const c = cleanStr(contCond).padStart(3, '0');
+  if (c !== '018' && c !== '019') return null;
+  const factor = (c === '018') ? 0.5 : 1.0;
+  const pts = parseFloat(puntosRaw) || 0;
+  const vol = parseFloat(m3Raw) || 0;
+
+  // 1. Overrides por volumen en m3:
+  // "para los rangos 1 a 3 cuando este se encuentre entre 10 a 12 m^3 en la columna Total M3Viaje debes considerar un valor de 6000 para 019 y la mitad para 018"
+  if (pts >= 1 && pts <= 3 && vol >= 10 && vol <= 12) {
+    return 6000 * factor;
+  }
+  // "En el caso de mas de 12 m^3 en los punto de 1 a 3 o 4 a 6 necesito que su valor sea 8000 para los 019 y la mitad para los 018"
+  if ((pts >= 1 && pts <= 6) && vol > 12) {
+    return 8000 * factor;
+  }
+
+  // 2. Escala base por Puntos:
+  // 1 a 3 -> 3.500 (019) / 1.750 (018)
+  if (pts >= 1 && pts <= 3) return 3500 * factor;
+  // 4 a 6 -> 7.000 (019) / 3.500 (018)
+  if (pts >= 4 && pts <= 6) return 7000 * factor;
+  // 7 a 9 -> 8.000 (019) / 4.000 (018)
+  if (pts >= 7 && pts <= 9) return 8000 * factor;
+  // 10 a 20 -> 10.000 (019) / 5.000 (018)
+  if (pts >= 10 && pts <= 20) return 10000 * factor;
+  // 21 a 30 -> 12.000 (019) / 6.000 (018)
+  if (pts >= 21 && pts <= 30) return 12000 * factor;
+  // mas a 31 -> 14.000 (019) / 7.000 (018)
+  if (pts >= 31) return 14000 * factor;
+
+  return null;
+};
+
 // Formato de moneda chilena ($ X.XXX.XXX)
 const formatCLP = (amount) => {
   const num = Number(amount) || 0;
@@ -75,6 +122,10 @@ export default function PagoDotacion() {
   const [activeTab, setActiveTab] = useState('dashboard'); 
   // 'dashboard' | 'contratos' | 'excel' | 'manual'
 
+  // Usuario autenticado
+  const { user } = useAuthStore();
+  const currentUserName = user?.name || user?.username || 'Usuario';
+
   // Stores
   const { staffList, fetchStaff } = useStaffStore();
   const { attendanceList, fetchAttendanceByDateRange } = useAttendanceStore();
@@ -83,6 +134,7 @@ export default function PagoDotacion() {
     paymentsList, 
     transmittedTripsList,
     contractUploadDates,
+    changeHistory,
     fetchPayments, 
     addBatchPayments, 
     addManualPayment, 
@@ -124,6 +176,24 @@ export default function PagoDotacion() {
   const [filterAuxiliar, setFilterAuxiliar] = useState('');
   const [filterSearch, setFilterSearch] = useState('');
   const [filterServiceType, setFilterServiceType] = useState('');
+
+  // Filtro por tipo de contrato (multi-selección, Requisito 10.4)
+  const [filterContracts, setFilterContracts] = useState([]); // ['Colectivo', 'Contrato 8', etc.]
+
+  // Selección de viajes para acciones masivas (Requisito 10.4)
+  const [selectedTripIds, setSelectedTripIds] = useState(new Set());
+
+  // Modal Histórico de Cambios (Requisito 10.4)
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
+  const [historyFilterAction, setHistoryFilterAction] = useState('TODOS');
+
+  // Modal Enviar por Correo / Outlook (Requisito 10.4)
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [emailTo, setEmailTo] = useState('operaciones@keylogistics.cl');
+  const [emailCc, setEmailCc] = useState('');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailTemplate, setEmailTemplate] = useState('executive'); // 'executive' | 'detailed' | 'eventualidades'
 
   // Modo Comparación entre dos periodos (Requisito 3.6)
   const [isCompareMode, setIsCompareMode] = useState(false);
@@ -191,18 +261,17 @@ export default function PagoDotacion() {
           label: pLabel,
           shortLabel: pShort,
           totalMonto: 0,
-          tripsSet: new Set()
+          tripsCount: 0
         };
       }
       const monto = parseFloat(p.total) || 0;
       agg[pKey].totalMonto += monto;
-      const tripKey = `${p.fechaDespacho}_${cleanRut(p.rutCond1 || p.rut) || p.nomCond1}_${p.rutas || p.ruta}`;
-      agg[pKey].tripsSet.add(tripKey);
+      agg[pKey].tripsCount += 1;
     });
 
     const list = Object.values(agg).map(item => ({
       ...item,
-      totalViajes: item.tripsSet.size,
+      totalViajes: item.tripsCount,
       montoMM: item.totalMonto / 1000000
     }));
 
@@ -252,6 +321,18 @@ export default function PagoDotacion() {
         return false;
       }
 
+      // Filtro múltiple por Contrato (Requisito 10.4)
+      if (filterContracts.length > 0) {
+        const originStr = cleanStr(item.contratoOrigen || item.origen || item.glosa || '').toLowerCase();
+        const isMan = !!item.isManuallyAssigned;
+        const isEv = !!item.isEventualidad;
+        const matchesContract = filterContracts.some(cId => {
+          const opt = CONTRACT_FILTER_OPTIONS.find(o => o.id === cId);
+          return opt ? opt.match(originStr, isMan, isEv) : false;
+        });
+        if (!matchesContract) return false;
+      }
+
       if (filterSearch.trim()) {
         const term = filterSearch.toLowerCase();
         const fullText = [
@@ -270,17 +351,14 @@ export default function PagoDotacion() {
 
       return true;
     });
-  }, [paymentsList, filterPeriodo, filterConductor, filterAuxiliar, filterServiceType, filterSearch]);
+  }, [paymentsList, filterPeriodo, filterConductor, filterAuxiliar, filterServiceType, filterContracts, filterSearch]);
 
-  // KPIs Dinámicos (Requisitos 3.2, 3.3, 3.4)
+  // KPIs Dinámicos (Requisitos 3.2, 3.3, 3.4, 10.3)
   const kpiData = useMemo(() => {
     const totalMonto = filteredPayments.reduce((acc, p) => acc + (parseFloat(p.total) || 0), 0);
 
-    // 3.2: Total de viajes en base a cantidad de rutas por día (relación entre fecha con conductor/auxiliar)
-    const uniqueTripsSet = new Set(
-      filteredPayments.map(p => `${p.fechaDespacho}_${cleanRut(p.rutCond1 || p.rut) || p.nomCond1}_${p.rutas || p.ruta}`)
-    );
-    const totalViajes = uniqueTripsSet.size;
+    // 3.2 y 10.3: Total de viajes en base a cantidad de vueltas/rutas realizadas (sin colapsar vueltas)
+    const totalViajes = filteredPayments.length;
 
     // 3.3: Total Pagado Periodo Anterior y Fluctuación
     let previousPeriodTotal = 0;
@@ -318,7 +396,7 @@ export default function PagoDotacion() {
     };
   }, [filteredPayments, filterPeriodo, availablePeriodos, paymentsList]);
 
-  // Comparador de Dos Periodos (Requisito 3.6)
+  // Comparador de Dos Periodos (Requisito 3.6, 10.3)
   const comparisonData = useMemo(() => {
     if (!isCompareMode || !comparePeriodA || !comparePeriodB) return null;
 
@@ -328,7 +406,7 @@ export default function PagoDotacion() {
         return (info?.key === targetKey) || (p.periodo === targetKey);
       });
       const monto = rows.reduce((acc, r) => acc + (parseFloat(r.total) || 0), 0);
-      const trips = new Set(rows.map(r => `${r.fechaDespacho}_${cleanRut(r.rutCond1 || r.rut) || r.nomCond1}_${r.rutas || r.ruta}`)).size;
+      const trips = rows.length; // Conteo real de viajes / vueltas
       const countStaff = new Set(rows.map(r => cleanRut(r.rutCond1 || r.rut) || r.nomCond1)).size;
       return { monto, trips, countStaff, rowsCount: rows.length };
     };
@@ -354,7 +432,7 @@ export default function PagoDotacion() {
     };
   }, [isCompareMode, comparePeriodA, comparePeriodB, paymentsList, availablePeriodos]);
 
-  // 3.5: Ranking Top 5 de Conductores y Auxiliares por Periodo
+  // 3.5: Ranking Top 5 de Conductores y Auxiliares por Periodo (10.3: contabilizando cada vuelta)
   const { topConductores, topAuxiliares } = useMemo(() => {
     const condMap = new Map();
     const auxMap = new Map();
@@ -364,7 +442,6 @@ export default function PagoDotacion() {
       const nom = cleanStr(p.nomCond1 || p.nombre || p.cond1) || 'Sin Nombre';
       const rol = cleanStr(p.tipoCond1 || p.rol);
       const monto = parseFloat(p.total) || 0;
-      const tripKey = `${p.fechaDespacho}_${p.rutas || p.ruta}`;
 
       const isAux = rol.toLowerCase().includes('auxiliar');
       const targetMap = isAux ? auxMap : condMap;
@@ -376,17 +453,16 @@ export default function PagoDotacion() {
           name: nom,
           role: isAux ? 'Auxiliar' : 'Conductor',
           totalMonto: 0,
-          tripsSet: new Set()
+          totalViajes: 0
         });
       }
       const entry = targetMap.get(key);
       entry.totalMonto += monto;
-      entry.tripsSet.add(tripKey);
+      entry.totalViajes += 1; // Cada registro representa una vuelta real
     });
 
     const formatTop = (map) => {
       return Array.from(map.values())
-        .map(i => ({ ...i, totalViajes: i.tripsSet.size }))
         .sort((a, b) => b.totalMonto - a.totalMonto)
         .slice(0, 5);
     };
@@ -396,34 +472,6 @@ export default function PagoDotacion() {
       topAuxiliares: formatTop(auxMap)
     };
   }, [filteredPayments]);
-
-  // Exportar Master a Excel
-  const handleExportMasterExcel = () => {
-    if (filteredPayments.length === 0) {
-      toast.warning('No hay datos para exportar.');
-      return;
-    }
-
-    const exportRows = filteredPayments.map(p => ({
-      'Periodo': p.periodo || '',
-      'Fecha Despacho': p.fechaDespacho || '',
-      'Cont Cond1': p.contCond1 || '',
-      'Tipo Cond1': p.tipoCond1 || '',
-      'Cond1': p.cond1 || '',
-      'Rut Cond1': p.rutCond1 || '',
-      'Nom Cond1': p.nomCond1 || '',
-      'Rutas': p.rutas || '',
-      'Transportistas': p.transportistas || '',
-      'Total': p.total || 0,
-      'Contrato Origen': p.contratoOrigen || p.origen || 'Excel'
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportRows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Pago Dotacion');
-    XLSX.writeFile(wb, `Pago_Dotacion_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success('Archivo Excel descargado exitosamente');
-  };
 
   // =========================================================================
   // SECCIÓN 2: CARGA DE CONTRATOS (3.7)
@@ -471,23 +519,42 @@ export default function PagoDotacion() {
         const headers = rawJson[headerIdx].map(h => String(h || '').trim());
         
         // Mapeo inteligente de columnas para Colectivo
-        let colPeriodo = -1, colFecha = -1, colRut = -1, colNombre = -1, colTipoCond = -1, colRutas = -1, colTransportistas = -1, colTotal = -1;
+        let colPeriodo = -1, colFecha = -1, colContCond = -1, colTipoCond = -1, colRut = -1, colNombre = -1;
+        let colRutas = -1, colTransportistas = -1, colTipoPago = -1, colTipoCalculo = -1, colSegundaVuelta = -1;
+        let colPuntos = -1, colM3 = -1, colCajas = -1, colTotal = -1;
+
         headers.forEach((hRaw, c) => {
           const h = hRaw.toLowerCase().trim();
           if (h === 'periodo') colPeriodo = c;
           if (h === 'fecha despacho' || h === 'fecha') colFecha = c;
+          if (h === 'cont cond1' || h === 'cont' || h === 'contrato') colContCond = c;
+          if (h === 'tipo cond1' || h === 'tipo') colTipoCond = c;
           if (h === 'rut cond1' || h === 'rut') colRut = c;
           if (h === 'nom cond1' || h === 'nombre') colNombre = c;
-          if (h === 'tipo cond1' || h === 'tipo') colTipoCond = c;
           if (h === 'rutas' || h === 'ruta') colRutas = c;
           if (h === 'transportistas') colTransportistas = c;
-          if (h === 'total' || h === 'pago cond1' || h.includes('total')) colTotal = c;
+          if (h === 'tipo pago') colTipoPago = c;
+          if (h === 'tipo calculo') colTipoCalculo = c;
+          if (h === 'segunda vuelta' || h === '2v') colSegundaVuelta = c;
+          if (h === 'total puntos viaje' || h === 'puntos viaje' || h === 'puntos') colPuntos = c;
+          if (h === 'total m3viaje' || h === 'total m3' || h === 'm3') colM3 = c;
+          if (h === 'total cajas viaje' || h === 'total cajas' || h === 'cajas') colCajas = c;
+          if (h === 'total') colTotal = c;
         });
 
         if (colFecha === -1) colFecha = 1;
+        if (colContCond === -1) colContCond = 2;
+        if (colTipoCond === -1) colTipoCond = 3;
         if (colRut === -1) colRut = 5;
         if (colNombre === -1) colNombre = 6;
         if (colRutas === -1) colRutas = 7;
+        if (colTransportistas === -1) colTransportistas = 8;
+        if (colTipoPago === -1) colTipoPago = 12;
+        if (colTipoCalculo === -1) colTipoCalculo = 13;
+        if (colSegundaVuelta === -1) colSegundaVuelta = 14;
+        if (colPuntos === -1) colPuntos = 18;
+        if (colM3 === -1) colM3 = 19;
+        if (colCajas === -1) colCajas = 20;
         if (colTotal === -1) colTotal = headers.length - 1;
 
         const parsedRows = [];
@@ -495,6 +562,13 @@ export default function PagoDotacion() {
         for (let r = headerIdx + 1; r < rawJson.length; r++) {
           const row = rawJson[r];
           if (!row || row.length === 0) continue;
+
+          // 1. Filtrar estrictamente solo lo que dice 018 y 019 de la columna "Cont Cond1" (Requisito 10.1)
+          const rawContCond = colContCond >= 0 ? cleanStr(row[colContCond]) : '';
+          const normContCond = rawContCond.replace(/^0+/, '');
+          if (normContCond !== '18' && normContCond !== '19' && rawContCond !== '018' && rawContCond !== '019') {
+            continue; // Se descartan filas con otros contratos
+          }
 
           const rawRut = row[colRut];
           const cRut = cleanRut(rawRut);
@@ -505,6 +579,12 @@ export default function PagoDotacion() {
           const nom = cleanStr(row[colNombre]);
           const tipoCond = cleanStr(row[colTipoCond]) || 'Conductor';
           const rutas = cleanStr(row[colRutas]);
+          const tipoPagoVal = colTipoPago >= 0 ? cleanStr(row[colTipoPago]) : '';
+          const tipoCalculoVal = colTipoCalculo >= 0 ? cleanStr(row[colTipoCalculo]) : '';
+          const segundaVueltaVal = colSegundaVuelta >= 0 ? cleanStr(row[colSegundaVuelta]) : '';
+          const puntosVal = colPuntos >= 0 ? (parseFloat(row[colPuntos]) || 0) : 0;
+          const m3Val = colM3 >= 0 ? (parseFloat(row[colM3]) || 0) : 0;
+          const cajasVal = colCajas >= 0 ? (parseFloat(row[colCajas]) || 0) : 0;
           
           // Total de la fila (columna Total o última columna numérica)
           let totalVal = 0;
@@ -534,7 +614,7 @@ export default function PagoDotacion() {
           const matchedStaff = staffMapByRut.get(cRut);
           const periodInfo = getPeriodFromDate(normFecha);
 
-          parsedRows.push({
+          const baseItem = {
             id: `colectivo-${Date.now()}-${r}-${Math.random().toString(36).substr(2, 4)}`,
             contratoOrigen: 'Colectivo',
             periodo: colPeriodo >= 0 && row[colPeriodo] ? String(row[colPeriodo]) : periodInfo.key,
@@ -547,11 +627,61 @@ export default function PagoDotacion() {
             transportistas: colTransportistas >= 0 ? cleanStr(row[colTransportistas]) : '',
             total: totalVal,
             pagoCond1: totalVal,
+            tipoPago: tipoPagoVal,
+            tipoCalculo: tipoCalculoVal,
+            segundaVuelta: segundaVueltaVal,
+            totalPuntosViaje: puntosVal,
+            totalM3Viaje: m3Val,
+            totalCajasViaje: cajasVal,
+            contCond1: rawContCond || (normContCond ? normContCond.padStart(3, '0') : '018'),
             tipoServicio: isEventualidad ? 'Eventualidades' : 'Ruta',
             origen: 'Colectivo',
             isEventualidad,
             matchedStaffInAttendance: !!matchedStaff
-          });
+          };
+
+          parsedRows.push(baseItem);
+
+          // 2. Validación de regla oficial para Tipo Pago === 'RM' (Requisito 10.2)
+          const calcRmMonto = calculateColectivoRmMonto(
+            baseItem.contCond1,
+            tipoPagoVal,
+            puntosVal,
+            m3Val
+          );
+
+          // Si el valor calculado difiere del que viene en el Excel, se ingresa como una fila diferente con color diferenciado (Morado pastel)
+          if (calcRmMonto !== null && Math.round(calcRmMonto) !== Math.round(totalVal)) {
+            parsedRows.push({
+              id: `colectivo-ajuste-rm-${Date.now()}-${r}-${Math.random().toString(36).substr(2, 4)}`,
+              contratoOrigen: 'Colectivo',
+              periodo: baseItem.periodo,
+              periodoLabel: baseItem.periodoLabel,
+              fechaDespacho: normFecha,
+              rutCond1: cRut,
+              nomCond1: baseItem.nomCond1,
+              tipoCond1: baseItem.tipoCond1,
+              rutas: `${rutas || 'Ruta'} [Ajuste Escala RM: ${puntosVal} pts, ${m3Val} m³]`,
+              transportistas: baseItem.transportistas,
+              total: calcRmMonto,
+              originalExcelTotal: totalVal,
+              diferenciaMonto: calcRmMonto - totalVal,
+              pagoCond1: calcRmMonto,
+              tipoPago: 'RM',
+              tipoCalculo: 'Escala Oficial RM',
+              segundaVuelta: segundaVueltaVal,
+              totalPuntosViaje: puntosVal,
+              totalM3Viaje: m3Val,
+              totalCajasViaje: cajasVal,
+              contCond1: baseItem.contCond1,
+              tipoServicio: 'Ajuste Escala RM',
+              glosa: 'Ajuste_RM_Puntos',
+              origen: 'Colectivo (Ajuste RM)',
+              isRmAdjustment: true, // Color morado/violeta pastel
+              isEventualidad: false,
+              matchedStaffInAttendance: !!matchedStaff
+            });
+          }
         }
 
         setLoadedContractsBatch(prev => [...parsedRows, ...prev]);
@@ -882,6 +1012,19 @@ export default function PagoDotacion() {
       });
     }
 
+    // Filtro múltiple por Tipo de Contrato (Requisito 10.4)
+    if (filterContracts.length > 0) {
+      list = list.filter(t => {
+        const originStr = cleanStr(t.contratoOrigen || t.origen || t.glosa || '').toLowerCase();
+        const isMan = !!t.isManuallyAssigned;
+        const isEv = !!t.isEventualidad;
+        return filterContracts.some(cId => {
+          const opt = CONTRACT_FILTER_OPTIONS.find(o => o.id === cId);
+          return opt ? opt.match(originStr, isMan, isEv) : false;
+        });
+      });
+    }
+
     // Búsqueda general por ruta, contrato, glosa, etc.
     if (excelSearchText.trim()) {
       const term = excelSearchText.toLowerCase();
@@ -900,7 +1043,7 @@ export default function PagoDotacion() {
       const timeB = parseDateStrToTimestamp(b.fechaDespacho);
       return timeA - timeB;
     });
-  }, [transmittedTripsList, excelSelectedStaffRut, excelStaffInput, excelServiceTypeInput, excelSearchText]);
+  }, [transmittedTripsList, excelSelectedStaffRut, excelStaffInput, excelServiceTypeInput, excelSearchText, filterContracts]);
 
   // Manejador para Asignar Nuevo Viaje Manual en la Vista Excel
   const handleAddNewTransmittedTrip = async (e) => {
@@ -976,6 +1119,363 @@ export default function PagoDotacion() {
     toast.success(`Viaje '${newTrip.rutas}' asignado a ${staffObj?.name || targetRut} (Eventualidad_Key) y reflejado en la plataforma`);
   };
 
+  // -------------------------------------------------------------------------
+  // MÉTODOS DE SELECCIÓN Y FILTROS MULTIPLES (Requisito 10.4)
+  // -------------------------------------------------------------------------
+  const toggleSelectTrip = (id) => {
+    setSelectedTripIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllVisible = () => {
+    const visibleIds = displayedTransmittedTrips.map(t => t.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedTripIds.has(id));
+    setSelectedTripIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleIds.forEach(id => next.delete(id));
+      } else {
+        visibleIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllEventualidadKey = () => {
+    const targetTrips = transmittedTripsList.filter(t => 
+      t.isManuallyAssigned || 
+      cleanStr(t.contratoOrigen) === 'Eventualidad_Key' || 
+      cleanStr(t.glosa) === 'Eventualidad_Key' ||
+      cleanStr(t.tipoServicio) === 'Eventualidad_Key' ||
+      t.isEventualidad
+    );
+
+    if (targetTrips.length === 0) {
+      toast.info('No hay registros de Eventualidad_Key en los viajes transmitidos.');
+      return;
+    }
+
+    setSelectedTripIds(prev => {
+      const next = new Set(prev);
+      targetTrips.forEach(t => next.add(t.id));
+      return next;
+    });
+    toast.success(`Se seleccionaron ${targetTrips.length} registro(s) de Eventualidad_Key.`);
+  };
+
+  const toggleContractFilter = (contractId) => {
+    setFilterContracts(prev => {
+      if (prev.includes(contractId)) {
+        return prev.filter(c => c !== contractId);
+      } else {
+        return [...prev, contractId];
+      }
+    });
+  };
+
+  // Exportar Master / Transmitidos a Excel filtrado (Requisito 10.4)
+  const handleExportMasterExcel = () => {
+    let sourceData = [];
+    if (selectedTripIds.size > 0) {
+      const allAvailable = [...transmittedTripsList, ...paymentsList];
+      const seen = new Set();
+      sourceData = allAvailable.filter(t => {
+        if (selectedTripIds.has(t.id) && !seen.has(t.id)) {
+          seen.add(t.id);
+          return true;
+        }
+        return false;
+      });
+    } else if (activeTab === 'excel') {
+      sourceData = displayedTransmittedTrips;
+    } else {
+      sourceData = filteredPayments;
+    }
+
+    if (sourceData.length === 0) {
+      toast.warning('No hay datos filtrados o seleccionados para exportar.');
+      return;
+    }
+
+    const exportRows = sourceData.map((p, idx) => ({
+      '#': idx + 1,
+      'Periodo': p.periodo || '',
+      'Fecha Despacho': p.fechaDespacho || p.fecha || '',
+      'Cont Cond1': p.contCond1 || '',
+      'Tipo Cond1': p.tipoCond1 || '',
+      'Rut Cond1': p.rutCond1 || p.rut || '',
+      'Nom Cond1': p.nomCond1 || p.nombre || '',
+      'Rutas': p.rutas || p.ruta || '',
+      'Tipo Servicio': p.tipoServicio || p.tipoPunto || '',
+      'Tipo Pago': p.tipoPago || '',
+      'Total Puntos Viaje': p.totalPuntosViaje || '',
+      'Total M3Viaje': p.totalM3Viaje || '',
+      'Segunda Vuelta': p.segundaVuelta || '',
+      'Monto Total ($)': Number(p.total) || 0,
+      'Contrato Origen': p.contratoOrigen || p.origen || 'Excel',
+      'Glosa': p.glosa || '',
+      'Es Eventualidad': p.isEventualidad ? 'SI' : 'NO',
+      'Es Ajuste RM': p.isRmAdjustment ? 'SI' : 'NO',
+      'Asignación Manual': p.isManuallyAssigned ? 'SI' : 'NO'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Pago Dotacion');
+    XLSX.writeFile(wb, `Pago_Dotacion_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success(`Archivo Excel descargado: ${exportRows.length} registros exportados.`);
+  };
+
+  // -------------------------------------------------------------------------
+  // CORREO / OUTLOOK GENERATION (Requisito 10.4)
+  // -------------------------------------------------------------------------
+  const emailData = useMemo(() => {
+    let items = [];
+    if (selectedTripIds.size > 0) {
+      items = displayedTransmittedTrips.filter(t => selectedTripIds.has(t.id));
+      if (items.length === 0) {
+        items = transmittedTripsList.filter(t => selectedTripIds.has(t.id));
+      }
+    } else {
+      items = displayedTransmittedTrips;
+    }
+
+    const totalMonto = items.reduce((acc, t) => acc + (parseFloat(t.total) || 0), 0);
+    const totalViajes = items.length;
+    const staffSet = new Set(items.map(t => cleanRut(t.rutCond1) || t.nomCond1));
+
+    const byContract = {};
+    items.forEach(t => {
+      const c = t.contratoOrigen || t.origen || 'Otros';
+      if (!byContract[c]) byContract[c] = { name: c, count: 0, monto: 0 };
+      byContract[c].count += 1;
+      byContract[c].monto += (parseFloat(t.total) || 0);
+    });
+
+    const byStaff = {};
+    items.forEach(t => {
+      const k = cleanRut(t.rutCond1) || t.nomCond1;
+      if (!byStaff[k]) {
+        byStaff[k] = {
+          rut: t.rutCond1,
+          name: t.nomCond1,
+          role: t.tipoCond1 || 'Conductor',
+          count: 0,
+          monto: 0
+        };
+      }
+      byStaff[k].count += 1;
+      byStaff[k].monto += (parseFloat(t.total) || 0);
+    });
+
+    return {
+      items,
+      totalMonto,
+      totalViajes,
+      totalColaboradores: staffSet.size,
+      contractSummary: Object.values(byContract).sort((a, b) => b.monto - a.monto),
+      staffSummary: Object.values(byStaff).sort((a, b) => b.monto - a.monto)
+    };
+  }, [selectedTripIds, displayedTransmittedTrips, transmittedTripsList]);
+
+  const generateOutlookHtml = () => {
+    const { items, totalMonto, totalViajes, totalColaboradores, contractSummary, staffSummary } = emailData;
+
+    return `
+<div style="font-family: Arial, Helvetica, sans-serif; color: #1e293b; max-width: 850px; margin: 0 auto; line-height: 1.5;">
+  <div style="background-color: #0f172a; padding: 20px; border-radius: 8px 8px 0 0; color: #ffffff;">
+    <h2 style="margin: 0; font-size: 19px; color: #ffffff; letter-spacing: -0.5px;">Key Logistics - Liquidación y Pago Dotación</h2>
+    <p style="margin: 6px 0 0 0; font-size: 13px; color: #94a3b8;">
+      Reporte de Liquidación y Asignación Operacional • Generado el ${new Date().toLocaleDateString('es-CL')} a las ${new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })}
+    </p>
+  </div>
+
+  <div style="border: 1px solid #e2e8f0; border-top: none; padding: 20px; border-radius: 0 0 8px 8px; background-color: #ffffff;">
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+      <tr>
+        <td style="width: 33.33%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; text-align: center;">
+          <div style="font-size: 11px; font-weight: bold; color: #64748b; text-transform: uppercase;">Monto Total Liquidado</div>
+          <div style="font-size: 20px; font-weight: 900; color: #047857; margin-top: 4px;">${formatCLP(totalMonto)}</div>
+        </td>
+        <td style="width: 10px;"></td>
+        <td style="width: 33.33%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; text-align: center;">
+          <div style="font-size: 11px; font-weight: bold; color: #64748b; text-transform: uppercase;">Total de Viajes / Vueltas</div>
+          <div style="font-size: 20px; font-weight: 900; color: #1e40af; margin-top: 4px;">${totalViajes}</div>
+        </td>
+        <td style="width: 10px;"></td>
+        <td style="width: 33.33%; padding: 12px; background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; text-align: center;">
+          <div style="font-size: 11px; font-weight: bold; color: #64748b; text-transform: uppercase;">Dotación Activa</div>
+          <div style="font-size: 20px; font-weight: 900; color: #334155; margin-top: 4px;">${totalColaboradores} pers.</div>
+        </td>
+      </tr>
+    </table>
+
+    <h3 style="font-size: 14px; font-weight: 800; color: #0f172a; margin: 18px 0 8px 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px;">
+      1. Resumen Consolidado por Contrato
+    </h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 22px;">
+      <thead>
+        <tr style="background-color: #1e293b; color: #ffffff; text-align: left;">
+          <th style="padding: 8px 10px; border: 1px solid #334155;">Contrato / Origen</th>
+          <th style="padding: 8px 10px; border: 1px solid #334155; text-align: center;">Viajes</th>
+          <th style="padding: 8px 10px; border: 1px solid #334155; text-align: right;">Monto Total ($)</th>
+          <th style="padding: 8px 10px; border: 1px solid #334155; text-align: right;">% Part.</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${contractSummary.map((c, i) => `
+          <tr style="background-color: ${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; font-weight: bold;">${c.name}</td>
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center;">${c.count}</td>
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: 800; color: ${c.monto < 0 ? '#dc2626' : '#047857'};">${formatCLP(c.monto)}</td>
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: right; color: #64748b;">${totalMonto > 0 ? ((c.monto / totalMonto) * 100).toFixed(1) : 0}%</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+
+    <h3 style="font-size: 14px; font-weight: 800; color: #0f172a; margin: 18px 0 8px 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px;">
+      2. Resumen por Personal (Conductores y Auxiliares)
+    </h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 22px;">
+      <thead>
+        <tr style="background-color: #334155; color: #ffffff; text-align: left;">
+          <th style="padding: 8px 10px; border: 1px solid #475569;">Colaborador</th>
+          <th style="padding: 8px 10px; border: 1px solid #475569;">RUT</th>
+          <th style="padding: 8px 10px; border: 1px solid #475569; text-align: center;">Rol</th>
+          <th style="padding: 8px 10px; border: 1px solid #475569; text-align: center;">Viajes</th>
+          <th style="padding: 8px 10px; border: 1px solid #475569; text-align: right;">Total Liquidado ($)</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${staffSummary.map((s, i) => `
+          <tr style="background-color: ${i % 2 === 0 ? '#ffffff' : '#f8fafc'};">
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; font-weight: bold; color: #0f172a;">${s.name}</td>
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; font-family: monospace; font-size: 11px; color: #64748b;">${s.rut || '-'}</td>
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center;">${s.role}</td>
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: center; font-weight: bold;">${s.count}</td>
+            <td style="padding: 7px 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: 800; color: ${s.monto < 0 ? '#dc2626' : '#047857'};">${formatCLP(s.monto)}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+
+    ${(emailTemplate === 'detailed' || emailTemplate === 'eventualidades') ? `
+      <h3 style="font-size: 14px; font-weight: 800; color: #0f172a; margin: 18px 0 8px 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 6px;">
+        3. Detalle de Viajes (${items.length})
+      </h3>
+      <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+        <thead>
+          <tr style="background-color: #475569; color: #ffffff; text-align: left;">
+            <th style="padding: 7px 8px; border: 1px solid #64748b;">Fecha</th>
+            <th style="padding: 7px 8px; border: 1px solid #64748b;">Colaborador</th>
+            <th style="padding: 7px 8px; border: 1px solid #64748b;">Ruta</th>
+            <th style="padding: 7px 8px; border: 1px solid #64748b;">Tipo / Contrato</th>
+            <th style="padding: 7px 8px; border: 1px solid #64748b; text-align: right;">Monto ($)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.slice(0, 150).map((t, i) => {
+            let bg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+            if (t.isManuallyAssigned || t.glosa === 'Eventualidad_Key') bg = '#fef3c7';
+            else if (t.isRmAdjustment) bg = '#f3e8ff';
+            else if (t.isEventualidad) bg = '#e0f2fe';
+
+            return `
+              <tr style="background-color: ${bg};">
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: bold;">${t.fechaDespacho || t.fecha}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${t.nomCond1} <span style="font-size: 10px; color: #64748b;">(${t.rutCond1})</span></td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-weight: 600; color: #1e40af;">${t.rutas || t.ruta}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0;">${t.glosa || t.contratoOrigen || t.origen || '-'}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: right; font-weight: 800; color: ${(parseFloat(t.total) || 0) < 0 ? '#dc2626' : '#047857'};">${formatCLP(t.total)}</td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+      ${items.length > 150 ? `<p style="font-size: 11px; color: #64748b; margin-top: 6px;">* Mostrando los primeros 150 viajes de ${items.length} para optimizar el correo.</p>` : ''}
+    ` : ''}
+
+    <div style="margin-top: 24px; padding-top: 14px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center;">
+      Key Logistics SpA • Sistema Integral de Asignación y Pago Dotación • San Bernardo, Santiago de Chile
+    </div>
+  </div>
+</div>
+    `.trim();
+  };
+
+  const generatePlainTextSummary = () => {
+    const { totalMonto, totalViajes, totalColaboradores, contractSummary, staffSummary } = emailData;
+    let text = `LIQUIDACIÓN Y PAGO DE DOTACIÓN - KEY LOGISTICS\n`;
+    text += `Fecha: ${new Date().toLocaleDateString('es-CL')}\n\n`;
+    text += `RESUMEN GENERAL:\n`;
+    text += `- Monto Total: ${formatCLP(totalMonto)}\n`;
+    text += `- Total Viajes / Vueltas: ${totalViajes}\n`;
+    text += `- Personal Liquidado: ${totalColaboradores} colaboradores\n\n`;
+    text += `DESGLOSE POR CONTRATO:\n`;
+    contractSummary.forEach(c => {
+      text += `• ${c.name}: ${c.count} viajes | ${formatCLP(c.monto)}\n`;
+    });
+    text += `\nRESUMEN POR COLABORADOR (TOP 10):\n`;
+    staffSummary.slice(0, 10).forEach(s => {
+      text += `• ${s.name} (${s.rut || s.role}): ${s.count} viajes | ${formatCLP(s.monto)}\n`;
+    });
+    text += `\nKey Logistics SpA - Gestión Operacional`;
+    return text;
+  };
+
+  const handleOpenOutlookMailto = () => {
+    const subject = emailSubject.trim() || `Liquidación Pago Dotación - ${new Date().toLocaleDateString('es-CL')}`;
+    const body = generatePlainTextSummary();
+    const mailto = `mailto:${encodeURIComponent(emailTo)}?cc=${encodeURIComponent(emailCc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(mailto, '_blank');
+    toast.success('Abriendo cliente de correo Outlook...');
+  };
+
+  const handleCopyOutlookHtml = async () => {
+    const html = generateOutlookHtml();
+    const plain = generatePlainTextSummary();
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        const textBlob = new Blob([plain], { type: 'text/plain' });
+        const htmlBlob = new Blob([html], { type: 'text/html' });
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': textBlob,
+            'text/html': htmlBlob
+          })
+        ]);
+      } else {
+        await navigator.clipboard.writeText(plain);
+      }
+      toast.success('¡Tabla HTML copiada! Pégala directamente en Outlook con Ctrl+V');
+    } catch (err) {
+      console.warn('Clipboard write error:', err);
+      await navigator.clipboard.writeText(plain);
+      toast.info('Copiado texto plano al portapapeles');
+    }
+  };
+
+  // Histórico de cambios filtrado
+  const filteredHistoryList = useMemo(() => {
+    let list = changeHistory || [];
+    if (historyFilterAction !== 'TODOS') {
+      list = list.filter(h => h.action === historyFilterAction);
+    }
+    if (historySearchTerm.trim()) {
+      const term = historySearchTerm.toLowerCase().trim();
+      list = list.filter(h => {
+        const full = [h.details, h.user, h.timestamp, h.action].filter(Boolean).join(' ').toLowerCase();
+        return full.includes(term);
+      });
+    }
+    return list;
+  }, [changeHistory, historyFilterAction, historySearchTerm]);
+
   // Catálogo de rutas de briefing para autocompletar
   const briefingRouteSuggestions = useMemo(() => {
     const list = [];
@@ -1007,16 +1507,51 @@ export default function PagoDotacion() {
           </div>
         </div>
 
-        {/* Acciones de Cabecera */}
-        <div className="flex items-center gap-2">
+        {/* Acciones de Cabecera (Requisito 10.4) */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Botón Histórico de Cambios */}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs h-9 px-3 flex items-center gap-1.5 rounded-xl cursor-pointer border border-slate-200"
+          >
+            <History size={14} className="text-blue-600" />
+            Histórico de cambios
+            {changeHistory.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 bg-blue-100 text-blue-800 rounded-full text-[10px] font-black">
+                {changeHistory.length}
+              </span>
+            )}
+          </Button>
+
+          {/* Botón Enviar por Correo (Outlook) */}
+          <Button
+            type="button"
+            onClick={() => {
+              setEmailSubject(`Liquidación y Pago de Dotación - Key Logistics (${new Date().toLocaleDateString('es-CL')})`);
+              setIsEmailModalOpen(true);
+            }}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-9 px-3.5 flex items-center gap-1.5 rounded-xl cursor-pointer shadow-xs"
+          >
+            <Mail size={14} />
+            Enviar por correo (Outlook)
+            {selectedTripIds.size > 0 && (
+              <span className="ml-1 px-1.5 py-0.2 bg-white/20 text-white rounded-full text-[10px] font-black">
+                {selectedTripIds.size}
+              </span>
+            )}
+          </Button>
+
+          {/* Botón Exportar Todo / Filtrados */}
           {paymentsList.length > 0 && (
             <Button
               type="button"
               onClick={handleExportMasterExcel}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 px-3.5 flex items-center gap-1.5 rounded-xl cursor-pointer"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs h-9 px-3.5 flex items-center gap-1.5 rounded-xl cursor-pointer shadow-xs"
             >
               <Download size={14} />
-              Exportar Todo ({filteredPayments.length})
+              Exportar {selectedTripIds.size > 0 ? `Seleccionados (${selectedTripIds.size})` : `Todo (${(activeTab === 'excel' ? displayedTransmittedTrips : filteredPayments).length})`}
             </Button>
           )}
         </div>
@@ -2009,7 +2544,7 @@ export default function PagoDotacion() {
                 </div>
 
                 {/* Limpiar filtros */}
-                {(excelStaffInput || excelSelectedStaffRut || excelServiceTypeInput || excelSearchText) && (
+                {(excelStaffInput || excelSelectedStaffRut || excelServiceTypeInput || excelSearchText || filterContracts.length > 0) && (
                   <button
                     type="button"
                     onClick={() => {
@@ -2017,11 +2552,77 @@ export default function PagoDotacion() {
                       setExcelSelectedStaffRut('');
                       setExcelServiceTypeInput('');
                       setExcelSearchText('');
+                      setFilterContracts([]);
                     }}
                     className="text-xs text-blue-600 font-bold hover:underline cursor-pointer flex items-center gap-1"
                   >
-                    <X size={12} /> Limpiar
+                    <X size={12} /> Limpiar filtros
                   </button>
+                )}
+              </div>
+            </div>
+
+            {/* Barra de Filtros por Contrato y Selección Rápida (Requisito 10.4) */}
+            <div className="flex items-center justify-between flex-wrap gap-2 pt-2.5 border-t border-slate-200">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-black text-slate-700 flex items-center gap-1 mr-1">
+                  <Filter size={12} className="text-blue-600" />
+                  Filtrar por Contrato:
+                </span>
+                {CONTRACT_FILTER_OPTIONS.map(cOpt => {
+                  const isSelected = filterContracts.includes(cOpt.id);
+                  return (
+                    <button
+                      key={cOpt.id}
+                      type="button"
+                      onClick={() => toggleContractFilter(cOpt.id)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-100'
+                      }`}
+                    >
+                      {isSelected ? <Check size={12} /> : null}
+                      {cOpt.label}
+                    </button>
+                  );
+                })}
+
+                {filterContracts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFilterContracts([])}
+                    className="text-[11px] text-blue-600 hover:underline font-bold ml-1 cursor-pointer"
+                  >
+                    (Todos)
+                  </button>
+                )}
+              </div>
+
+              {/* Botones de Selección Rápida y Acciones Masivas */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleSelectAllEventualidadKey}
+                  className="bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300 font-bold text-xs h-7.5 px-2.5 flex items-center gap-1 rounded-lg cursor-pointer"
+                  title="Seleccionar todos los registros de Eventualidad_Key"
+                >
+                  <Sparkles size={12} className="text-amber-600" />
+                  ★ Seleccionar Eventualidad_Key
+                </Button>
+
+                {selectedTripIds.size > 0 && (
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-2.5 py-1 rounded-lg text-xs font-bold text-blue-800">
+                    <span>{selectedTripIds.size} seleccionados</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTripIds(new Set())}
+                      className="text-blue-600 hover:text-blue-900 underline font-normal text-[11px] cursor-pointer"
+                    >
+                      Limpiar
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -2201,6 +2802,15 @@ export default function PagoDotacion() {
               <table className="w-full text-xs text-left whitespace-nowrap border-collapse">
                 <thead className="bg-slate-200 text-slate-800 font-black sticky top-0 z-10 border-b border-slate-300">
                   <tr>
+                    <th className="px-2.5 py-2.5 border-r border-slate-300 w-9 text-center">
+                      <input
+                        type="checkbox"
+                        checked={displayedTransmittedTrips.length > 0 && displayedTransmittedTrips.every(t => selectedTripIds.has(t.id))}
+                        onChange={handleSelectAllVisible}
+                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        title="Seleccionar / Deseleccionar todos los visibles"
+                      />
+                    </th>
                     <th className="px-3 py-2.5 border-r border-slate-300 w-10 text-center">#</th>
                     <th className="px-3.5 py-2.5 border-r border-slate-300">Fecha</th>
                     <th className="px-3 py-2.5 border-r border-slate-300">Ruta</th>
@@ -2217,7 +2827,8 @@ export default function PagoDotacion() {
                 <tbody className="divide-y divide-slate-200 bg-white">
                   {displayedTransmittedTrips.map((row, idx) => {
                     const isManual = row.isManuallyAssigned;
-                    const isEventualidad = !isManual && (
+                    const isRm = row.isRmAdjustment;
+                    const isEventualidad = !isManual && !isRm && (
                       row.isEventualidad || 
                       String(row.tipoPunto || '').toLowerCase().includes('eventualidad') || 
                       String(row.rutas || '').toLowerCase().includes('eventualidad') || 
@@ -2226,11 +2837,14 @@ export default function PagoDotacion() {
                     );
 
                     // Colores por tipo:
-                    // 1. Asignación manual desde plataforma (Eventualidad_Key): Amarillo pastel
-                    // 2. Eventualidades de los 4 archivos subidos: Celeste pastel
-                    // 3. Normal: slate
+                    // 1. Ajuste por escala oficial RM Puntos/M3: Morado/Violeta pastel (Requisito 10.2)
+                    // 2. Asignación manual desde plataforma (Eventualidad_Key): Amarillo pastel
+                    // 3. Eventualidades de los 4 archivos subidos: Celeste pastel
+                    // 4. Normal: slate
                     let rowClass = 'hover:bg-slate-50';
-                    if (isManual) {
+                    if (isRm) {
+                      rowClass = 'bg-purple-100 hover:bg-purple-200/80 border-l-4 border-l-purple-600 font-semibold text-purple-950';
+                    } else if (isManual) {
                       rowClass = 'bg-amber-100 hover:bg-amber-200/80 border-l-4 border-l-amber-500 font-semibold text-slate-900';
                     } else if (isEventualidad) {
                       rowClass = 'bg-sky-100 hover:bg-sky-200/80 border-l-4 border-l-sky-500 font-semibold text-slate-900';
@@ -2241,6 +2855,14 @@ export default function PagoDotacion() {
                         key={row.id}
                         className={`transition-colors ${rowClass}`}
                       >
+                        <td className="px-2.5 py-2 text-center border-r border-slate-200">
+                          <input
+                            type="checkbox"
+                            checked={selectedTripIds.has(row.id)}
+                            onChange={() => toggleSelectTrip(row.id)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                          />
+                        </td>
                         <td className="px-3 py-2 text-center text-slate-400 font-mono text-[11px] border-r border-slate-200">
                           {idx + 1}
                         </td>
@@ -2267,23 +2889,34 @@ export default function PagoDotacion() {
                           {row.tipoServicio || row.tipoPunto || 'Ruta'}
                         </td>
                         <td className={`px-3 py-2 text-right font-black border-r border-slate-200 text-sm ${
-                          (parseFloat(row.total) || 0) < 0 ? 'text-red-600 bg-red-50/60' : 'text-emerald-800'
+                          (parseFloat(row.total) || 0) < 0 ? 'text-red-600 bg-red-50/60' : (isRm ? 'text-purple-900' : 'text-emerald-800')
                         }`}>
-                          {formatCLP(row.total)}
+                          <div>{formatCLP(row.total)}</div>
+                          {row.originalExcelTotal !== undefined && (
+                            <div className="text-[10px] text-purple-700 font-normal">
+                              Excel: {formatCLP(row.originalExcelTotal)}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-center border-r border-slate-200">
                           <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] border ${
-                            isManual
-                              ? 'bg-amber-200 text-amber-950 border-amber-300 shadow-2xs'
-                              : isEventualidad
-                                ? 'bg-sky-200 text-sky-950 border-sky-300 shadow-2xs'
-                                : 'bg-white/80 border-slate-200 text-slate-700'
+                            isRm
+                              ? 'bg-purple-200 text-purple-950 border-purple-300 shadow-2xs'
+                              : isManual
+                                ? 'bg-amber-200 text-amber-950 border-amber-300 shadow-2xs'
+                                : isEventualidad
+                                  ? 'bg-sky-200 text-sky-950 border-sky-300 shadow-2xs'
+                                  : 'bg-white/80 border-slate-200 text-slate-700'
                           }`}>
                             {row.glosa || row.contratoOrigen || row.origen || 'Excel'}
                           </span>
                         </td>
                         <td className="px-3 py-2 text-center border-r border-slate-200">
-                          {isManual ? (
+                          {isRm ? (
+                            <span className="px-2 py-0.5 bg-purple-200 text-purple-950 border border-purple-300 rounded font-black text-[10px] inline-flex items-center gap-1">
+                              ✦ Ajuste RM
+                            </span>
+                          ) : isManual ? (
                             <span className="px-2 py-0.5 bg-amber-200 text-amber-900 border border-amber-300 rounded font-black text-[10px]">
                               ★ Eventualidad_Key
                             </span>
@@ -2301,11 +2934,11 @@ export default function PagoDotacion() {
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={async () => {
                                 const newAmount = prompt('Nuevo monto para este viaje ($):', String(row.total || 0));
                                 if (newAmount !== null) {
                                   const parsed = parseFloat(newAmount.replace(/[^\d.-]/g, '')) || 0;
-                                  updateTransmittedTrip(row.id, { total: parsed, pagoCond1: parsed });
+                                  await updateTransmittedTrip(row.id, { total: parsed, pagoCond1: parsed }, currentUserName);
                                 }
                               }}
                               className="p-1 text-blue-600 hover:bg-blue-50 rounded"
@@ -2315,13 +2948,13 @@ export default function PagoDotacion() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                if (confirm(`¿Eliminar viaje de ${row.nomCond1} en ruta ${row.rutas}?`)) {
-                                  deleteTransmittedTrip(row.id);
+                              onClick={async () => {
+                                if (confirm(`¿Eliminar viaje de ${row.nomCond1} en ruta ${row.rutas}? Esta acción eliminará el viaje de todas las vistas y se conservará en el histórico de cambios.`)) {
+                                  await deleteTransmittedTrip(row.id, currentUserName);
                                 }
                               }}
                               className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded"
-                              title="Eliminar"
+                              title="Eliminar de todas las vistas"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -2412,13 +3045,300 @@ export default function PagoDotacion() {
               <Button
                 onClick={async () => {
                   const parsed = parseFloat(editMontoValue.replace(/[^\d.-]/g, '')) || 0;
-                  await updatePayment(editingPayment.id, { total: parsed, pagoCond1: parsed });
+                  await updatePayment(editingPayment.id, { total: parsed, pagoCond1: parsed }, currentUserName);
                   setEditingPayment(null);
                 }}
                 className="text-xs h-8 bg-blue-600 text-white font-bold"
               >
                 Guardar
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL HISTÓRICO DE CAMBIOS (Requisito 10.4) */}
+      {/* ========================================================================= */}
+      {isHistoryModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+            {/* Cabecera del Modal */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow-xs">
+                  <History size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+                    Histórico de Cambios y Modificaciones
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-black">
+                      {filteredHistoryList.length} registros
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Registro auditable permanente de eliminaciones, ediciones, ajustes por escala RM y transmisiones
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsHistoryModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Filtros dentro del Histórico */}
+            <div className="p-4 border-b border-slate-100 bg-white flex items-center justify-between flex-wrap gap-3">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {['TODOS', 'ELIMINACION', 'EDICION', 'AJUSTE_RM', 'CREACION', 'TRANSMISION'].map(act => (
+                  <button
+                    key={act}
+                    type="button"
+                    onClick={() => setHistoryFilterAction(act)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      historyFilterAction === act
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {act === 'TODOS' ? 'Todos' : act}
+                  </button>
+                ))}
+              </div>
+
+              <div className="w-64 relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={13} />
+                <input
+                  type="text"
+                  placeholder="Buscar en el histórico..."
+                  value={historySearchTerm}
+                  onChange={(e) => setHistorySearchTerm(e.target.value)}
+                  className="w-full pl-7 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* Lista / Timeline del Histórico */}
+            <div className="overflow-y-auto p-4 flex-1 divide-y divide-slate-100 space-y-3">
+              {filteredHistoryList.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 space-y-2">
+                  <History size={36} className="mx-auto text-slate-300" />
+                  <p className="font-bold text-xs text-slate-600">No se encontraron eventos en el histórico</p>
+                  <p className="text-[11px] text-slate-400">
+                    Todas las acciones de eliminación, edición o ajuste quedarán registradas aquí permanentemente.
+                  </p>
+                </div>
+              ) : (
+                filteredHistoryList.map(item => {
+                  let badgeClass = 'bg-slate-100 text-slate-800 border-slate-200';
+                  if (item.action === 'ELIMINACION') badgeClass = 'bg-red-100 text-red-800 border-red-200';
+                  else if (item.action === 'EDICION') badgeClass = 'bg-blue-100 text-blue-800 border-blue-200';
+                  else if (item.action === 'AJUSTE_RM') badgeClass = 'bg-purple-100 text-purple-900 border-purple-200';
+                  else if (item.action === 'CREACION') badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                  else if (item.action === 'TRANSMISION') badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
+
+                  return (
+                    <div key={item.id} className="pt-3 first:pt-0 flex items-start gap-3">
+                      <div className="w-2.5 h-2.5 rounded-full bg-blue-500 mt-1.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-black border uppercase ${badgeClass}`}>
+                              {item.action}
+                            </span>
+                            <span className="text-xs font-bold text-slate-800">
+                              Usuario: {item.user || 'Sistema'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-400 font-mono">
+                            {item.timestamp}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-700 mt-1 font-medium leading-relaxed">
+                          {item.details}
+                        </p>
+                        {item.recordSnapshot && (
+                          <div className="mt-2 p-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-600 font-mono flex flex-wrap gap-x-4 gap-y-1">
+                            {item.recordSnapshot.fechaDespacho && <span><strong>Fecha:</strong> {item.recordSnapshot.fechaDespacho}</span>}
+                            {item.recordSnapshot.nomCond1 && <span><strong>Personal:</strong> {item.recordSnapshot.nomCond1}</span>}
+                            {item.recordSnapshot.rutCond1 && <span><strong>RUT:</strong> {item.recordSnapshot.rutCond1}</span>}
+                            {item.recordSnapshot.rutas && <span><strong>Ruta:</strong> {item.recordSnapshot.rutas}</span>}
+                            {item.recordSnapshot.total !== undefined && <span><strong>Monto:</strong> {formatCLP(item.recordSnapshot.total)}</span>}
+                            {item.recordSnapshot.contratoOrigen && <span><strong>Contrato:</strong> {item.recordSnapshot.contratoOrigen}</span>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Pie del Modal */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <span className="text-xs text-slate-500 font-medium">
+                Mostrando {filteredHistoryList.length} registro(s) auditados
+              </span>
+              <Button
+                type="button"
+                onClick={() => setIsHistoryModalOpen(false)}
+                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs h-8.5 px-4 rounded-xl cursor-pointer"
+              >
+                Cerrar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL ENVIAR POR CORREO (OUTLOOK) CON PREVIEW (Requisito 10.4) */}
+      {/* ========================================================================= */}
+      {isEmailModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+            {/* Cabecera del Modal */}
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-blue-600 text-white rounded-xl shadow-xs">
+                  <Mail size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+                    Enviar Planilla y Liquidación por Correo (Outlook)
+                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-full text-xs font-black">
+                      {emailData.items.length} viajes incluidos
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Previsualiza la tabla con formato oficial para Outlook y envíala directamente o cópiala al portapapeles
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEmailModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded-xl transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Configuración de Envío y Selección de Plantilla Tipo */}
+            <div className="p-4 border-b border-slate-100 bg-white grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Para:</label>
+                <input
+                  type="email"
+                  value={emailTo}
+                  onChange={(e) => setEmailTo(e.target.value)}
+                  placeholder="destinatario@keylogistics.cl"
+                  className="w-full py-1.5 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">CC (Copia):</label>
+                <input
+                  type="text"
+                  value={emailCc}
+                  onChange={(e) => setEmailCc(e.target.value)}
+                  placeholder="copia@keylogistics.cl"
+                  className="w-full py-1.5 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Plantilla Tipo:</label>
+                <select
+                  value={emailTemplate}
+                  onChange={(e) => setEmailTemplate(e.target.value)}
+                  className="w-full py-1.5 px-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-800"
+                >
+                  <option value="executive">1. Resumen Ejecutivo por Contrato</option>
+                  <option value="detailed">2. Detalle Completo de Viajes</option>
+                  <option value="eventualidades">3. Especial Eventualidad_Key</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-3">
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Asunto:</label>
+                <input
+                  type="text"
+                  value={emailSubject}
+                  onChange={(e) => setEmailSubject(e.target.value)}
+                  placeholder="Asunto del correo..."
+                  className="w-full py-1.5 px-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-800"
+                />
+              </div>
+            </div>
+
+            {/* Previsualización en Tiempo Real (Live Preview) */}
+            <div className="p-4 bg-slate-100 flex-1 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-black uppercase text-slate-600 flex items-center gap-1.5">
+                  <Eye size={13} className="text-blue-600" />
+                  Previsualización en Tiempo Real (Formato Outlook)
+                </span>
+                <span className="text-[10px] text-slate-500">
+                  Total: {formatCLP(emailData.totalMonto)} • {emailData.totalViajes} viajes • {emailData.totalColaboradores} colaboradores
+                </span>
+              </div>
+
+              <div 
+                className="bg-white p-4 rounded-xl shadow-xs border border-slate-200 overflow-x-auto text-xs"
+                dangerouslySetInnerHTML={{ __html: generateOutlookHtml() }}
+              />
+            </div>
+
+            {/* Botones de Acción */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between flex-wrap gap-2.5">
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCopyOutlookHtml}
+                  className="text-xs h-9 px-3.5 flex items-center gap-1.5 bg-white border-slate-300 font-bold hover:bg-slate-100 cursor-pointer"
+                  title="Copia la tabla HTML con colores lista para pegar en Outlook con Ctrl+V"
+                >
+                  <Copy size={13} />
+                  Copiar Tabla HTML para Outlook
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(generatePlainTextSummary());
+                    toast.success('Texto resumen copiado al portapapeles');
+                  }}
+                  className="text-xs h-9 px-3 bg-white border-slate-300 font-medium hover:bg-slate-100 cursor-pointer"
+                >
+                  Copiar Texto
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsEmailModalOpen(false)}
+                  className="text-xs h-9 px-4 cursor-pointer"
+                >
+                  Cerrar
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleOpenOutlookMailto}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs h-9 px-4 flex items-center gap-1.5 rounded-xl cursor-pointer shadow-xs"
+                >
+                  <ExternalLink size={14} />
+                  Abrir en Outlook (mailto)
+                </Button>
+              </div>
             </div>
           </div>
         </div>

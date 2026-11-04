@@ -6,6 +6,7 @@ import { normalizeDate } from './planningStore';
 const STORAGE_KEY_MASTER = 'keylogistics_pago_dotacion';
 const STORAGE_KEY_TRANSMITTED = 'keylogistics_pago_dotacion_transmitted';
 const STORAGE_KEY_CONTRACT_DATES = 'keylogistics_pago_contract_dates';
+const STORAGE_KEY_HISTORY = 'keylogistics_pago_dotacion_history';
 
 export const cleanRut = (r) => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
 export const cleanStr = (s) => String(s || '').trim();
@@ -80,6 +81,7 @@ export const usePagoDotacionStore = create((set, get) => ({
     contrato9: null,
     contrato13: null
   },
+  changeHistory: [],            // Histórico de cambios (eliminaciones, ediciones, ajustes RM, etc.)
   isLoading: false,
 
   // Cargar pagos desde Supabase DB (con fallback a localStorage)
@@ -143,6 +145,23 @@ export const usePagoDotacionStore = create((set, get) => ({
         }
       }
 
+      // 4. Cargar histórico de cambios con clave __pago_dotacion_history__
+      const { data: histData, error: histErr } = await supabase
+        .from('planning_assignments')
+        .select('*')
+        .eq('fecha', '__pago_dotacion_history__')
+        .maybeSingle();
+
+      let loadedHistory = [];
+      if (!histErr && histData && Array.isArray(histData.assignments)) {
+        loadedHistory = histData.assignments;
+      } else if (typeof window !== 'undefined' && window.localStorage) {
+        const savedHist = localStorage.getItem(STORAGE_KEY_HISTORY);
+        if (savedHist) {
+          try { loadedHistory = JSON.parse(savedHist); } catch (e) {}
+        }
+      }
+
       // Inferencia inicial si hay viajes existentes pero no se registraron fechas aún
       if (Array.isArray(loadedTrans) && loadedTrans.length > 0) {
         const findDateFor = (keyword) => {
@@ -162,6 +181,7 @@ export const usePagoDotacionStore = create((set, get) => ({
         paymentsList: loadedMaster,
         transmittedTripsList: loadedTrans,
         contractUploadDates: loadedDates,
+        changeHistory: loadedHistory,
         isLoading: false
       });
 
@@ -169,13 +189,63 @@ export const usePagoDotacionStore = create((set, get) => ({
         localStorage.setItem(STORAGE_KEY_MASTER, JSON.stringify(loadedMaster));
         localStorage.setItem(STORAGE_KEY_TRANSMITTED, JSON.stringify(loadedTrans));
         localStorage.setItem(STORAGE_KEY_CONTRACT_DATES, JSON.stringify(loadedDates));
+        localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(loadedHistory));
       }
 
-      return { master: loadedMaster, transmitted: loadedTrans, dates: loadedDates };
+      return { master: loadedMaster, transmitted: loadedTrans, dates: loadedDates, history: loadedHistory };
     } catch (err) {
       console.warn('[PagoDotacion] Error cargando pagos:', err);
       set({ isLoading: false });
-      return { master: [], transmitted: [], dates: {} };
+      return { master: [], transmitted: [], dates: {}, history: [] };
+    }
+  },
+
+  // Guardar histórico de cambios en Supabase y localStorage
+  saveHistoryToDb: async (newHistory) => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem(STORAGE_KEY_HISTORY, JSON.stringify(newHistory));
+      }
+      const { error } = await supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__pago_dotacion_history__',
+          assignments: newHistory,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' });
+
+      if (error) {
+        console.warn('[PagoDotacion] Advertencia guardando histórico en Supabase:', error);
+      }
+      set({ changeHistory: newHistory });
+      return true;
+    } catch (err) {
+      console.error('[PagoDotacion] Error persistiendo histórico:', err);
+      set({ changeHistory: newHistory });
+      return false;
+    }
+  },
+
+  // Registrar un cambio en el histórico (permanente incluso tras eliminación de registros)
+  logChange: async ({ action, details, record, user = '' }) => {
+    try {
+      const current = get().changeHistory || [];
+      const newEntry = {
+        id: `hist-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        timestamp: formatChileanDateTime(new Date()) || new Date().toLocaleString('es-CL'),
+        isoDate: new Date().toISOString(),
+        action: action || 'MODIFICACION',
+        details: details || '',
+        user: user || 'Sistema',
+        recordSnapshot: record ? JSON.parse(JSON.stringify(record)) : null
+      };
+      // Conservar hasta 1000 eventos de histórico
+      const updated = [newEntry, ...current].slice(0, 1000);
+      await get().saveHistoryToDb(updated);
+      return newEntry;
+    } catch (err) {
+      console.error('[PagoDotacion] Error registrando cambio:', err);
+      return null;
     }
   },
 
@@ -394,6 +464,11 @@ export const usePagoDotacionStore = create((set, get) => ({
     await get().savePaymentsToDb(updatedMaster);
     await get().saveContractUploadDates(updatedDates);
 
+    await get().logChange({
+      action: 'TRANSMISION',
+      details: `Transmitidos y conciliados ${matchedTransmitted.length} viajes a la plataforma (${records.length} registros cargados). Contratos actualizados: ${Array.from(incomingContractTypes).join(', ') || 'General'}`
+    });
+
     set({ isLoading: false });
 
     return {
@@ -405,7 +480,7 @@ export const usePagoDotacionStore = create((set, get) => ({
 
   // Asignar nuevo viaje manual en la vista Excel transmitida
   // Registra glosa "Eventualidad_Key", se ordena por fecha cronológicamente y se destaca en amarillo pastel
-  addTransmittedTrip: async (newTrip) => {
+  addTransmittedTrip: async (newTrip, user = '') => {
     if (!newTrip) return false;
     const currentTrans = get().transmittedTripsList || [];
     const currentMaster = get().paymentsList || [];
@@ -426,13 +501,21 @@ export const usePagoDotacionStore = create((set, get) => ({
     await get().saveTransmittedTripsToDb(updatedTrans);
     await get().savePaymentsToDb(updatedMaster);
 
+    await get().logChange({
+      action: 'CREACION',
+      details: `Asignado nuevo viaje manual (Eventualidad_Key) a ${tripEntry.nomCond1 || tripEntry.nombre || 'Personal'} (${tripEntry.rutCond1 || tripEntry.rut || 'S/R'}), Fecha: ${tripEntry.fechaDespacho || tripEntry.fecha || 'S/F'}, Ruta: ${tripEntry.rutas || tripEntry.ruta || 'S/R'}, Monto: $${Number(tripEntry.total || 0).toLocaleString('es-CL')}`,
+      record: tripEntry,
+      user
+    });
+
     return tripEntry;
   },
 
-  // Actualizar un viaje transmitido
-  updateTransmittedTrip: async (id, updates) => {
+  // Actualizar un viaje transmitido (sincronizado en ambas listas y registrado en histórico)
+  updateTransmittedTrip: async (id, updates, user = '') => {
     const currentTrans = get().transmittedTripsList || [];
     const currentMaster = get().paymentsList || [];
+    const prevItem = currentTrans.find(item => item.id === id) || currentMaster.find(item => item.id === id);
 
     const updatedTrans = currentTrans.map(item =>
       item.id === id ? { ...item, ...updates, updatedAt: new Date().toISOString() } : item
@@ -443,41 +526,60 @@ export const usePagoDotacionStore = create((set, get) => ({
 
     await get().saveTransmittedTripsToDb(updatedTrans);
     await get().savePaymentsToDb(updatedMaster);
-    toast.success('Viaje actualizado correctamente');
+
+    if (prevItem) {
+      await get().logChange({
+        action: 'EDICION',
+        details: `Actualizado viaje de ${prevItem.nomCond1 || prevItem.nombre || 'Personal'} (${prevItem.rutCond1 || prevItem.rut || 'S/R'}): Monto anterior $${Number(prevItem.total || 0).toLocaleString('es-CL')} ➔ Nuevo monto $${Number(updates.total !== undefined ? updates.total : prevItem.total).toLocaleString('es-CL')}`,
+        record: { ...prevItem, ...updates },
+        user
+      });
+    }
+
+    toast.success('Viaje actualizado correctamente en todas las vistas');
     return true;
   },
 
-  // Eliminar un viaje transmitido
-  deleteTransmittedTrip: async (id) => {
+  // Eliminar un viaje: SE ELIMINA DE TODAS LAS VISTAS (operacional y maestra) y se registra en histórico
+  deleteTransmittedTrip: async (id, user = '') => {
     const currentTrans = get().transmittedTripsList || [];
+    const currentMaster = get().paymentsList || [];
+    const targetItem = currentTrans.find(item => item.id === id) || currentMaster.find(item => item.id === id);
+
     const updatedTrans = currentTrans.filter(item => item.id !== id);
+    const updatedMaster = currentMaster.filter(item => item.id !== id);
+
     await get().saveTransmittedTripsToDb(updatedTrans);
-    toast.success('Viaje eliminado de la vista de transmisión');
+    await get().savePaymentsToDb(updatedMaster);
+
+    if (targetItem) {
+      await get().logChange({
+        action: 'ELIMINACION',
+        details: `Eliminado viaje de ${targetItem.nomCond1 || targetItem.nombre || 'Personal'} (${targetItem.rutCond1 || targetItem.rut || 'S/R'}), Fecha: ${targetItem.fechaDespacho || targetItem.fecha || 'S/F'}, Ruta: ${targetItem.rutas || targetItem.ruta || 'S/R'}, Monto: $${Number(targetItem.total || 0).toLocaleString('es-CL')}, Contrato: ${targetItem.glosa || targetItem.contratoOrigen || targetItem.origen || 'S/C'}`,
+        record: targetItem,
+        user
+      });
+    }
+
+    toast.success('Viaje eliminado de todas las vistas y respaldado en el histórico');
     return true;
   },
 
-  // Actualizar un pago existente en la lista maestra
-  updatePayment: async (id, updates) => {
-    const current = get().paymentsList || [];
-    const updated = current.map(item =>
-      item.id === id ? { ...item, ...updates, updatedAt: new Date().toISOString() } : item
-    );
-    const success = await get().savePaymentsToDb(updated);
-    if (success) {
-      toast.success('Registro de pago actualizado exitosamente');
-    }
-    return success;
+  // Actualizar un pago existente en la lista maestra (sincronizado)
+  updatePayment: async (id, updates, user = '') => {
+    return get().updateTransmittedTrip(id, updates, user);
   },
 
-  // Eliminar un pago de la lista maestra
-  deletePayment: async (id) => {
-    const current = get().paymentsList || [];
-    const updated = current.filter(item => item.id !== id);
-    const success = await get().savePaymentsToDb(updated);
-    if (success) {
-      toast.success('Registro de pago eliminado');
-    }
-    return success;
+  // Eliminar un pago de la lista maestra: SE ELIMINA DE TODAS LAS VISTAS
+  deletePayment: async (id, user = '') => {
+    return get().deleteTransmittedTrip(id, user);
+  },
+
+  // Limpiar histórico de cambios (solo por acción explícita)
+  clearChangeHistory: async () => {
+    await get().saveHistoryToDb([]);
+    toast.info('Histórico de cambios vaciado.');
+    return true;
   },
 
   // Limpiar todos los registros
