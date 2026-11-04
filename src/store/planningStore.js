@@ -1877,85 +1877,97 @@ export const usePlanningStore = create((set, get) => ({
       return false;
     }
 
-    const { transmittedAssignments, transformedRoutes, fileName } = get();
-    const targetFecha = normalizeDate(fecha) || '14-10-2026';
+    const { transmittedAssignments, transformedRoutes } = get();
+    const fallbackFecha = normalizeDate(fecha) || normalizeDate(new Date());
     const nextAssignments = { ...transmittedAssignments };
-    if (!nextAssignments[targetFecha]) {
-      nextAssignments[targetFecha] = [];
-    }
 
-    let addedCount = 0;
-    let updatedCount = 0;
-    const currentRows = [...nextAssignments[targetFecha]];
-
+    // Agrupar rutas especiales por fecha efectiva (soporta archivos multi-fecha o mono-fecha)
+    const routesByDate = new Map();
     specialRoutes.forEach((sr, idx) => {
-      const rutaClean = String(sr.ruta).trim();
-      const existingIdx = currentRows.findIndex(r => String(r.ruta).trim() === rutaClean);
-
-      if (existingIdx >= 0) {
-        // La ruta ya existía: consolidar paradas nuevas preservando tripulación y camión asignados
-        const old = currentRows[existingIdx];
-        const oldParadas = old.paradas || [];
-        const existingDestinos = new Set(oldParadas.map(p => (p.destino || '').trim().toUpperCase()));
-
-        // Agregar paradas nuevas que no estaban
-        const newParadas = (sr.paradas || []).filter(p => !existingDestinos.has((p.destino || '').trim().toUpperCase()));
-        const mergedParadas = [...oldParadas, ...newParadas];
-
-        const distinctDestinos = new Set(mergedParadas.map(p => (p.destino || '').trim().toUpperCase()));
-        const totalVolumen = mergedParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0);
-        const totalPeso = mergedParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0);
-        const totalCajas = mergedParadas.reduce((a, b) => a + (parseInt(b.cantCJ, 10) || 0), 0);
-
-        currentRows[existingIdx] = {
-          ...old,
-          locales: distinctDestinos.size || 1,
-          m3: Number(totalVolumen.toFixed(4)),
-          peso: Number(totalPeso.toFixed(2)),
-          cantCJ: totalCajas,
-          referencia: old.referencia ? `${old.referencia} | Especial` : 'Ruta Especial (Destinos Nuevos)',
-          paradas: mergedParadas,
-          isSpecialRoute: true
-        };
-        updatedCount++;
-      } else {
-        // Nueva ruta especial: crear registro listo para asignar en Disponibilización
-        const newAssignmentRow = {
-          id: `disp-${targetFecha}-${rutaClean}-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
-          fecha: targetFecha,
-          conductor_name: '',
-          conductor_rut: '',
-          aux1_name: '',
-          aux1_rut: '',
-          aux2_name: '',
-          aux2_rut: '',
-          camion: '',
-          tipo_equipo: '',
-          rampla: '',
-          n_vuelta: '',
-          tipo_servicio: 'Distribución',
-          ruta: rutaClean,
-          cliente: sr.nombreRuta || `Ruta ${rutaClean}`,
-          transportista: sr.transportista || '',
-          referencia: 'Ruta Especial',
-          locales: sr.recuentoDestino || (new Set((sr.paradas || []).map(p => p.destino)).size) || 1,
-          m3: Number(parseFloat(sr.sumaVolumen || 0).toFixed(4)),
-          peso: Number(parseFloat(sr.sumaPeso || 0).toFixed(2)),
-          cantCJ: parseInt(sr.sumaCantCJ || 0, 10),
-          isSpecialRoute: true,
-          paradas: sr.paradas || []
-        };
-        currentRows.push(newAssignmentRow);
-        addedCount++;
+      const effFecha = normalizeDate(sr.fecha || sr.Fecha) || fallbackFecha;
+      if (!routesByDate.has(effFecha)) {
+        routesByDate.set(effFecha, []);
       }
+      routesByDate.get(effFecha).push({ ...sr, idx });
     });
 
-    nextAssignments[targetFecha] = currentRows;
-    await persistAssignments(nextAssignments);
+    let totalAdded = 0;
+    let totalUpdated = 0;
 
-    // Sincronizar con savedRuteo, savedHistory y Supabase
-    const synced = syncHistoryAndSavedForDate(get(), targetFecha, currentRows);
-    await persistAssignmentsToDb(targetFecha, currentRows);
+    for (const [targetFecha, routesForDate] of routesByDate.entries()) {
+      if (!nextAssignments[targetFecha]) {
+        nextAssignments[targetFecha] = [];
+      }
+      const currentRows = [...nextAssignments[targetFecha]];
+
+      routesForDate.forEach((sr) => {
+        const rutaClean = String(sr.ruta).trim();
+        const existingIdx = currentRows.findIndex(r => String(r.ruta).trim() === rutaClean);
+
+        if (existingIdx >= 0) {
+          // La ruta ya existía: consolidar paradas nuevas preservando tripulación y camión asignados
+          const old = currentRows[existingIdx];
+          const oldParadas = old.paradas || [];
+          const existingDestinos = new Set(oldParadas.map(p => (p.destino || '').trim().toUpperCase()));
+
+          // Agregar paradas nuevas que no estaban
+          const newParadas = (sr.paradas || []).filter(p => !existingDestinos.has((p.destino || '').trim().toUpperCase()));
+          const mergedParadas = [...oldParadas, ...newParadas];
+
+          const distinctDestinos = new Set(mergedParadas.map(p => (p.destino || '').trim().toUpperCase()));
+          const totalVolumen = mergedParadas.reduce((a, b) => a + (parseFloat(b.volumen) || 0), 0);
+          const totalPeso = mergedParadas.reduce((a, b) => a + (parseFloat(b.peso) || 0), 0);
+          const totalCajas = mergedParadas.reduce((a, b) => a + (parseInt(b.cantCJ, 10) || 0), 0);
+
+          currentRows[existingIdx] = {
+            ...old,
+            locales: distinctDestinos.size || 1,
+            m3: Number(totalVolumen.toFixed(4)),
+            peso: Number(totalPeso.toFixed(2)),
+            cantCJ: totalCajas,
+            referencia: old.referencia ? `${old.referencia} | Especial` : 'Ruta Especial (Destinos Nuevos)',
+            paradas: mergedParadas,
+            isSpecialRoute: true
+          };
+          totalUpdated++;
+        } else {
+          // Nueva ruta especial: crear registro listo para asignar en Disponibilización
+          const newAssignmentRow = {
+            id: `disp-${targetFecha}-${rutaClean}-${Date.now()}-${sr.idx}-${Math.random().toString(36).substring(2, 6)}`,
+            fecha: targetFecha,
+            conductor_name: '',
+            conductor_rut: '',
+            aux1_name: '',
+            aux1_rut: '',
+            aux2_name: '',
+            aux2_rut: '',
+            camion: '',
+            tipo_equipo: '',
+            rampla: '',
+            n_vuelta: '',
+            tipo_servicio: 'Distribución',
+            ruta: rutaClean,
+            cliente: sr.nombreRuta || `Ruta ${rutaClean}`,
+            transportista: sr.transportista || '',
+            referencia: 'Ruta Especial',
+            locales: sr.recuentoDestino || (new Set((sr.paradas || []).map(p => p.destino)).size) || 1,
+            m3: Number(parseFloat(sr.sumaVolumen || 0).toFixed(4)),
+            peso: Number(parseFloat(sr.sumaPeso || 0).toFixed(2)),
+            cantCJ: parseInt(sr.sumaCantCJ || 0, 10),
+            isSpecialRoute: true,
+            paradas: sr.paradas || []
+          };
+          currentRows.push(newAssignmentRow);
+          totalAdded++;
+        }
+      });
+
+      nextAssignments[targetFecha] = currentRows;
+      syncHistoryAndSavedForDate(get(), targetFecha, currentRows);
+      await persistAssignmentsToDb(targetFecha, currentRows);
+    }
+
+    await persistAssignments(nextAssignments);
 
     // Sincronizar también con transformedRoutes para que aparezcan en Ruteo
     const nextTransformed = [...transformedRoutes];
@@ -1967,16 +1979,9 @@ export const usePlanningStore = create((set, get) => ({
         nextTransformed.push({ ...sr, isSpecialRoute: true });
       }
     });
-    persistTransformedRoutes(nextTransformed, { fileName, date: targetFecha });
+    set({ transformedRoutes: nextTransformed });
 
-    set({
-      transmittedAssignments: nextAssignments,
-      transformedRoutes: nextTransformed,
-      selectedDisponibilizarDate: targetFecha,
-      ...synced
-    });
-
-    toast.success(`¡${addedCount} ruta(s) nueva(s) y ${updatedCount} actualizada(s) como Especiales guardadas en servidor!`);
+    toast.success(`${specialRoutes.length} ruta(s) especial(es) transmitida(s) a Disponibilización (${totalAdded} nuevas, ${totalUpdated} consolidadas)`);
     return true;
   },
 

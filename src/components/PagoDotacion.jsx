@@ -457,7 +457,7 @@ export default function PagoDotacion() {
         let headerIdx = -1;
         for (let r = 0; r < Math.min(10, rawJson.length); r++) {
           const row = rawJson[r] || [];
-          if (row.some(c => String(c).toLowerCase().includes('rut cond1') || String(c).toLowerCase().includes('fecha despacho'))) {
+          if (row.some(c => String(c).toLowerCase().includes('rut cond1') || String(c).toLowerCase().includes('fecha despacho') || String(c).toLowerCase().includes('periodo'))) {
             headerIdx = r;
             break;
           }
@@ -469,27 +469,66 @@ export default function PagoDotacion() {
         }
 
         const headers = rawJson[headerIdx].map(h => String(h || '').trim());
+        
+        // Mapeo inteligente de columnas para Colectivo
+        let colPeriodo = -1, colFecha = -1, colRut = -1, colNombre = -1, colTipoCond = -1, colRutas = -1, colTransportistas = -1, colTotal = -1;
+        headers.forEach((hRaw, c) => {
+          const h = hRaw.toLowerCase().trim();
+          if (h === 'periodo') colPeriodo = c;
+          if (h === 'fecha despacho' || h === 'fecha') colFecha = c;
+          if (h === 'rut cond1' || h === 'rut') colRut = c;
+          if (h === 'nom cond1' || h === 'nombre') colNombre = c;
+          if (h === 'tipo cond1' || h === 'tipo') colTipoCond = c;
+          if (h === 'rutas' || h === 'ruta') colRutas = c;
+          if (h === 'transportistas') colTransportistas = c;
+          if (h === 'total' || h === 'pago cond1' || h.includes('total')) colTotal = c;
+        });
+
+        if (colFecha === -1) colFecha = 1;
+        if (colRut === -1) colRut = 5;
+        if (colNombre === -1) colNombre = 6;
+        if (colRutas === -1) colRutas = 7;
+        if (colTotal === -1) colTotal = headers.length - 1;
+
         const parsedRows = [];
 
         for (let r = headerIdx + 1; r < rawJson.length; r++) {
           const row = rawJson[r];
           if (!row || row.length === 0) continue;
 
-          const rowObj = {};
-          headers.forEach((h, i) => {
-            rowObj[h] = row[i];
-          });
-
-          const rawRut = rowObj['Rut Cond1'] || rowObj['RUT'] || '';
+          const rawRut = row[colRut];
           const cRut = cleanRut(rawRut);
           if (!cRut) continue;
 
-          const rawFecha = rowObj['Fecha Despacho'] || rowObj['Fecha'] || '';
+          const rawFecha = row[colFecha];
           const normFecha = parseExcelDate(rawFecha);
-          const nom = cleanStr(rowObj['Nom Cond1'] || rowObj['Cond1'] || rowObj['Nombre']);
-          const tipoCond = cleanStr(rowObj['Tipo Cond1']) || 'Conductor';
-          const rutas = cleanStr(rowObj['Rutas'] || rowObj['Ruta']);
-          const totalVal = parseFloat(String(rowObj['Total'] || rowObj['Pago Cond1'] || 0).replace(/[^\d.-]/g, '')) || 0;
+          const nom = cleanStr(row[colNombre]);
+          const tipoCond = cleanStr(row[colTipoCond]) || 'Conductor';
+          const rutas = cleanStr(row[colRutas]);
+          
+          // Total de la fila (columna Total o última columna numérica)
+          let totalVal = 0;
+          if (colTotal >= 0 && row[colTotal] !== undefined && row[colTotal] !== '') {
+            totalVal = parseFloat(String(row[colTotal]).replace(/[^\d.-]/g, '')) || 0;
+          }
+          if (totalVal === 0) {
+            for (let c = row.length - 1; c >= 7; c--) {
+              const v = row[c];
+              if (v !== undefined && v !== null && v !== '') {
+                const parsedV = parseFloat(String(v).replace(/[^\d.-]/g, ''));
+                if (!isNaN(parsedV) && parsedV !== 0) {
+                  totalVal = parsedV;
+                  break;
+                }
+              }
+            }
+          }
+
+          // Detección de palabra "Eventualidad" (Requisito explícito de marcado celeste pastel)
+          const fullRowText = row.map(x => String(x || '')).join(' ').toLowerCase();
+          const isEventualidad = fullRowText.includes('eventualidad') || 
+                                fullRowText.includes('eventualidades') ||
+                                rutas.toLowerCase().includes('eventualidad');
 
           // Cruce con Asistencia / StaffList
           const matchedStaff = staffMapByRut.get(cRut);
@@ -498,18 +537,19 @@ export default function PagoDotacion() {
           parsedRows.push({
             id: `colectivo-${Date.now()}-${r}-${Math.random().toString(36).substr(2, 4)}`,
             contratoOrigen: 'Colectivo',
-            periodo: periodInfo.key,
+            periodo: colPeriodo >= 0 && row[colPeriodo] ? String(row[colPeriodo]) : periodInfo.key,
             periodoLabel: periodInfo.label,
             fechaDespacho: normFecha,
             rutCond1: cRut,
             nomCond1: matchedStaff?.name || nom,
             tipoCond1: matchedStaff?.role || tipoCond,
             rutas,
-            transportistas: cleanStr(rowObj['Transportistas']),
+            transportistas: colTransportistas >= 0 ? cleanStr(row[colTransportistas]) : '',
             total: totalVal,
             pagoCond1: totalVal,
-            tipoServicio: 'Ruta',
+            tipoServicio: isEventualidad ? 'Eventualidades' : 'Ruta',
             origen: 'Colectivo',
+            isEventualidad,
             matchedStaffInAttendance: !!matchedStaff
           });
         }
@@ -525,7 +565,7 @@ export default function PagoDotacion() {
     reader.readAsBinaryString(file);
   };
 
-  // Parser para formato "Antiguo" (Contrato 8, 9, 13) (matching vía Rut)
+  // Parser dinámico para contratos antiguos (Contrato 8, 9, 13)
   const processAntiguoFile = (file, contractType) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -540,12 +580,12 @@ export default function PagoDotacion() {
           return;
         }
 
-        // Buscar fila de encabezado
+        // Buscar fila de encabezado revisando hasta 15 filas
         let headerIdx = -1;
         for (let r = 0; r < Math.min(15, rawJson.length); r++) {
           const row = rawJson[r] || [];
-          if (row.some(c => String(c).toLowerCase().includes('rut')) && 
-              row.some(c => String(c).toLowerCase().includes('fecha'))) {
+          const rowStr = row.map(c => String(c || '').toLowerCase()).join(' ');
+          if (rowStr.includes('rut') && (rowStr.includes('fecha') || rowStr.includes('nombre') || rowStr.includes('viajes') || rowStr.includes('cajas') || rowStr.includes('total'))) {
             headerIdx = r;
             break;
           }
@@ -553,30 +593,155 @@ export default function PagoDotacion() {
 
         if (headerIdx === -1) headerIdx = 4; // Fallback al índice 4 detectado en la plantilla
 
+        const headerRow = rawJson[headerIdx] || [];
+        const prevHeaderRow = headerIdx > 0 ? (rawJson[headerIdx - 1] || []) : [];
+        const prevHeaderRow2 = headerIdx > 1 ? (rawJson[headerIdx - 2] || []) : [];
+
+        let colFecha = -1, colRut = -1, colNombre = -1, colTipoPunto = -1, colRuta = -1, colTotal = -1;
+        let colViajes = -1, colEspera = -1, colBono2v = -1, colDif = -1, colCarga = -1;
+
+        const maxCols = Math.max(headerRow.length, prevHeaderRow.length, prevHeaderRow2.length);
+        for (let c = 0; c < maxCols; c++) {
+          const h2 = String(prevHeaderRow2[c] || '').toLowerCase().trim();
+          const h1 = String(prevHeaderRow[c] || '').toLowerCase().trim();
+          const h0 = String(headerRow[c] || '').toLowerCase().trim();
+          const h = `${h2} ${h1} ${h0}`.trim();
+
+          if (colFecha === -1 && (h0 === 'fecha' || h.includes('fecha'))) colFecha = c;
+          if (colRut === -1 && (h0 === 'rut' || h0 === 'rut cond1' || h.includes('rut'))) colRut = c;
+          if (colNombre === -1 && (h0 === 'nom cond1' || h0 === 'nombre' || h.includes('conductor/auxiliar') || h.includes('nombre'))) colNombre = c;
+          if (colTipoPunto === -1 && (h0 === 'tipo punto' || h.includes('tipo punto') || h.includes('tipo contrato'))) colTipoPunto = c;
+          if (colRuta === -1 && (h0 === 'cajas/viajes/ruta' || h.includes('cajas/viajes/ruta') || h.includes('descripción ruta') || h.includes('cajas/despachadas') || h0 === 'rutas' || h0 === 'ruta')) colRuta = c;
+          if (colTotal === -1 && (h0 === 'pago total' || h0 === 'total final' || h0 === 'total' || h.includes('pago total') || h.includes('total pago') || h.includes('monto'))) colTotal = c;
+          if (colViajes === -1 && (h0 === 'viajes' || h.includes('viajes')) && colRuta !== c) colViajes = c;
+          if (colEspera === -1 && (h.includes('tiempo de espera') || h0 === 'espera')) colEspera = c;
+          if (colBono2v === -1 && (h.includes('bono segunda') || h.includes('segunda vuelta') || h.includes('bono 2v'))) colBono2v = c;
+          if (colDif === -1 && (h.includes('diferencia') || h0 === 'dif')) colDif = c;
+          if (colCarga === -1 && (h.includes('carga/descarga') || h.includes('descarga'))) colCarga = c;
+        }
+
+        if (colFecha === -1) colFecha = 0;
+        if (colRut === -1) colRut = 1;
+        if (colNombre === -1) colNombre = 2;
+
         const parsedRows = [];
         for (let r = headerIdx + 1; r < rawJson.length; r++) {
           const row = rawJson[r];
           if (!row || row.length === 0) continue;
 
-          const rawFecha = row[0];
-          const rawRut = row[1];
-          const rawNombre = row[2];
+          // Buscar RUT en colRut o en las primeras columnas
+          let rawRut = row[colRut];
+          if (!rawRut || !String(rawRut).includes('-')) {
+            for (let c = 0; c < Math.min(5, row.length); c++) {
+              if (row[c] && String(row[c]).includes('-') && cleanRut(row[c]).length >= 8) {
+                rawRut = row[c];
+                break;
+              }
+            }
+          }
 
           // Validar que la fila contenga un RUT válido
           if (!rawRut || !String(rawRut).includes('-')) continue;
 
           const cRut = cleanRut(rawRut);
+          const rawFecha = row[colFecha] || row[0];
           const normFecha = parseExcelDate(rawFecha);
-          const tipoPunto = cleanStr(row[4]);
-          const ruta = cleanStr(row[6]);
+          const rawNombre = cleanStr(row[colNombre]);
 
-          const viajes = parseFloat(row[16]) || 0;
-          const espera = parseFloat(row[17]) || 0;
-          const bono2v = parseFloat(row[18]) || 0;
-          const dif = parseFloat(row[19]) || 0;
+          // Tipo Punto
+          let tipoPunto = colTipoPunto >= 0 ? cleanStr(row[colTipoPunto]) : '';
+          if (!tipoPunto && row[3] && typeof row[3] === 'string' && !row[3].includes('-') && isNaN(row[3])) {
+            tipoPunto = cleanStr(row[3]);
+          } else if (!tipoPunto && row[4] && typeof row[4] === 'string' && !row[4].includes('-') && isNaN(row[4])) {
+            tipoPunto = cleanStr(row[4]);
+          }
 
-          let totalVal = viajes + espera + bono2v + dif;
-          if (totalVal === 0 && viajes > 0) totalVal = viajes;
+          // Detección inteligente de Ruta:
+          let ruta = '';
+          // 1. En Contrato 9, la columna K (index 10) contiene la descripción (ej: '4304|RUTA STREAT BURGUER 04...')
+          const colK = row[10] ? cleanStr(row[10]) : '';
+          if (colK && (colK.includes('|') || colK.toUpperCase().includes('RUTA') || colK.toUpperCase().includes('SPID') || colK.toUpperCase().includes('OXXO') || colK.toUpperCase().includes('SUBWAY') || colK.toUpperCase().includes('CARLS') || colK.toUpperCase().includes('SERVICIO') || colK.toUpperCase().includes('ESPECIALES'))) {
+            ruta = colK;
+          }
+
+          // 2. Columna detectada por encabezado (ej. Cajas/Viajes/Ruta)
+          if (!ruta && colRuta >= 0 && row[colRuta]) {
+            const cand = cleanStr(row[colRuta]);
+            if (cand && cand.toUpperCase() !== rawNombre.toUpperCase()) {
+              ruta = cand;
+            }
+          }
+
+          // 3. Fallback a columnas comunes (col 6 o col 4) cuidando de NO usar el nombre
+          if (!ruta && row[6]) {
+            const cand = cleanStr(row[6]);
+            if (cand && cand.toUpperCase() !== rawNombre.toUpperCase() && isNaN(cand)) {
+              ruta = cand;
+            }
+          }
+          if (!ruta && row[4]) {
+            const cand = cleanStr(row[4]);
+            if (cand && cand.toUpperCase() !== rawNombre.toUpperCase() && isNaN(cand)) {
+              ruta = cand;
+            }
+          }
+
+          // 4. Búsqueda por patrón de ruta en cualquier celda de la fila
+          if (!ruta) {
+            for (let c = 0; c < row.length; c++) {
+              const val = cleanStr(row[c]);
+              if (val && val.toUpperCase() !== rawNombre.toUpperCase() && (/\d{3,5}\|/.test(val) || val.toUpperCase().includes('RUTA ') || val.toUpperCase().includes('SERVICIO'))) {
+                ruta = val;
+                break;
+              }
+            }
+          }
+
+          if (!ruta) ruta = tipoPunto || 'Ruta';
+
+          // Cálculo del Total:
+          // 1. Columna Total explícita
+          let totalVal = 0;
+          if (colTotal >= 0 && row[colTotal] !== undefined && row[colTotal] !== '') {
+            const p = parseFloat(String(row[colTotal]).replace(/[^\d.-]/g, ''));
+            if (!isNaN(p) && p !== 0) totalVal = p;
+          }
+
+          // 2. Suma de componentes (viajes + espera + bono2v + dif + carga)
+          const viajes = colViajes >= 0 ? (parseFloat(row[colViajes]) || 0) : 0;
+          const espera = colEspera >= 0 ? (parseFloat(row[colEspera]) || 0) : 0;
+          const bono2v = colBono2v >= 0 ? (parseFloat(row[colBono2v]) || 0) : 0;
+          const dif = colDif >= 0 ? (parseFloat(row[colDif]) || 0) : 0;
+          const carga = colCarga >= 0 ? (parseFloat(row[colCarga]) || 0) : 0;
+          const sumComponents = viajes + espera + bono2v + dif + carga;
+
+          // 3. Última columna numérica no vacía de la fila (requisito explícito del usuario)
+          let lastNumeric = 0;
+          for (let c = row.length - 1; c >= Math.max(5, colRut + 2); c--) {
+            const v = row[c];
+            if (v !== undefined && v !== null && v !== '') {
+              const parsedV = parseFloat(String(v).replace(/[^\d.-]/g, ''));
+              if (!isNaN(parsedV) && parsedV !== 0) {
+                lastNumeric = parsedV;
+                break;
+              }
+            }
+          }
+
+          if (totalVal === 0) {
+            if (sumComponents > 0) {
+              totalVal = sumComponents;
+            } else if (lastNumeric !== 0) {
+              totalVal = lastNumeric;
+            }
+          }
+
+          // Detección de palabra "Eventualidad" en cualquier celda o campo (Requisito celeste pastel)
+          const rowText = row.map(c => String(c || '')).join(' ').toLowerCase();
+          const isEventualidad = rowText.includes('eventualidad') || 
+                                rowText.includes('eventualidades') ||
+                                tipoPunto.toLowerCase().includes('eventualidad') || 
+                                ruta.toLowerCase().includes('eventualidad');
 
           // Cruce con Asistencia / StaffList
           const matchedStaff = staffMapByRut.get(cRut);
@@ -590,13 +755,14 @@ export default function PagoDotacion() {
             fechaDespacho: normFecha,
             rutCond1: cRut,
             nomCond1: matchedStaff?.name || cleanStr(rawNombre),
-            tipoCond1: matchedStaff?.role || (tipoPunto.includes('Auxiliar') ? 'Auxiliar' : 'Conductor'),
+            tipoCond1: matchedStaff?.role || (tipoPunto.toLowerCase().includes('auxiliar') ? 'Auxiliar' : 'Conductor'),
             rutas: ruta || tipoPunto,
             tipoPunto,
             total: totalVal,
             pagoCond1: totalVal,
-            tipoServicio: bono2v > 0 ? 'Segunda Vuelta' : 'Ruta',
+            tipoServicio: isEventualidad ? 'Eventualidades' : (bono2v > 0 ? 'Segunda Vuelta' : 'Ruta'),
             origen: contractType,
+            isEventualidad,
             matchedStaffInAttendance: !!matchedStaff
           });
         }
@@ -1347,8 +1513,21 @@ export default function PagoDotacion() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {filteredPayments.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
+                    {filteredPayments.map((row) => {
+                      const isManual = row.isManuallyAssigned;
+                      const isEv = !isManual && (
+                        row.isEventualidad || 
+                        String(row.tipoPunto || '').toLowerCase().includes('eventualidad') || 
+                        String(row.rutas || '').toLowerCase().includes('eventualidad') || 
+                        String(row.glosa || '').toLowerCase().includes('eventualidad')
+                      );
+                      const rowClass = isManual 
+                        ? 'bg-amber-100 hover:bg-amber-200/80 border-l-4 border-l-amber-500 font-semibold text-slate-900' 
+                        : isEv 
+                          ? 'bg-sky-100 hover:bg-sky-200/80 border-l-4 border-l-sky-500 font-semibold text-slate-900' 
+                          : 'hover:bg-slate-50/80';
+                      return (
+                      <tr key={row.id} className={`${rowClass} transition-colors`}>
                         <td className="px-3.5 py-2 font-bold text-slate-800">{row.fechaDespacho || '-'}</td>
                         <td className="px-3 py-2 text-slate-500 font-mono text-[11px]">{row.periodo || '-'}</td>
                         <td className="px-3 py-2 font-black text-blue-700">{row.rutas || '-'}</td>
@@ -1399,7 +1578,8 @@ export default function PagoDotacion() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    );
+                  })}
                   </tbody>
                 </table>
               </div>
@@ -1602,8 +1782,12 @@ export default function PagoDotacion() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {loadedContractsBatch.slice(0, 100).map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50">
+                    {loadedContractsBatch.slice(0, 100).map((row) => {
+                      const isEv = row.isEventualidad || 
+                        String(row.tipoPunto || '').toLowerCase().includes('eventualidad') || 
+                        String(row.rutas || '').toLowerCase().includes('eventualidad');
+                      return (
+                      <tr key={row.id} className={isEv ? 'bg-sky-100 hover:bg-sky-200/80 border-l-4 border-l-sky-500 font-semibold text-slate-900' : 'hover:bg-slate-50'}>
                         <td className="px-3 py-2">
                           <span className="px-2 py-0.5 rounded font-bold text-[10px] bg-slate-100 text-slate-700">
                             {row.contratoOrigen}
@@ -1634,7 +1818,8 @@ export default function PagoDotacion() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    );
+                  })}
                   </tbody>
                 </table>
               </div>
@@ -2032,15 +2217,29 @@ export default function PagoDotacion() {
                 <tbody className="divide-y divide-slate-200 bg-white">
                   {displayedTransmittedTrips.map((row, idx) => {
                     const isManual = row.isManuallyAssigned;
+                    const isEventualidad = !isManual && (
+                      row.isEventualidad || 
+                      String(row.tipoPunto || '').toLowerCase().includes('eventualidad') || 
+                      String(row.rutas || '').toLowerCase().includes('eventualidad') || 
+                      String(row.tipoServicio || '').toLowerCase().includes('eventualidad') || 
+                      String(row.glosa || '').toLowerCase().includes('eventualidad')
+                    );
+
+                    // Colores por tipo:
+                    // 1. Asignación manual desde plataforma (Eventualidad_Key): Amarillo pastel
+                    // 2. Eventualidades de los 4 archivos subidos: Celeste pastel
+                    // 3. Normal: slate
+                    let rowClass = 'hover:bg-slate-50';
+                    if (isManual) {
+                      rowClass = 'bg-amber-100 hover:bg-amber-200/80 border-l-4 border-l-amber-500 font-semibold text-slate-900';
+                    } else if (isEventualidad) {
+                      rowClass = 'bg-sky-100 hover:bg-sky-200/80 border-l-4 border-l-sky-500 font-semibold text-slate-900';
+                    }
 
                     return (
                       <tr 
                         key={row.id}
-                        className={`transition-colors ${
-                          isManual 
-                            ? 'bg-amber-100 hover:bg-amber-200/80 border-l-4 border-l-amber-500 font-semibold' 
-                            : 'hover:bg-slate-50'
-                        }`}
+                        className={`transition-colors ${rowClass}`}
                       >
                         <td className="px-3 py-2 text-center text-slate-400 font-mono text-[11px] border-r border-slate-200">
                           {idx + 1}
@@ -2074,9 +2273,11 @@ export default function PagoDotacion() {
                         </td>
                         <td className="px-3 py-2 text-center border-r border-slate-200">
                           <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] border ${
-                            (row.contratoOrigen === 'Eventualidad_Key' || row.glosa === 'Eventualidad_Key')
+                            isManual
                               ? 'bg-amber-200 text-amber-950 border-amber-300 shadow-2xs'
-                              : 'bg-white/80 border-slate-200 text-slate-700'
+                              : isEventualidad
+                                ? 'bg-sky-200 text-sky-950 border-sky-300 shadow-2xs'
+                                : 'bg-white/80 border-slate-200 text-slate-700'
                           }`}>
                             {row.glosa || row.contratoOrigen || row.origen || 'Excel'}
                           </span>
@@ -2085,6 +2286,10 @@ export default function PagoDotacion() {
                           {isManual ? (
                             <span className="px-2 py-0.5 bg-amber-200 text-amber-900 border border-amber-300 rounded font-black text-[10px]">
                               ★ Eventualidad_Key
+                            </span>
+                          ) : isEventualidad ? (
+                            <span className="px-2 py-0.5 bg-sky-200 text-sky-900 border border-sky-300 rounded font-black text-[10px]">
+                              ◆ Eventualidad
                             </span>
                           ) : (
                             <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-black text-[10px]">

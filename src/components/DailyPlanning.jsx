@@ -497,8 +497,14 @@ export default function DailyPlanning() {
           return;
         }
 
+        // Auto-detectar fechas del archivo para no quedar atado a una fecha antigua
+        const fileDates = Array.from(new Set(validRows.map(r => normalizeDate(r.Fecha || r.fecha)).filter(Boolean)));
+        const targetAnalysisDate = fileDates[0] || selectedDisponibilizarDate || specialDate || normalizeDate(new Date());
+
+        setSpecialDate(targetAnalysisDate);
+        setDetectedFileDate(fileDates[0] || '');
         setSpecialRawRows(validRows);
-        analyzeSpecialRoutes(validRows, specialDate, specialCompareDate);
+        analyzeSpecialRoutes(validRows, targetAnalysisDate, specialCompareDate);
       } catch (err) {
         console.error('Error procesando rutas especiales:', err);
         toast.error('Error al analizar archivo para rutas especiales.');
@@ -511,7 +517,7 @@ export default function DailyPlanning() {
     e.target.value = '';
   };
 
-  const handleConfirmTransmitSpecialRoutes = () => {
+  const handleConfirmTransmitSpecialRoutes = async () => {
     if (!specialAnalysisResult || !specialAnalysisResult.specialRoutes) return;
     const targetRoutes = specialAnalysisResult.specialRoutes.filter(r => 
       selectedSpecialRouteIds.includes(r.id)
@@ -522,18 +528,23 @@ export default function DailyPlanning() {
       return;
     }
 
-    const ok = transmitSpecialRoutes(specialDate, targetRoutes);
-    if (ok) {
-      setIsSpecialModalOpen(false);
-      setSpecialAnalysisResult(null);
-      setSpecialFileName('');
-      setSpecialRawRows([]);
-      toast.success('Rutas Especiales transmitidas con éxito.', {
-        action: {
-          label: 'Ver Disponibilización',
-          onClick: () => navigate('/assignment')
-        }
-      });
+    try {
+      const ok = await transmitSpecialRoutes(specialDate, targetRoutes);
+      if (ok) {
+        setIsSpecialModalOpen(false);
+        setSpecialAnalysisResult(null);
+        setSpecialFileName('');
+        setSpecialRawRows([]);
+        toast.success(`Se transmitieron ${targetRoutes.length} rutas especiales con éxito a Disponibilización.`, {
+          action: {
+            label: 'Ver Disponibilización',
+            onClick: () => navigate('/assignment')
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error transmitiendo rutas especiales:', err);
+      toast.error('Error al transmitir rutas especiales a Disponibilización.');
     }
   };
 

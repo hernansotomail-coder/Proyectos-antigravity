@@ -225,8 +225,8 @@ export default function UsersManager() {
                 </div>
               </div>
 
-              {/* Matriz de módulos */}
-              <div className="space-y-3 overflow-y-auto max-h-56 pr-1 text-xs">
+              {/* Matriz de módulos completa sin cortes ni truncamiento */}
+              <div className="space-y-3 pr-1 text-xs">
                 {APP_MODULES.map(mod => (
                   <div key={mod.module} className="border border-slate-100 rounded-lg p-2 bg-slate-50/60 space-y-1.5">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">

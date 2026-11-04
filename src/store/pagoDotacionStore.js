@@ -301,10 +301,13 @@ export const usePagoDotacionStore = create((set, get) => ({
     const matchedTransmitted = [];
     const nowIso = new Date().toISOString();
 
-    records.forEach(item => {
+    records.forEach((item, rIdx) => {
       const fecha = normalizeDate(item.fechaDespacho || item.fecha);
       const rut = cleanRut(item.rutCond1 || item.rut);
-      const nombre = cleanStr(item.nomCond1 || item.nombre).toUpperCase();
+      const nombre = cleanStr(item.nomCond1 || item.nombre);
+
+      // Descartar únicamente filas vacías o inválidas sin RUT ni Nombre
+      if (!rut && !nombre) return;
 
       // Buscar si en esa fecha ese RUT o Nombre fue disponibilizado
       const dayAssignments = transmittedAssignments?.[fecha] || [];
@@ -315,21 +318,21 @@ export const usePagoDotacionStore = create((set, get) => ({
         const auxName = cleanStr(a.auxiliar_name).toUpperCase();
 
         const matchRut = rut && (condRut === rut || auxRut === rut);
-        const matchName = nombre && (condName.includes(nombre) || auxName.includes(nombre) || nombre.includes(condName) || nombre.includes(auxName));
+        const matchName = nombre && (condName.includes(nombre.toUpperCase()) || auxName.includes(nombre.toUpperCase()) || nombre.toUpperCase().includes(condName) || nombre.toUpperCase().includes(auxName));
         return matchRut || matchName;
       });
 
-      // Si coincide con la Disponibilización, se conserva en la vista transmitida
-      if (hasMatchInDisp) {
-        matchedTransmitted.push({
-          ...item,
-          fechaDespacho: fecha,
-          rutCond1: rut || item.rutCond1 || item.rut,
-          nomCond1: item.nomCond1 || item.nombre,
-          transmittedAt: nowIso,
-          isTransmittedMatch: true
-        });
-      }
+      // Se conserva el viaje en la vista transmitida con todos sus datos y montos intactos
+      matchedTransmitted.push({
+        ...item,
+        id: item.id || `trans-${cleanStr(item.contratoOrigen || item.origen || 'c').toLowerCase()}-${Date.now()}-${rIdx}-${Math.random().toString(36).substr(2, 4)}`,
+        fechaDespacho: fecha,
+        rutCond1: rut || item.rutCond1 || item.rut,
+        nomCond1: item.nomCond1 || item.nombre,
+        transmittedAt: nowIso,
+        hasMatchInDisp,
+        isTransmittedMatch: true
+      });
     });
 
     // Función auxiliar para determinar si un registro antiguo debe ser pisado por el nuevo archivo

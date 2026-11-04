@@ -439,36 +439,35 @@ export default function Layout() {
 
         </nav>
 
-        {/* Footer Sidebar (Cerrar Sesión) */}
-        {isAuthenticated && (
-          <div className="p-3 border-t border-slate-100">
-            {!isSidebarCollapsed ? (
-              <button
-                onClick={handleLogout}
-                className="flex w-full items-center gap-2.5 px-3 py-2.5 rounded-xl text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all text-xs font-semibold"
-              >
-                <LogOut size={16} />
-                <span>Cerrar Sesión</span>
-              </button>
-            ) : (
-              <button
-                onClick={handleLogout}
-                title="Cerrar Sesión"
-                className="w-10 h-10 mx-auto rounded-xl flex items-center justify-center text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors"
-              >
-                <LogOut size={18} />
-              </button>
-            )}
-          </div>
-        )}
+        {/* Footer Sidebar (Cerrar Sesión) - Siempre visible y fijo en la parte inferior */}
+        <div className="p-3 border-t border-slate-200 bg-white shrink-0 mt-auto z-10 shadow-xs">
+          {!isSidebarCollapsed ? (
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center gap-2.5 px-3 py-2.5 rounded-xl text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all text-xs font-bold cursor-pointer"
+              title="Cerrar Sesión"
+            >
+              <LogOut size={16} className="text-red-500 shrink-0" />
+              <span>Cerrar Sesión</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleLogout}
+              title="Cerrar Sesión"
+              className="w-10 h-10 mx-auto rounded-xl flex items-center justify-center text-slate-500 hover:bg-red-50 hover:text-red-600 transition-colors cursor-pointer"
+            >
+              <LogOut size={18} className="text-red-500" />
+            </button>
+          )}
+        </div>
       </aside>
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         
-        {/* Mobile Header */}
-        <header className="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 z-10 shrink-0">
-          <div className="flex flex-col items-center">
+        {/* Mobile Header con botón permanente Cerrar Sesión */}
+        <header className="md:hidden flex items-center justify-between p-3.5 bg-white border-b border-slate-200 z-10 shrink-0 shadow-2xs">
+          <div className="flex flex-col items-start">
             <img 
               src="/keylogistics-logo.jpg" 
               alt="Torre de Control Logo" 
@@ -476,12 +475,23 @@ export default function Layout() {
             />
             <p className="text-[9px] text-slate-500 font-black uppercase tracking-wider mt-0.5">Torre de Control</p>
           </div>
-          <button 
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
-            className="p-2 text-slate-600 bg-slate-100 rounded-xl"
-          >
-            {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
+              title="Cerrar Sesión"
+            >
+              <LogOut size={14} className="text-red-500" />
+              <span>Cerrar Sesión</span>
+            </button>
+            <button 
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+              className="p-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              aria-label="Abrir menú"
+            >
+              {isMobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          </div>
         </header>
 
         {/* Mobile Menu Dropdown */}
