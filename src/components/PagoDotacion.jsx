@@ -108,6 +108,14 @@ const formatMM = (amount) => {
 
 // Parsear fecha serial de Excel o texto a DD-MM-YYYY
 function parseExcelDate(val) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return '';
+    const day = String(val.getDate()).padStart(2, '0');
+    const month = String(val.getMonth() + 1).padStart(2, '0');
+    const year = val.getFullYear();
+    return `${day}-${month}-${year}`;
+  }
   if (typeof val === 'number' && val > 30000 && val < 65000) {
     const d = new Date(Math.round((val - 25569) * 86400 * 1000));
     const day = String(d.getUTCDate()).padStart(2, '0');
@@ -506,10 +514,10 @@ export default function PagoDotacion() {
   // Parser para formato "Colectivo" (matching vía Rut Cond1)
   const processColectivoFile = (file) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
-        const data = e.target.result;
-        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rawJson = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
@@ -707,23 +715,30 @@ export default function PagoDotacion() {
         }
 
         setLoadedContractsBatch(prev => [...parsedRows, ...prev]);
-        setLoadedSummary(prev => ({ ...prev, colectivo: prev.colectivo + parsedRows.length }));
-        toast.success(`Contrato Colectivo cargado: ${parsedRows.length} registros listos.`);
+        setLoadedSummary(prev => ({ ...prev, colectivo: (prev.colectivo || 0) + parsedRows.length }));
+
+        // Auto-transmitir a la plataforma para pisar el contrato anterior y reflejarse de inmediato
+        await transmitRecords({
+          records: parsedRows,
+          transmittedAssignments
+        });
+
+        toast.success(`Contrato Colectivo cargado y actualizado con éxito: ${parsedRows.length} registros listos.`);
       } catch (err) {
         console.error(err);
         toast.error('Error al procesar el archivo Colectivo.');
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
-  // Parser dinámico para contratos antiguos (Contrato 8, 9, 13)
+  // Parser dinámico y robusto para contratos antiguos (Contrato 8, 9, 13)
   const processAntiguoFile = (file, contractType) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       try {
-        const data = e.target.result;
-        const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: false });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rawJson = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
@@ -774,7 +789,6 @@ export default function PagoDotacion() {
 
         if (colFecha === -1) colFecha = 0;
         if (colRut === -1) colRut = 1;
-        if (colNombre === -1) colNombre = 2;
 
         const parsedRows = [];
         for (let r = headerIdx + 1; r < rawJson.length; r++) {
@@ -798,68 +812,83 @@ export default function PagoDotacion() {
           const cRut = cleanRut(rawRut);
           const rawFecha = row[colFecha] || row[0];
           const normFecha = parseExcelDate(rawFecha);
-          const rawNombre = cleanStr(row[colNombre]);
 
-          // Tipo Punto
-          let tipoPunto = colTipoPunto >= 0 ? cleanStr(row[colTipoPunto]) : '';
-          if (!tipoPunto && row[3] && typeof row[3] === 'string' && !row[3].includes('-') && isNaN(row[3])) {
-            tipoPunto = cleanStr(row[3]);
-          } else if (!tipoPunto && row[4] && typeof row[4] === 'string' && !row[4].includes('-') && isNaN(row[4])) {
-            tipoPunto = cleanStr(row[4]);
+          // Extraer nombre del colaborador de forma robusta
+          let rawNombre = '';
+          if (colNombre >= 0 && row[colNombre] && typeof row[colNombre] === 'string' && isNaN(row[colNombre]) && !row[colNombre].includes('-')) {
+            rawNombre = cleanStr(row[colNombre]);
           }
-
-          // Detección inteligente de Ruta:
-          let ruta = '';
-          // 1. En Contrato 9, la columna K (index 10) contiene la descripción (ej: '4304|RUTA STREAT BURGUER 04...')
-          const colK = row[10] ? cleanStr(row[10]) : '';
-          if (colK && (colK.includes('|') || colK.toUpperCase().includes('RUTA') || colK.toUpperCase().includes('SPID') || colK.toUpperCase().includes('OXXO') || colK.toUpperCase().includes('SUBWAY') || colK.toUpperCase().includes('CARLS') || colK.toUpperCase().includes('SERVICIO') || colK.toUpperCase().includes('ESPECIALES'))) {
-            ruta = colK;
-          }
-
-          // 2. Columna detectada por encabezado (ej. Cajas/Viajes/Ruta)
-          if (!ruta && colRuta >= 0 && row[colRuta]) {
-            const cand = cleanStr(row[colRuta]);
-            if (cand && cand.toUpperCase() !== rawNombre.toUpperCase()) {
-              ruta = cand;
-            }
-          }
-
-          // 3. Fallback a columnas comunes (col 6 o col 4) cuidando de NO usar el nombre
-          if (!ruta && row[6]) {
-            const cand = cleanStr(row[6]);
-            if (cand && cand.toUpperCase() !== rawNombre.toUpperCase() && isNaN(cand)) {
-              ruta = cand;
-            }
-          }
-          if (!ruta && row[4]) {
-            const cand = cleanStr(row[4]);
-            if (cand && cand.toUpperCase() !== rawNombre.toUpperCase() && isNaN(cand)) {
-              ruta = cand;
-            }
-          }
-
-          // 4. Búsqueda por patrón de ruta en cualquier celda de la fila
-          if (!ruta) {
-            for (let c = 0; c < row.length; c++) {
-              const val = cleanStr(row[c]);
-              if (val && val.toUpperCase() !== rawNombre.toUpperCase() && (/\d{3,5}\|/.test(val) || val.toUpperCase().includes('RUTA ') || val.toUpperCase().includes('SERVICIO'))) {
-                ruta = val;
+          if (!rawNombre) {
+            for (const colIdx of [2, 3, 4]) {
+              const val = row[colIdx];
+              if (val && typeof val === 'string' && isNaN(val) && !val.includes('-') && !/^\d{3,5}\|/.test(val) && !val.toUpperCase().includes('SERVICIO') && !val.toUpperCase().includes('CONSOLIDADO') && !val.toUpperCase().includes('FASTFOOD')) {
+                rawNombre = cleanStr(val);
                 break;
               }
             }
           }
 
-          if (!ruta) ruta = tipoPunto || 'Ruta';
+          // Cruce con Asistencia / StaffList
+          const matchedStaff = staffMapByRut.get(cRut);
+          const nomFinal = matchedStaff?.name || cleanStr(rawNombre);
 
-          // Cálculo del Total:
-          // 1. Columna Total explícita
-          let totalVal = 0;
-          if (colTotal >= 0 && row[colTotal] !== undefined && row[colTotal] !== '') {
-            const p = parseFloat(String(row[colTotal]).replace(/[^\d.-]/g, ''));
-            if (!isNaN(p) && p !== 0) totalVal = p;
+          // Tipo Punto (evitar que tome el nombre del colaborador)
+          let tipoPunto = colTipoPunto >= 0 ? cleanStr(row[colTipoPunto]) : '';
+          if (!tipoPunto || tipoPunto.toUpperCase() === nomFinal.toUpperCase() || tipoPunto.toUpperCase() === rawNombre.toUpperCase()) {
+            if (row[7] && typeof row[7] === 'string' && isNaN(row[7])) tipoPunto = cleanStr(row[7]);
+            else if (row[4] && typeof row[4] === 'string' && isNaN(row[4]) && cleanStr(row[4]).toUpperCase() !== nomFinal.toUpperCase() && cleanStr(row[4]).toUpperCase() !== rawNombre.toUpperCase()) {
+              tipoPunto = cleanStr(row[4]);
+            }
           }
 
-          // 2. Suma de componentes (viajes + espera + bono2v + dif + carga)
+          // EXTRACCIÓN INTELIGENTE DE RUTA (NUNCA DEBE SER EL NOMBRE DEL PERSONAL):
+          let ruta = '';
+
+          // 1. Prioridad 1: Buscar patrón de ruta "1234|..." en cualquier celda de la fila
+          for (let c = 0; c < row.length; c++) {
+            const val = cleanStr(row[c]);
+            if (val && /^\d{3,5}\|/.test(val) && val.toUpperCase() !== nomFinal.toUpperCase() && val.toUpperCase() !== rawNombre.toUpperCase()) {
+              ruta = val;
+              if (val.length > 8 && val.includes('(')) break;
+            }
+          }
+
+          // 2. Prioridad 2: En Contrato 9, la columna J/K (index 9) contiene la descripción oficial
+          if (!ruta && contractType === 'Contrato 9' && row[9]) {
+            const cand = cleanStr(row[9]);
+            if (cand && cand.toUpperCase() !== nomFinal.toUpperCase() && cand.toUpperCase() !== rawNombre.toUpperCase() && isNaN(cand)) {
+              ruta = cand;
+            }
+          }
+
+          // 3. Prioridad 3: Columna detectada por encabezado (ej. Cajas/Viajes/Ruta)
+          if (!ruta && colRuta >= 0 && row[colRuta]) {
+            const cand = cleanStr(row[colRuta]);
+            if (cand && cand.toUpperCase() !== nomFinal.toUpperCase() && cand.toUpperCase() !== rawNombre.toUpperCase() && isNaN(cand)) {
+              ruta = cand;
+            }
+          }
+
+          // 4. Prioridad 4: Fallback a columna 6 o columna 4
+          if (!ruta && row[6]) {
+            const cand = cleanStr(row[6]);
+            if (cand && cand.toUpperCase() !== nomFinal.toUpperCase() && cand.toUpperCase() !== rawNombre.toUpperCase() && isNaN(cand)) {
+              ruta = cand;
+            }
+          }
+
+          // 5. Prioridad 5: Si no hay ruta específica, usar tipoPunto siempre que no sea nombre
+          if (!ruta && tipoPunto && tipoPunto.toUpperCase() !== nomFinal.toUpperCase() && tipoPunto.toUpperCase() !== rawNombre.toUpperCase()) {
+            ruta = tipoPunto;
+          }
+
+          // Guardián estricto: Si la ruta coincide con el nombre o RUT, reasignar a tipoPunto o 'Ruta'
+          if (ruta.toUpperCase() === nomFinal.toUpperCase() || ruta.toUpperCase() === rawNombre.toUpperCase() || cleanRut(ruta) === cRut) {
+            ruta = (tipoPunto && tipoPunto.toUpperCase() !== nomFinal.toUpperCase() && tipoPunto.toUpperCase() !== rawNombre.toUpperCase()) ? tipoPunto : 'Ruta';
+          }
+          if (!ruta) ruta = 'Ruta';
+
+          // Cálculo del Total:
           const viajes = colViajes >= 0 ? (parseFloat(row[colViajes]) || 0) : 0;
           const espera = colEspera >= 0 ? (parseFloat(row[colEspera]) || 0) : 0;
           const bono2v = colBono2v >= 0 ? (parseFloat(row[colBono2v]) || 0) : 0;
@@ -867,48 +896,56 @@ export default function PagoDotacion() {
           const carga = colCarga >= 0 ? (parseFloat(row[colCarga]) || 0) : 0;
           const sumComponents = viajes + espera + bono2v + dif + carga;
 
-          // 3. Última columna numérica no vacía de la fila (requisito explícito del usuario)
-          let lastNumeric = 0;
-          for (let c = row.length - 1; c >= Math.max(5, colRut + 2); c--) {
-            const v = row[c];
-            if (v !== undefined && v !== null && v !== '') {
-              const parsedV = parseFloat(String(v).replace(/[^\d.-]/g, ''));
-              if (!isNaN(parsedV) && parsedV !== 0) {
-                lastNumeric = parsedV;
-                break;
+          let totalVal = 0;
+          // Columna total explícita
+          if (colTotal >= 0 && row[colTotal] !== undefined && row[colTotal] !== '') {
+            const p = parseFloat(String(row[colTotal]).replace(/[^\d.-]/g, ''));
+            if (!isNaN(p) && p !== 0) totalVal = p;
+          }
+
+          // En Contrato 9, la columna 22 tiene el total oficial
+          if (totalVal === 0 && contractType === 'Contrato 9' && typeof row[22] === 'number') {
+            totalVal = row[22];
+          }
+
+          // Suma de componentes (viajes + espera + bono2v + dif + carga)
+          if (totalVal === 0 && sumComponents > 0) {
+            totalVal = sumComponents;
+          }
+
+          // Última columna numérica no vacía de la fila
+          if (totalVal === 0) {
+            for (let c = row.length - 1; c >= Math.max(5, colRut + 2); c--) {
+              const v = row[c];
+              if (v !== undefined && v !== null && v !== '') {
+                const parsedV = parseFloat(String(v).replace(/[^\d.-]/g, ''));
+                if (!isNaN(parsedV) && parsedV !== 0) {
+                  totalVal = parsedV;
+                  break;
+                }
               }
             }
           }
 
-          if (totalVal === 0) {
-            if (sumComponents > 0) {
-              totalVal = sumComponents;
-            } else if (lastNumeric !== 0) {
-              totalVal = lastNumeric;
-            }
-          }
-
-          // Detección de palabra "Eventualidad" en cualquier celda o campo (Requisito celeste pastel)
+          // Detección de palabra "Eventualidad"
           const rowText = row.map(c => String(c || '')).join(' ').toLowerCase();
           const isEventualidad = rowText.includes('eventualidad') || 
                                 rowText.includes('eventualidades') ||
                                 tipoPunto.toLowerCase().includes('eventualidad') || 
                                 ruta.toLowerCase().includes('eventualidad');
 
-          // Cruce con Asistencia / StaffList
-          const matchedStaff = staffMapByRut.get(cRut);
           const periodInfo = getPeriodFromDate(normFecha);
 
           parsedRows.push({
-            id: `${contractType.toLowerCase()}-${Date.now()}-${r}-${Math.random().toString(36).substr(2, 4)}`,
+            id: `${contractType.toLowerCase()}-${normFecha}-${cRut}-${r}-${Math.random().toString(36).substr(2, 4)}`,
             contratoOrigen: contractType,
             periodo: periodInfo.key,
             periodoLabel: periodInfo.label,
             fechaDespacho: normFecha,
             rutCond1: cRut,
-            nomCond1: matchedStaff?.name || cleanStr(rawNombre),
-            tipoCond1: matchedStaff?.role || (tipoPunto.toLowerCase().includes('auxiliar') ? 'Auxiliar' : 'Conductor'),
-            rutas: ruta || tipoPunto,
+            nomCond1: nomFinal,
+            tipoCond1: matchedStaff?.role || (contractType === 'Contrato 9' || tipoPunto.toLowerCase().includes('auxiliar') ? 'Auxiliar' : 'Conductor'),
+            rutas: ruta,
             tipoPunto,
             total: totalVal,
             pagoCond1: totalVal,
@@ -924,13 +961,20 @@ export default function PagoDotacion() {
                          : contractType === 'Contrato 9' ? 'contrato9' 
                          : 'contrato13';
         setLoadedSummary(prev => ({ ...prev, [summaryKey]: (prev[summaryKey] || 0) + parsedRows.length }));
-        toast.success(`${contractType} cargado: ${parsedRows.length} registros listos.`);
+
+        // Auto-transmitir a la plataforma para pisar el contrato anterior y reflejarse de inmediato
+        await transmitRecords({
+          records: parsedRows,
+          transmittedAssignments
+        });
+
+        toast.success(`${contractType} cargado y transmitido con éxito: ${parsedRows.length} registros listos.`);
       } catch (err) {
         console.error(err);
         toast.error(`Error al procesar el archivo ${contractType}.`);
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   // Ejecutar Transmisión (Requisito 3.7)
@@ -2087,7 +2131,7 @@ export default function PagoDotacion() {
                       <tr key={row.id} className={`${rowClass} transition-colors`}>
                         <td className="px-3.5 py-2 font-bold text-slate-800">{row.fechaDespacho || '-'}</td>
                         <td className="px-3 py-2 text-slate-500 font-mono text-[11px]">{row.periodo || '-'}</td>
-                        <td className="px-3 py-2 font-black text-blue-700">{row.rutas || '-'}</td>
+                        <td className="px-3 py-2 font-black text-blue-700 max-w-[170px] md:max-w-[200px] truncate" title={row.rutas}>{row.rutas || '-'}</td>
                         <td className="px-3 py-2 font-semibold text-slate-800">{row.nomCond1 || row.nombre || '-'}</td>
                         <td className="px-3 py-2 font-mono text-[11px] text-slate-500">{row.rutCond1 || row.rut || '-'}</td>
                         <td className="px-3 py-2">
@@ -2361,7 +2405,7 @@ export default function PagoDotacion() {
                             {row.tipoCond1}
                           </span>
                         </td>
-                        <td className="px-3 py-2 font-bold text-slate-700">{row.rutas}</td>
+                        <td className="px-3 py-2 font-bold text-slate-700 max-w-[170px] truncate" title={row.rutas}>{row.rutas}</td>
                         <td className={`px-3 py-2 text-right font-black ${(parseFloat(row.total) || 0) < 0 ? "text-red-600 bg-red-50/60" : "text-emerald-700"}`}>{formatCLP(row.total)}</td>
                         <td className="px-3 py-2 text-center">
                           {row.matchedStaffInAttendance ? (
@@ -2404,55 +2448,127 @@ export default function PagoDotacion() {
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {/* Colectivo */}
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
-                    Colectivo
-                  </span>
-                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.colectivo ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                      Colectivo
+                    </span>
+                    <span className={`w-2 h-2 rounded-full ${contractUploadDates?.colectivo ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  </div>
+                  <p className="text-xs font-black text-slate-800">
+                    {contractUploadDates?.colectivo || 'Sin cargas'}
+                  </p>
                 </div>
-                <p className="text-xs font-black text-slate-800">
-                  {contractUploadDates?.colectivo || 'Sin cargas'}
-                </p>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <input
+                    type="file"
+                    id="excel-banner-colectivo"
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) processColectivoFile(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <label htmlFor="excel-banner-colectivo" className="text-[10px] font-black text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1">
+                    <UploadCloud size={11} /> Cargar / Actualizar
+                  </label>
+                </div>
               </div>
 
               {/* Contrato 8 */}
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
-                    Contrato 8
-                  </span>
-                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato8 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200">
+                      Contrato 8
+                    </span>
+                    <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato8 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  </div>
+                  <p className="text-xs font-black text-slate-800">
+                    {contractUploadDates?.contrato8 || 'Sin cargas'}
+                  </p>
                 </div>
-                <p className="text-xs font-black text-slate-800">
-                  {contractUploadDates?.contrato8 || 'Sin cargas'}
-                </p>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <input
+                    type="file"
+                    id="excel-banner-contrato8"
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) processAntiguoFile(f, 'Contrato 8');
+                      e.target.value = '';
+                    }}
+                  />
+                  <label htmlFor="excel-banner-contrato8" className="text-[10px] font-black text-indigo-600 hover:text-indigo-800 cursor-pointer flex items-center gap-1">
+                    <UploadCloud size={11} /> Cargar / Actualizar
+                  </label>
+                </div>
               </div>
 
               {/* Contrato 9 */}
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
-                    Contrato 9
-                  </span>
-                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato9 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                      Contrato 9
+                    </span>
+                    <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato9 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  </div>
+                  <p className="text-xs font-black text-slate-800">
+                    {contractUploadDates?.contrato9 || 'Sin cargas'}
+                  </p>
                 </div>
-                <p className="text-xs font-black text-slate-800">
-                  {contractUploadDates?.contrato9 || 'Sin cargas'}
-                </p>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <input
+                    type="file"
+                    id="excel-banner-contrato9"
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) processAntiguoFile(f, 'Contrato 9');
+                      e.target.value = '';
+                    }}
+                  />
+                  <label htmlFor="excel-banner-contrato9" className="text-[10px] font-black text-purple-600 hover:text-purple-800 cursor-pointer flex items-center gap-1">
+                    <UploadCloud size={11} /> Cargar / Actualizar
+                  </label>
+                </div>
               </div>
 
               {/* Contrato 13 */}
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] font-black text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
-                    Contrato 13
-                  </span>
-                  <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato13 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-black text-amber-800 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                      Contrato 13
+                    </span>
+                    <span className={`w-2 h-2 rounded-full ${contractUploadDates?.contrato13 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  </div>
+                  <p className="text-xs font-black text-slate-800">
+                    {contractUploadDates?.contrato13 || 'Sin cargas'}
+                  </p>
                 </div>
-                <p className="text-xs font-black text-slate-800">
-                  {contractUploadDates?.contrato13 || 'Sin cargas'}
-                </p>
+                <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
+                  <input
+                    type="file"
+                    id="excel-banner-contrato13"
+                    accept=".xlsx, .xls"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) processAntiguoFile(f, 'Contrato 13');
+                      e.target.value = '';
+                    }}
+                  />
+                  <label htmlFor="excel-banner-contrato13" className="text-[10px] font-black text-amber-700 hover:text-amber-900 cursor-pointer flex items-center gap-1">
+                    <UploadCloud size={11} /> Cargar / Actualizar
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -2820,11 +2936,11 @@ export default function PagoDotacion() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto border border-slate-300 rounded-xl shadow-xs max-h-[600px]">
-              <table className="w-full text-xs text-left whitespace-nowrap border-collapse">
-                <thead className="bg-slate-200 text-slate-800 font-black sticky top-0 z-10 border-b border-slate-300">
+            <div className="overflow-x-auto border-2 border-slate-300 rounded-2xl shadow-sm min-h-[550px] max-h-[780px] bg-white">
+              <table className="w-full text-xs md:text-sm text-left whitespace-nowrap border-collapse">
+                <thead className="bg-slate-200 text-slate-800 font-black sticky top-0 z-10 border-b-2 border-slate-300 shadow-2xs">
                   <tr>
-                    <th className="px-2.5 py-2.5 border-r border-slate-300 w-9 text-center">
+                    <th className="px-2.5 py-3 border-r border-slate-300 w-10 text-center">
                       <input
                         type="checkbox"
                         checked={displayedTransmittedTrips.length > 0 && displayedTransmittedTrips.every(t => selectedTripIds.has(t.id))}
@@ -2833,17 +2949,16 @@ export default function PagoDotacion() {
                         title="Seleccionar / Deseleccionar todos los visibles"
                       />
                     </th>
-                    <th className="px-3 py-2.5 border-r border-slate-300 w-10 text-center">#</th>
-                    <th className="px-3.5 py-2.5 border-r border-slate-300">Fecha</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300">Ruta</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300">Personal</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300">RUT</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300">Rol</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300">Tipo Servicio / Concepto</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300 text-right">Monto ($)</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300 text-center">Contrato / Origen</th>
-                    <th className="px-3 py-2.5 border-r border-slate-300 text-center">Estado</th>
-                    <th className="px-3 py-2.5 text-center">Acciones</th>
+                    <th className="px-3 py-3 border-r border-slate-300 w-12 text-center text-slate-600">#</th>
+                    <th className="px-3.5 py-3 border-r border-slate-300 font-black">Fecha</th>
+                    <th className="px-3 py-3 border-r border-slate-300 font-black max-w-[170px] md:max-w-[200px]">Ruta</th>
+                    <th className="px-3.5 py-3 border-r border-slate-300 font-black">Personal</th>
+                    <th className="px-3.5 py-3 border-r border-slate-300 text-right font-black">Monto ($)</th>
+                    <th className="px-3 py-3 border-r border-slate-300 text-center font-black">Rol</th>
+                    <th className="px-3 py-3 border-r border-slate-300 font-black">Tipo servicio</th>
+                    <th className="px-3 py-3 border-r border-slate-300 text-center font-black">Contrato/origen</th>
+                    <th className="px-3 py-3 border-r border-slate-300 text-center font-black">Estado</th>
+                    <th className="px-3 py-3 text-center font-black">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 bg-white">
@@ -2877,7 +2992,7 @@ export default function PagoDotacion() {
                         key={row.id}
                         className={`transition-colors ${rowClass}`}
                       >
-                        <td className="px-2.5 py-2 text-center border-r border-slate-200">
+                        <td className="px-2.5 py-2.5 text-center border-r border-slate-200">
                           <input
                             type="checkbox"
                             checked={selectedTripIds.has(row.id)}
@@ -2885,32 +3000,24 @@ export default function PagoDotacion() {
                             className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                           />
                         </td>
-                        <td className="px-3 py-2 text-center text-slate-400 font-mono text-[11px] border-r border-slate-200">
+                        <td className="px-3 py-2.5 text-center text-slate-400 font-mono text-xs border-r border-slate-200">
                           {idx + 1}
                         </td>
-                        <td className="px-3.5 py-2 font-black text-slate-800 border-r border-slate-200">
+                        <td className="px-3.5 py-2.5 font-black text-slate-800 border-r border-slate-200">
                           {row.fechaDespacho}
                         </td>
-                        <td className="px-3 py-2 font-black text-blue-700 border-r border-slate-200">
+                        <td className="px-3 py-2.5 font-black text-blue-700 border-r border-slate-200 max-w-[170px] md:max-w-[200px] truncate" title={row.rutas}>
                           {row.rutas}
                         </td>
-                        <td className="px-3 py-2 font-bold text-slate-800 border-r border-slate-200">
-                          {row.nomCond1}
+                        <td className="px-3.5 py-2.5 border-r border-slate-200">
+                          <div className="font-bold text-slate-900 leading-tight">
+                            {row.nomCond1}
+                          </div>
+                          <div className="font-mono text-[11px] text-slate-500 mt-0.5">
+                            {row.rutCond1}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-slate-500 border-r border-slate-200">
-                          {row.rutCond1}
-                        </td>
-                        <td className="px-3 py-2 border-r border-slate-200">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                            row.tipoCond1 === 'Auxiliar' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-blue-50 text-blue-700 border border-blue-200'
-                          }`}>
-                            {row.tipoCond1 || 'Conductor'}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-slate-700 border-r border-slate-200">
-                          {row.tipoServicio || row.tipoPunto || 'Ruta'}
-                        </td>
-                        <td className={`px-3 py-2 text-right font-black border-r border-slate-200 text-sm ${
+                        <td className={`px-3.5 py-2.5 text-right font-black border-r border-slate-200 text-sm md:text-base ${
                           (parseFloat(row.total) || 0) < 0 ? 'text-red-600 bg-red-50/60' : (isRm ? 'text-purple-900' : 'text-emerald-800')
                         }`}>
                           <div>{formatCLP(row.total)}</div>
@@ -2921,8 +3028,18 @@ export default function PagoDotacion() {
                             </div>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-center border-r border-slate-200">
-                          <span className={`px-2 py-0.5 rounded font-extrabold text-[10px] border ${
+                        <td className="px-3 py-2.5 border-r border-slate-200 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-black ${
+                            row.tipoCond1 === 'Auxiliar' ? 'bg-purple-50 text-purple-700 border border-purple-200' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                          }`}>
+                            {row.tipoCond1 || 'Conductor'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-700 border-r border-slate-200 font-medium">
+                          {row.tipoServicio || row.tipoPunto || 'Ruta'}
+                        </td>
+                        <td className="px-3 py-2.5 text-center border-r border-slate-200">
+                          <span className={`px-2.5 py-1 rounded font-extrabold text-[11px] border ${
                             isRm
                               ? 'bg-purple-200 text-purple-950 border-purple-300 shadow-2xs'
                               : isManual
@@ -2934,7 +3051,7 @@ export default function PagoDotacion() {
                             {row.glosa || row.contratoOrigen || row.origen || 'Excel'}
                           </span>
                         </td>
-                        <td className="px-3 py-2 text-center border-r border-slate-200">
+                        <td className="px-3 py-2.5 text-center border-r border-slate-200">
                           {isRm ? (
                             <span className="px-2 py-0.5 bg-purple-200 text-purple-950 border border-purple-300 rounded font-black text-[10px] inline-flex items-center gap-1">
                               ✦ Ajuste RM
@@ -2953,7 +3070,7 @@ export default function PagoDotacion() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-3 py-2.5 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"

@@ -59,6 +59,13 @@ export const healParadasWithPreloaded = (routeNumber, currentParadas, fecha = ''
 // Helper to format/normalize date string to DD-MM-YYYY
 export const normalizeDate = (rawDate) => {
   if (!rawDate) return '';
+  if (rawDate instanceof Date) {
+    if (isNaN(rawDate.getTime())) return '';
+    const day = String(rawDate.getUTCDate()).padStart(2, '0');
+    const month = String(rawDate.getUTCMonth() + 1).padStart(2, '0');
+    const year = rawDate.getUTCFullYear();
+    return `${day}-${month}-${year}`;
+  }
   const str = String(rawDate).trim();
 
   // Excel serial number as string or number (e.g. 46323 or "46323" -> 28-10-2026)
