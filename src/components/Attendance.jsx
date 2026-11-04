@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { useStaffStore } from '../store/staffStore';
+import { useStaffStore, isStaffExternal } from '../store/staffStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
@@ -83,12 +83,17 @@ export default function Attendance() {
     ? [Number(selectedDay)] 
     : Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
+  // Requisito: En Asistencia solo debe considerarse dotación propia (excluir personal externo)
+  const ownActiveStaff = useMemo(() => {
+    return (staffList || []).filter(s => s.status === 'Activo' && !isStaffExternal(s));
+  }, [staffList]);
+
   // Helper para normalizar RUT y Nombre al cruzar con Disponibilización
   const cleanRut = (r) => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
   const cleanName = (n) => String(n || '').trim().toUpperCase();
 
   const matrix = useMemo(() => {
-    const rawMatrix = staffList.filter(s => s.status === 'Activo').map(staff => {
+    const rawMatrix = ownActiveStaff.map(staff => {
       const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
       const sRut = cleanRut(staff.rut);
       const sName = cleanName(staff.name);
@@ -152,9 +157,9 @@ export default function Attendance() {
     }
 
     return rawMatrix;
-  }, [staffList, attendanceList, daysArray, selectedYear, selectedMonth, statusFilter, transmittedAssignments]);
+  }, [ownActiveStaff, attendanceList, daysArray, selectedYear, selectedMonth, statusFilter, transmittedAssignments]);
 
-  // Sincronizar masivamente todas las rutas del mes desde Disponibilización a Asistencia
+  // Sincronizar masivamente todas las rutas del mes desde Disponibilización a Asistencia (solo dotación propia)
   const handleSyncFromDisponibilizacion = async () => {
     setIsSyncing(true);
     try {
@@ -182,7 +187,7 @@ export default function Attendance() {
           const a2Rut = cleanRut(assign.aux2_rut);
           const a2Name = cleanName(assign.aux2_name);
 
-          staffList.forEach(s => {
+          ownActiveStaff.forEach(s => {
             const sRut = cleanRut(s.rut);
             const sName = cleanName(s.name);
             const isMatch = (cRut && sRut === cRut) || (cName && sName === cName) ||
@@ -301,9 +306,9 @@ export default function Attendance() {
           const rutAuxiliar = formatRut(row['Rut Auxiliar']);
           const rawServiceType = row['Tipo de servicio'] || '';
           
-          // Encuentra si existen en DB
-          const conductorDB = staffList.find(s => formatRut(s.rut) === rutConductor);
-          const auxiliarDB = staffList.find(s => formatRut(s.rut) === rutAuxiliar);
+          // Encuentra si existen en DB y corresponden a dotación propia
+          const conductorDB = ownActiveStaff.find(s => formatRut(s.rut) === rutConductor);
+          const auxiliarDB = ownActiveStaff.find(s => formatRut(s.rut) === rutAuxiliar);
 
           // Determinar estado por defecto (Trabajado si hay tipo de servicio, o en blanco)
           const matchedServiceType = rawServiceType ? 'Trabajado' : '';
@@ -369,7 +374,7 @@ export default function Attendance() {
   };
 
   const handleStaffChange = (index, newStaffId) => {
-    const staff = staffList.find(s => s.id === newStaffId);
+    const staff = ownActiveStaff.find(s => s.id === newStaffId);
     if (!staff) return;
     
     const newData = [...previewData];
@@ -494,7 +499,20 @@ export default function Attendance() {
 
   return (
     <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-100 max-w-6xl mx-auto">
-      <h2 className="text-2xl font-bold text-slate-800 mb-6">Asignación de Asistencia</h2>
+      {/* Encabezado con indicador exclusivo de Dotación Propia */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-2xl font-bold text-slate-800">Asignación de Asistencia</h2>
+            <span className="text-xs font-black bg-blue-100 text-blue-800 border border-blue-200 px-2.5 py-0.5 rounded-full">
+              Dotación Propia ({ownActiveStaff.length})
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Gestión y control de asistencia exclusivo para personal propio interno (conductores y auxiliares de la empresa).
+          </p>
+        </div>
+      </div>
       
       {/* Tabs */}
       <div className="flex space-x-2 border-b border-slate-200 mb-6 overflow-x-auto pb-2">
@@ -604,8 +622,8 @@ export default function Attendance() {
                               value=""
                               onChange={(e) => handleStaffChange(i, e.target.value)}
                             >
-                              <option value="" disabled>Seleccionar de dotación...</option>
-                              {staffList.filter(s => s.status === 'Activo').map(s => (
+                              <option value="" disabled>Seleccionar de dotación propia...</option>
+                              {ownActiveStaff.map(s => (
                                 <option key={s.id} value={s.id}>{s.rut} - {s.name}</option>
                               ))}
                             </select>
@@ -653,10 +671,10 @@ export default function Attendance() {
       {activeTab === 'manual' && (
         <form onSubmit={submitManual} className="space-y-6 max-w-md">
           <Select 
-            label="Empleado (Conductor/Auxiliar)"
+            label="Empleado Propio (Conductor/Auxiliar)"
             value={manualData.staff_id}
             onChange={(e) => setManualData({...manualData, staff_id: e.target.value})}
-            options={staffList.filter(s => s.status === 'Activo').map(s => ({ value: s.id, label: `${s.rut} - ${s.name} (${s.role})` }))}
+            options={ownActiveStaff.map(s => ({ value: s.id, label: `${s.rut} - ${s.name} (${s.role})` }))}
             required
           />
           <Input 
@@ -682,10 +700,10 @@ export default function Attendance() {
       {activeTab === 'rango' && (
         <form onSubmit={submitRange} className="space-y-6 max-w-md">
           <Select 
-            label="Empleado"
+            label="Empleado Propio"
             value={rangeData.staff_id}
             onChange={(e) => setRangeData({...rangeData, staff_id: e.target.value})}
-            options={staffList.filter(s => s.status === 'Activo').map(s => ({ value: s.id, label: `${s.rut} - ${s.name}` }))}
+            options={ownActiveStaff.map(s => ({ value: s.id, label: `${s.rut} - ${s.name} (${s.role || 'Dotación Propia'})` }))}
             required
           />
           <div className="flex gap-4">
@@ -778,7 +796,9 @@ export default function Attendance() {
             <table className="w-full text-sm text-left border-collapse whitespace-nowrap">
               <thead className="bg-slate-100 text-slate-600 sticky top-0 z-20 shadow-sm">
                 <tr>
-                  <th className="px-4 py-3 font-semibold border-b border-r border-slate-200 sticky left-0 z-30 bg-slate-100 min-w-[250px]">Personal</th>
+                  <th className="px-4 py-3 font-semibold border-b border-r border-slate-200 sticky left-0 z-30 bg-slate-100 min-w-[250px]">
+                    Personal Propio ({matrix.length})
+                  </th>
                   <th className="px-3 py-3 font-semibold border-b border-r border-slate-200 min-w-[100px]">Cargo</th>
                   {daysArray.map(day => {
                     const isWeekend = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0 || new Date(selectedYear, selectedMonth - 1, day).getDay() === 6;

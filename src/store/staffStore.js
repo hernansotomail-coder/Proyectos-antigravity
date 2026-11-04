@@ -3,7 +3,12 @@ export const isStaffExternal = (s) => {
   if (!s) return false;
   if ((s.tipo_dotacion || '').toLowerCase() === 'externo') return true;
   if (s.empresa_externa && String(s.empresa_externa).trim() !== '') return true;
-  if (s.rut && String(s.rut).toUpperCase().startsWith('EXT-')) return true;
+  const rutUpper = String(s.rut || '').trim().toUpperCase();
+  if (rutUpper.startsWith('EXT-') || rutUpper.startsWith('EXT')) return true;
+  const nameUpper = String(s.name || '').toUpperCase();
+  if (nameUpper.includes('(EXT-') || nameUpper.includes('EXTERNO') || nameUpper.includes('(EXT)')) return true;
+  const roleUpper = String(s.role || '').toUpperCase();
+  if (roleUpper.includes('EXTERNO')) return true;
   return false;
 };
 
