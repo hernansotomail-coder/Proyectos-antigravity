@@ -309,6 +309,18 @@ export const ensureRowTransportista = (row) => {
   return 'T300';
 };
 
+// Helper para envolver cualquier promesa en un timeout estricto para evitar congelamientos en Supabase
+export const withTimeout = (promise, ms = 3500) => {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout de conexión a la base de datos (${ms}ms)`)), ms);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    timeoutPromise
+  ]);
+};
+
 export const persistAssignmentsToDb = async (fecha, assignments, silent = false) => {
   try {
     if (!fecha || !assignments) return false;
@@ -318,13 +330,16 @@ export const persistAssignmentsToDb = async (fecha, assignments, silent = false)
     // Sanitizar datos para asegurar serialización JSON limpia sin referencias circulares ni campos inválidos
     const sanitized = JSON.parse(JSON.stringify(assignments));
 
-    const { error } = await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: cleanFecha,
-        assignments: sanitized,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+    const { error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: cleanFecha,
+          assignments: sanitized,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      4000
+    );
     if (error) {
       console.warn(`[Supabase] Error guardando asignaciones para fecha ${cleanFecha}:`, error);
       if (!silent) {
@@ -336,7 +351,7 @@ export const persistAssignmentsToDb = async (fecha, assignments, silent = false)
   } catch (e) {
     console.warn('[Supabase] Excepción guardando asignaciones:', e);
     if (!silent) {
-      toast.error(`Error de red al guardar fecha ${fecha} en la nube.`);
+      toast.warning(`Sin respuesta de la nube (${fecha}). Se guardó localmente en este equipo.`);
     }
     return false;
   }
@@ -345,13 +360,16 @@ export const persistAssignmentsToDb = async (fecha, assignments, silent = false)
 export const persistRuteoOverridesToDb = async (overrides) => {
   try {
     if (!overrides) return false;
-    const { error } = await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__ruteo_overrides__',
-        assignments: overrides,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+    const { error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__ruteo_overrides__',
+          assignments: overrides,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      3500
+    );
     if (error) {
       console.warn('[Supabase] Error guardando overrides de ruteo:', error);
       return false;
@@ -366,13 +384,16 @@ export const persistRuteoOverridesToDb = async (overrides) => {
 export const persistHistoryToDb = async (historyList) => {
   try {
     if (!historyList) return false;
-    const { error } = await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__saved_history__',
-        assignments: historyList,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+    const { error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__saved_history__',
+          assignments: historyList,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      3500
+    );
     if (error) {
       console.warn('[Supabase] Error guardando histórico:', error);
       return false;
@@ -387,13 +408,16 @@ export const persistHistoryToDb = async (historyList) => {
 export const persistChangeHistoryToDb = async (changeList) => {
   try {
     if (!changeList) return false;
-    const { error } = await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__change_history__',
-        assignments: changeList,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+    const { error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__change_history__',
+          assignments: changeList,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      3500
+    );
     if (error) {
       console.warn('[Supabase] Error guardando change history:', error);
       return false;
@@ -506,13 +530,16 @@ export const persistTransformedRoutesToDb = async (transformedRoutes, meta = {})
         updated_at: new Date().toISOString()
       }
     };
-    const { error } = await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__transformed_routes__',
-        assignments: payload,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+    const { error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__transformed_routes__',
+          assignments: payload,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      3500
+    );
     if (error) {
       console.warn('[Supabase] Error guardando transformedRoutes:', error);
       return false;
@@ -526,9 +553,12 @@ export const persistTransformedRoutesToDb = async (transformedRoutes, meta = {})
 
 export const fetchPlanningStateFromDb = async () => {
   try {
-    const { data, error } = await supabase
-      .from('planning_assignments')
-      .select('*');
+    const { data, error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .select('*'),
+      4000
+    );
     if (error) {
       console.warn('Error leyendo planning_assignments:', error);
       return null;
@@ -987,6 +1017,10 @@ export const usePlanningStore = create((set, get) => ({
 
   // Metadatos y modificaciones en el sub-menú Ruteo: { [fecha]: { [tripKey]: { turno, hora_cita, prioridad, destino_prioritario } } }
   ruteoOverrides: loadPersistedRuteoOverrides(),
+
+  // Estado de sincronización en la nube (multi-computador)
+  cloudSyncStatus: 'idle', // 'idle' | 'synced' | 'syncing' | 'offline' | 'error'
+  lastCloudSync: null,
 
   // Set Raw Rows imported from Excel Sheet1
   setRawRows: (rows, name = '') => {
@@ -1460,7 +1494,12 @@ export const usePlanningStore = create((set, get) => ({
   initPlanningFromDb: async () => {
     try {
       const dbState = await fetchPlanningStateFromDb();
-      if (!dbState) return;
+      if (!dbState) {
+        set({ cloudSyncStatus: 'offline' });
+        return;
+      }
+
+      set({ cloudSyncStatus: 'synced', lastCloudSync: new Date().toISOString() });
 
       const { 
         assignmentsMap, 
@@ -1473,16 +1512,36 @@ export const usePlanningStore = create((set, get) => ({
 
       const currentState = get();
 
-      // 1. Detección y migración automática de fechas locales no presentes en BD (ej: 30-10-2026 cargada en otro notebook)
+      // 1. Detección y migración automática de fechas locales no presentes en BD o con asignaciones más completas
       const localTransmitted = currentState.transmittedAssignments || {};
       const datesToPushToDb = [];
 
       Object.entries(localTransmitted).forEach(([localFecha, localRows]) => {
         if (localFecha && !localFecha.startsWith('__') && Array.isArray(localRows) && localRows.length > 0) {
-          if (!assignmentsMap[localFecha]) {
-            console.log(`[Sync] Detectada fecha local ${localFecha} no presente en BD. Subiendo a Supabase...`);
-            datesToPushToDb.push({ fecha: localFecha, rows: localRows });
-            assignmentsMap[localFecha] = localRows;
+          const cleanFecha = normalizeDate(localFecha) || localFecha;
+          const dbRows = assignmentsMap[cleanFecha];
+          if (!dbRows) {
+            console.log(`[Sync] Detectada fecha local ${cleanFecha} no presente en BD. Subiendo a Supabase...`);
+            datesToPushToDb.push({ fecha: cleanFecha, rows: localRows });
+            assignmentsMap[cleanFecha] = localRows;
+          } else {
+            const localAssignedCount = localRows.filter(r => r.conductor_name || r.camion).length;
+            const dbAssignedCount = dbRows.filter(r => r.conductor_name || r.camion).length;
+            if (localAssignedCount > dbAssignedCount) {
+              console.log(`[Sync] Fecha local ${cleanFecha} tiene más asignaciones que BD (${localAssignedCount} vs ${dbAssignedCount}). Sincronizando con BD...`);
+              const localRowMap = new Map();
+              localRows.forEach(lr => {
+                const k = `${lr.ruta || ''}:::${lr.id || ''}`;
+                localRowMap.set(k, lr);
+              });
+              const merged = dbRows.map(dbR => {
+                const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
+                const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
+                return (lr && (lr.conductor_name || lr.camion)) ? { ...dbR, ...lr } : dbR;
+              });
+              datesToPushToDb.push({ fecha: cleanFecha, rows: merged });
+              assignmentsMap[cleanFecha] = merged;
+            }
           }
         }
       });
@@ -1677,6 +1736,8 @@ export const usePlanningStore = create((set, get) => ({
   // Sincronizar todos los datos locales con la nube Supabase bajo demanda
   syncAllToCloud: async () => {
     try {
+      set({ cloudSyncStatus: 'syncing' });
+      toast.loading('Sincronizando todas las asignaciones con la nube...', { id: 'cloud-sync-all' });
       const state = get();
       const promises = [];
 
@@ -1689,10 +1750,12 @@ export const usePlanningStore = create((set, get) => ({
       }
 
       // 2. Subir asignaciones por cada fecha disponible
+      let count = 0;
       if (state.transmittedAssignments && typeof state.transmittedAssignments === 'object') {
         Object.entries(state.transmittedAssignments).forEach(([fecha, rows]) => {
           if (fecha && !fecha.startsWith('__') && Array.isArray(rows) && rows.length > 0) {
-            promises.push(persistAssignmentsToDb(fecha, rows));
+            promises.push(persistAssignmentsToDb(fecha, rows, true));
+            count++;
           }
         });
       }
@@ -1708,12 +1771,105 @@ export const usePlanningStore = create((set, get) => ({
         promises.push(persistChangeHistoryToDb(state.changeHistoryList));
       }
 
-      await Promise.all(promises);
-      toast.success('¡Todos los datos locales se sincronizaron con la nube exitosamente!');
-      return true;
+      const results = await Promise.all(promises);
+      const allSuccess = results.every(res => res !== false);
+
+      if (allSuccess) {
+        set({ cloudSyncStatus: 'synced', lastCloudSync: new Date().toISOString() });
+        toast.success(`¡Sincronización completa! Se respaldaron ${count} fecha(s) en la nube para todos los computadores.`, { id: 'cloud-sync-all' });
+        return true;
+      } else {
+        set({ cloudSyncStatus: 'error' });
+        toast.warning('Se enviaron datos, pero el servidor Supabase tardó en responder. Verifica el estado en Supabase Dashboard.', { id: 'cloud-sync-all' });
+        return false;
+      }
     } catch (e) {
       console.error('Error sincronizando todo con la nube:', e);
-      toast.error('Error al sincronizar con el servidor');
+      set({ cloudSyncStatus: 'offline' });
+      toast.error('Error al sincronizar con la nube. Comprueba tu conexión o si Supabase está pausado.', { id: 'cloud-sync-all' });
+      return false;
+    }
+  },
+
+  // Exportar asignaciones en JSON para compartir directamente entre computadores
+  exportPlanningStateJson: (targetDate = null) => {
+    const state = get();
+    const data = {
+      version: CURRENT_STORAGE_VERSION,
+      export_date: new Date().toISOString(),
+      target_date: targetDate,
+      transmittedAssignments: targetDate && state.transmittedAssignments?.[targetDate]
+        ? { [targetDate]: state.transmittedAssignments[targetDate] }
+        : state.transmittedAssignments,
+      savedRuteoBaseline: targetDate && state.savedRuteoBaseline?.[targetDate]
+        ? { [targetDate]: state.savedRuteoBaseline[targetDate] }
+        : state.savedRuteoBaseline,
+      savedRuteoByDate: targetDate && state.savedRuteoByDate?.[targetDate]
+        ? { [targetDate]: state.savedRuteoByDate[targetDate] }
+        : state.savedRuteoByDate,
+      savedHistoryList: state.savedHistoryList,
+      ruteoOverrides: state.ruteoOverrides,
+      transformedRoutes: state.transformedRoutes
+    };
+    return JSON.stringify(data, null, 2);
+  },
+
+  // Importar asignaciones desde JSON generado en otro computador
+  importPlanningStateFromJson: async (jsonString) => {
+    try {
+      if (!jsonString) return false;
+      const data = typeof jsonString === 'string' ? JSON.parse(jsonString) : jsonString;
+      if (!data.transmittedAssignments || typeof data.transmittedAssignments !== 'object') {
+        toast.error('El archivo JSON no contiene asignaciones válidas.');
+        return false;
+      }
+
+      const currentState = get();
+      const mergedTransmitted = {
+        ...(currentState.transmittedAssignments || {}),
+        ...data.transmittedAssignments
+      };
+      const mergedBaseline = {
+        ...(currentState.savedRuteoBaseline || {}),
+        ...(data.savedRuteoBaseline || {})
+      };
+      const mergedSavedRuteo = {
+        ...(currentState.savedRuteoByDate || {}),
+        ...(data.savedRuteoByDate || {})
+      };
+      const mergedOverrides = {
+        ...(currentState.ruteoOverrides || {}),
+        ...(data.ruteoOverrides || {})
+      };
+
+      persistAssignments(mergedTransmitted);
+      persistSavedBaseline(mergedBaseline);
+      persistSavedRuteo(mergedSavedRuteo);
+      if (data.ruteoOverrides) {
+        try { localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(mergedOverrides)); } catch (e) {}
+      }
+
+      const importDates = Object.keys(data.transmittedAssignments);
+      const targetDate = data.target_date || importDates[0] || currentState.selectedDisponibilizarDate;
+
+      set({
+        transmittedAssignments: mergedTransmitted,
+        savedRuteoBaseline: mergedBaseline,
+        savedRuteoByDate: mergedSavedRuteo,
+        ruteoOverrides: mergedOverrides,
+        selectedDisponibilizarDate: targetDate
+      });
+
+      // Intentar subir a Supabase en segundo plano
+      Promise.all(importDates.map(d => persistAssignmentsToDb(d, data.transmittedAssignments[d], true)))
+        .then(() => console.log('[Import] Asignaciones subidas a Supabase'))
+        .catch(() => {});
+
+      toast.success(`¡Asignaciones importadas correctamente! Se cargaron ${importDates.length} fecha(s).`);
+      return true;
+    } catch (err) {
+      console.error('Error importando JSON:', err);
+      toast.error('Error al procesar el archivo JSON: ' + (err.message || 'Formato inválido'));
       return false;
     }
   },

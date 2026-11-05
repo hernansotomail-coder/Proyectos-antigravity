@@ -12,6 +12,7 @@ import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { usePlanningStore, ensureRowTransportista, sortDatesDescending, getMostRecentDate, normalizeDate } from '../store/planningStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { useAuthStore } from '../store/authStore';
+import { supabase } from '../lib/supabase';
 import { Button } from './ui/Button';
 import { getBriefingOperation } from './Briefing';
 
@@ -318,12 +319,79 @@ export default function AssignmentControl() {
     aperturarRutaEnDisponibilizacion,
     addExtraServices,
     syncActiveDateToCloud,
+    syncAllToCloud,
+    exportPlanningStateJson,
+    importPlanningStateFromJson,
+    cloudSyncStatus,
     initPlanningFromDb
   } = usePlanningStore();
 
   useEffect(() => {
     initPlanningFromDb?.();
+
+    // Suscripción Realtime para actualizar la tabla inmediatamente si otro notebook guarda
+    let timer = null;
+    let channel = null;
+    try {
+      channel = supabase
+        .channel('realtime:assignment_control')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'planning_assignments' }, (payload) => {
+          console.log('[Realtime AssignmentControl] Modificación detectada:', payload?.new?.fecha || payload);
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            initPlanningFromDb?.();
+          }, 600);
+        })
+        .subscribe();
+    } catch (e) {
+      console.warn('[Realtime AssignmentControl] Error subscribiendo canal:', e);
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch (e) {}
+      }
+    };
   }, [initPlanningFromDb]);
+
+  const handleExportBackup = () => {
+    try {
+      const json = exportPlanningStateJson(activeDate);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Disponibilizacion_${activeDate}_backup.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success(`Archivo de asignaciones descargado para ${activeDate}.`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al exportar archivo de respaldo.');
+    }
+  };
+
+  const handleImportBackup = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const content = event.target?.result;
+        if (typeof content === 'string') {
+          await importPlanningStateFromJson(content);
+        }
+      } catch (err) {
+        toast.error('Error leyendo archivo JSON.');
+      } finally {
+        e.target.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const availableDates = useMemo(() => {
     const setDates = new Set();
@@ -1678,36 +1746,79 @@ export default function AssignmentControl() {
             )}
           </div>
 
-          {/* Botones de acción al extremo derecho (Requisito 1) */}
+          {/* Botones de acción al extremo derecho */}
           <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+            {/* Indicador de estado Nube */}
+            {cloudSyncStatus === 'synced' ? (
+              <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-[10px] font-bold shadow-2xs" title="Conectado y sincronizado en vivo con Supabase">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Nube Conectada
+              </span>
+            ) : cloudSyncStatus === 'syncing' ? (
+              <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-50 border border-blue-300 text-blue-800 text-[10px] font-bold shadow-2xs">
+                <RefreshCw size={11} className="animate-spin text-blue-600" />
+                Sincronizando...
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-[10px] font-bold shadow-2xs" title="El servidor Supabase está en pausa o sin conexión. Los datos están guardados localmente en este equipo. Usa 'Sincronizar Nube' para reintentar.">
+                <AlertTriangle size={11} className="text-amber-600 shrink-0" />
+                Modo Local (Sin Nube)
+              </span>
+            )}
+
             <Button 
               onClick={() => handleOpenAperturarModal()}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-7.5 px-2.5 flex items-center gap-1 shadow-sm rounded-xl cursor-pointer"
               title="Apertura / dividir una ruta quitando filas/paradas hacia una nueva numeración"
             >
-              <Scissors size={13} />
+              <Scissors size={12} />
               Apertura Ruta
             </Button>
 
             {/* Botón Registrar Servicio Extra */}
             <Button 
               onClick={() => handleOpenExtraServicesModal()}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs h-7.5 px-2.5 flex items-center gap-1 shadow-sm rounded-xl cursor-pointer"
               title="Registrar servicios extras (Retiro camión, Taller, Vulcanización, Traspasos, Apoyo Centro, etc.)"
             >
-              <Plus size={13} />
+              <Plus size={12} />
               Servicio Extra
             </Button>
 
             {/* Botón Sincronizar Nube */}
             <Button 
-              onClick={() => syncActiveDateToCloud(activeDate)}
-              className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs h-7.5 px-3 flex items-center gap-1.5 shadow-sm rounded-xl cursor-pointer"
-              title="Sincronizar y forzar subida a la base de datos en la nube para que todos los notebooks vean los cambios de esta fecha"
+              onClick={() => syncAllToCloud()}
+              className="bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs h-7.5 px-2.5 flex items-center gap-1 shadow-sm rounded-xl cursor-pointer"
+              title="Sincronizar y forzar subida de todas las asignaciones a la base de datos en la nube para que todos los notebooks vean los cambios"
             >
               <UploadCloud size={13} />
               Sincronizar Nube
             </Button>
+
+            {/* Exportar JSON */}
+            <Button
+              onClick={handleExportBackup}
+              className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs h-7.5 px-2 flex items-center gap-1 shadow-sm rounded-xl cursor-pointer"
+              title="Exportar archivo de asignaciones (.json) para transferir a otro computador"
+            >
+              <Download size={12} />
+              Exportar
+            </Button>
+
+            {/* Importar JSON */}
+            <label 
+              className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-xs h-7.5 px-2 flex items-center gap-1 shadow-sm rounded-xl cursor-pointer select-none"
+              title="Cargar archivo de asignaciones (.json) exportado desde otro computador"
+            >
+              <UploadCloud size={12} />
+              Importar
+              <input
+                type="file"
+                accept=".json"
+                onChange={handleImportBackup}
+                className="hidden"
+              />
+            </label>
 
             {/* Botón Guardar Disponibilización */}
             <Button 

@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import { 
   Calendar, Search, Download, Clock, MapPin, 
   User, Truck, Layers, CheckCircle2, ChevronDown, ChevronRight,
-  FileSpreadsheet, ArrowRight, History, X, Check, Filter
+  FileSpreadsheet, ArrowRight, History, X, Check, Filter, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlanningStore, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
@@ -165,7 +165,11 @@ function MultiSelectFilter({ label, options, selectedValues, onChange, placehold
 }
 
 export default function HistoricalAssignment() {
-  const { savedHistoryList, savedRuteoByDate, transmittedAssignments } = usePlanningStore();
+  const { savedHistoryList, savedRuteoByDate, transmittedAssignments, initPlanningFromDb } = usePlanningStore();
+
+  useEffect(() => {
+    initPlanningFromDb?.();
+  }, [initPlanningFromDb]);
 
   // Fechas disponibles en el historial (ordenadas cronológicamente de más reciente a más antigua)
   const historyDates = useMemo(() => {
@@ -502,6 +506,17 @@ export default function HistoricalAssignment() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Button 
+            onClick={() => {
+              initPlanningFromDb?.();
+              toast.success('Sincronizando histórico con la nube...');
+            }}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
+            title="Recargar y sincronizar datos con el servidor en la nube"
+          >
+            <RefreshCw size={14} />
+            Sincronizar
+          </Button>
           <Button 
             onClick={handleExportDetailed}
             className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
