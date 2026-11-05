@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
   LogOut, ChevronDown, ChevronRight, ChevronLeft, Truck, Key, Layers, 
-  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen, DollarSign,
+  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen,
   BarChart3
 } from 'lucide-react';
 import { Toaster } from 'sonner';
@@ -59,7 +59,6 @@ export default function Layout() {
     { key: 'add-staff', name: 'Agregar Dotación', path: '/add-staff', icon: Users },
     { key: 'manage-staff', name: 'Gestión Dotación', path: '/manage-staff', icon: UserCog },
     { key: 'attendance', name: 'Asistencia', path: '/attendance', icon: CalendarClock },
-    { key: 'pago-dotacion', name: 'Pago dotación', path: '/pago-dotacion', icon: DollarSign },
     { key: 'users', name: 'Usuarios', path: '/users', icon: Key },
   ];
 

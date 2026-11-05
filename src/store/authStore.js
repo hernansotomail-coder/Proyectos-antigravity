@@ -54,7 +54,7 @@ export const canUserViewMenu = (user, menuKey) => {
   // Fallbacks predeterminados por Rol
   if (user.role === 'Visualizador') {
     // Por defecto el visualizador puede ver reportes/dashboards
-    return ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'pago-dotacion', 'estatus-diario'].includes(menuKey);
+    return ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(menuKey);
   }
 
   // Administrativo por defecto ve todos excepto mantenedor de usuarios

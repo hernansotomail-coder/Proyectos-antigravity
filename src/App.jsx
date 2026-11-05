@@ -21,7 +21,6 @@ import RuteoView from './components/RuteoView';
 import Briefing from './components/Briefing';
 import ChangeHistory from './components/ChangeHistory';
 import ManualDeUso from './components/ManualDeUso';
-import PagoDotacion from './components/PagoDotacion';
 import EstatusDiario from './components/EstatusDiario';
 import { usePlanningStore } from './store/planningStore';
 import { useFleetStore } from './store/fleetStore';
@@ -32,6 +31,14 @@ function App() {
   const { initPlanningFromDb } = usePlanningStore();
 
   useEffect(() => {
+    // 0. Liberación de memoria local (eliminar cachés antiguas no utilizadas)
+    try {
+      localStorage.removeItem('keylogistics_pago_dotacion');
+      localStorage.removeItem('keylogistics_pago_dotacion_transmitted');
+      localStorage.removeItem('keylogistics_pago_dotacion_contracts');
+      localStorage.removeItem('keylogistics_pago_dotacion_history');
+    } catch (e) {}
+
     // 1. Carga inicial garantizada de datos desde Supabase
     initPlanningFromDb?.();
     useFleetStore.getState().fetchFleet?.();
@@ -120,7 +127,6 @@ function App() {
           <Route path="add-staff" element={<Login><AddStaff /></Login>} />
           <Route path="manage-staff" element={<Login><ManageStaff /></Login>} />
           <Route path="attendance" element={<Login><Attendance /></Login>} />
-          <Route path="pago-dotacion" element={<Login><PagoDotacion /></Login>} />
           <Route path="users" element={<Login><UsersManager /></Login>} />
         </Route>
       </Routes>

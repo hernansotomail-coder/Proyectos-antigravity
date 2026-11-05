@@ -40,7 +40,6 @@ export const APP_MODULES = [
       { key: 'add-staff', label: 'Agregar Dotación', path: '/add-staff' },
       { key: 'manage-staff', label: 'Gestión Dotación', path: '/manage-staff' },
       { key: 'attendance', label: 'Asistencia', path: '/attendance' },
-      { key: 'pago-dotacion', label: 'Pago dotación', path: '/pago-dotacion' },
       { key: 'users', label: 'Usuarios (Mantenedor)', path: '/users' },
     ]
   }
@@ -64,7 +63,7 @@ export const getDefaultPermissionsForRole = (role) => {
     if (role === 'Administrador') {
       menus[k] = { view: true, edit: true };
     } else if (role === 'Visualizador') {
-      const canView = ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'pago-dotacion', 'estatus-diario'].includes(k);
+      const canView = ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(k);
       menus[k] = { view: canView, edit: false };
     } else {
       // Administrativo
