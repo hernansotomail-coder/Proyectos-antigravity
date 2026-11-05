@@ -4,11 +4,12 @@ import {
   FileSpreadsheet, UploadCloud, Calendar, Download, RefreshCw, 
   CheckCircle2, AlertTriangle, Building2, Fuel, TrendingUp, Layers, 
   Search, Copy, Check, Info, FileText, ArrowUpRight, BarChart3,
-  Truck, ShieldCheck, XCircle, X, Eye
+  Truck, ShieldCheck, XCircle, X, Eye, Clock
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/Button';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
 
 // Hojas oficiales a procesar
@@ -125,7 +126,25 @@ export function dmyToIso(dmyStr) {
   return clean;
 }
 
+// Retorna la fecha actual en Chile como 'YYYY-MM-DD'
+export function getChileLocalDateString(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(date);
+}
+
+// Verifica si un registro guardado sigue siendo válido hoy en Chile (hasta las 23:59:59)
+export function isEstatusRecordValid(record) {
+  if (!record || !record.dateChile || !record.processedData) return false;
+  const todayChile = getChileLocalDateString(new Date());
+  return record.dateChile === todayChile;
+}
+
 export default function EstatusDiario() {
+  const { user } = useAuthStore();
   const [file, setFile] = useState(null);
   const [workbook, setWorkbook] = useState(null);
   const [availableSheets, setAvailableSheets] = useState([]);
@@ -133,11 +152,130 @@ export default function EstatusDiario() {
   const [fechaCorte, setFechaCorte] = useState(''); // Formato DD-MM-YYYY
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedData, setProcessedData] = useState(null);
+  const [remoteInfo, setRemoteInfo] = useState(null); // { uploadedBy, savedAt, dateChile }
   const [activeTab, setActiveTab] = useState('all'); // 'all', 'rep1', 'rep2', 'rep3', 'rep4'
   const [isDragging, setIsDragging] = useState(false);
   const [copiedSection, setCopiedSection] = useState(null);
 
   const fileInputRef = useRef(null);
+
+  // Sincronización Realtime con Supabase y verificación de vigencia diaria (23:59 hrs Chile)
+  useEffect(() => {
+    let isMounted = true;
+
+    // 1. Cargar estatus activo al montar
+    const loadRemoteStatus = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('planning_assignments')
+          .select('*')
+          .eq('fecha', '__estatus_diario__')
+          .maybeSingle();
+
+        if (!error && data && data.assignments && isMounted) {
+          const record = data.assignments;
+          if (isEstatusRecordValid(record)) {
+            setProcessedData(record.processedData);
+            if (record.fechaCorte) setFechaCorte(record.fechaCorte);
+            setRemoteInfo({
+              uploadedBy: record.uploadedBy || 'Usuario',
+              savedAt: record.savedAt,
+              dateChile: record.dateChile
+            });
+          } else {
+            // Ya expiró (pasó de las 23:59 hrs del día cargado) -> Limpiar en BD
+            await supabase
+              .from('planning_assignments')
+              .delete()
+              .eq('fecha', '__estatus_diario__');
+            setProcessedData(null);
+            setRemoteInfo(null);
+          }
+        }
+      } catch (err) {
+        console.warn('Error al consultar estatus diario remoto en Supabase:', err);
+      }
+    };
+
+    loadRemoteStatus();
+
+    // 2. Suscripción en Tiempo Real para recibir cambios instantáneos desde cualquier computador
+    const channel = supabase
+      .channel('realtime:estatus_diario')
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'planning_assignments',
+        filter: 'fecha=eq.__estatus_diario__'
+      }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'DELETE' || !payload.new || !payload.new.assignments) {
+          setProcessedData(null);
+          setRemoteInfo(null);
+          return;
+        }
+
+        const record = payload.new.assignments;
+        if (isEstatusRecordValid(record)) {
+          setProcessedData(record.processedData);
+          if (record.fechaCorte) setFechaCorte(record.fechaCorte);
+          setRemoteInfo({
+            uploadedBy: record.uploadedBy || 'Usuario',
+            savedAt: record.savedAt,
+            dateChile: record.dateChile
+          });
+          toast.info(`Estatus diario actualizado automáticamente por ${record.uploadedBy || 'otro usuario'}.`);
+        } else {
+          setProcessedData(null);
+          setRemoteInfo(null);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // 3. Monitoreo continuo de medianoche (23:59 hrs Hora Chile) para resetear automáticamente
+  useEffect(() => {
+    if (!processedData) return;
+
+    const checkMidnightExpiry = () => {
+      const todayChile = getChileLocalDateString(new Date());
+      if (remoteInfo?.dateChile && remoteInfo.dateChile !== todayChile) {
+        setProcessedData(null);
+        setRemoteInfo(null);
+        setFile(null);
+        setWorkbook(null);
+        toast.info('Medianoche alcanzada (23:59 hrs): El estatus diario anterior se ha reiniciado automáticamente.');
+        supabase
+          .from('planning_assignments')
+          .delete()
+          .eq('fecha', '__estatus_diario__')
+          .catch(() => {});
+      }
+    };
+
+    const interval = setInterval(checkMidnightExpiry, 15000);
+    return () => clearInterval(interval);
+  }, [processedData, remoteInfo]);
+
+  // Función para reiniciar / limpiar el estatus manualmente si se desea cambiar antes de 23:59
+  const handleResetStatus = async () => {
+    if (!window.confirm('¿Deseas reiniciar y limpiar el estatus diario para todos los computadores?')) return;
+    try {
+      setProcessedData(null);
+      setRemoteInfo(null);
+      setFile(null);
+      setWorkbook(null);
+      await supabase.from('planning_assignments').delete().eq('fecha', '__estatus_diario__');
+      toast.success('Estatus diario reiniciado exitosamente.');
+    } catch (e) {
+      toast.error('Error al reiniciar: ' + e.message);
+    }
+  };
 
   // Integración con Disponibilización
   const { transmittedAssignments, savedRuteoByDate, initPlanningFromDb } = usePlanningStore();
@@ -327,7 +465,7 @@ export default function EstatusDiario() {
   };
 
   // Procesamiento de las 4 tablas pivote
-  const procesarReporte = () => {
+  const procesarReporte = async () => {
     if (!workbook) {
       toast.error('Por favor carga primero un archivo Excel de operaciones.');
       return;
@@ -530,7 +668,7 @@ export default function EstatusDiario() {
         _avanceNum: pctGlobal
       });
 
-      setProcessedData({
+      const dataToSave = {
         fechaCorteDmy: isoToDmy(isoTarget),
         fechaIso: isoTarget,
         totalRegistros: allRows.length,
@@ -541,9 +679,39 @@ export default function EstatusDiario() {
         rep2,
         rep3,
         rep4: rep4Rows
+      };
+
+      setProcessedData(dataToSave);
+
+      // Sincronizar en Supabase para todos los computadores
+      const todayChile = getChileLocalDateString(new Date());
+      const payload = {
+        processedData: dataToSave,
+        fechaCorte: isoToDmy(isoTarget),
+        dateChile: todayChile,
+        savedAt: new Date().toISOString(),
+        uploadedBy: user?.name || user?.username || 'Usuario'
+      };
+
+      setRemoteInfo({
+        uploadedBy: payload.uploadedBy,
+        savedAt: payload.savedAt,
+        dateChile: todayChile
       });
 
-      toast.success(`Reporte generado exitosamente con ${allRows.length} registros para el día ${isoToDmy(isoTarget)}.`);
+      try {
+        await supabase
+          .from('planning_assignments')
+          .upsert({
+            fecha: '__estatus_diario__',
+            assignments: payload,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'fecha' });
+        toast.success(`Estatus diario generado y sincronizado en tiempo real para todos los computadores.`);
+      } catch (dbErr) {
+        console.warn('Error al persistir estatus diario en Supabase:', dbErr);
+        toast.success(`Reporte generado localmente con ${allRows.length} registros para el día ${isoToDmy(isoTarget)}.`);
+      }
     } catch (err) {
       console.error(err);
       toast.error('Error durante la generación de tablas: ' + err.message);
@@ -661,8 +829,33 @@ export default function EstatusDiario() {
   };
 
   return (
-    <div className="p-4 md:p-6 space-y-6 w-full">
+    <div className="p-4 md:p-6 space-y-4 w-full">
       
+      {/* Aviso informativo de vigencia diaria hasta las 23:59 hrs */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-3.5 py-2 rounded-xl bg-amber-50/80 border border-amber-200/90 text-amber-950 shadow-2xs">
+        <div className="flex items-center gap-2 text-xs font-semibold">
+          <Clock size={15} className="text-amber-700 shrink-0" />
+          <span>
+            Esta información estará disponible hasta las <strong className="font-black text-amber-900">23:59 horas</strong> (hora local Chile) y al día siguiente se eliminará automáticamente.
+          </span>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-white border border-amber-200 text-[11px] font-bold text-amber-800 shadow-2xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Sincronización multi-equipo en vivo
+          </span>
+          {processedData && (
+            <button
+              onClick={handleResetStatus}
+              className="text-[11px] text-amber-800 hover:text-rose-600 font-bold underline transition-colors"
+              title="Limpiar la información y seleccionar otra fecha"
+            >
+              Reiniciar ahora
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Encabezado Principal */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
         <div>
@@ -680,13 +873,27 @@ export default function EstatusDiario() {
         </div>
 
         {processedData && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {remoteInfo && (
+              <div className="text-xs bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-slate-600">
+                Cargado por: <strong className="font-bold text-slate-800">{remoteInfo.uploadedBy}</strong>
+              </div>
+            )}
             <Button
               onClick={handleExportExcel}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-2 shadow-xs transition-all"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-2 shadow-xs transition-all text-xs"
             >
-              <Download size={16} />
+              <Download size={15} />
               <span>Descargar Reporte Excel</span>
+            </Button>
+            <Button
+              onClick={handleResetStatus}
+              variant="outline"
+              className="border-slate-200 text-slate-600 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 text-xs flex items-center gap-1.5 transition-all"
+              title="Limpiar y preparar para otra fecha"
+            >
+              <RefreshCw size={13} />
+              <span>Limpiar</span>
             </Button>
           </div>
         )}
