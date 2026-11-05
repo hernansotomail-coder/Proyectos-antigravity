@@ -328,31 +328,6 @@ export default function AssignmentControl() {
 
   useEffect(() => {
     initPlanningFromDb?.();
-
-    // Suscripción Realtime para actualizar la tabla inmediatamente si otro notebook guarda
-    let timer = null;
-    let channel = null;
-    try {
-      channel = supabase
-        .channel('realtime:assignment_control')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'planning_assignments' }, (payload) => {
-          console.log('[Realtime AssignmentControl] Modificación detectada:', payload?.new?.fecha || payload);
-          if (timer) clearTimeout(timer);
-          timer = setTimeout(() => {
-            initPlanningFromDb?.();
-          }, 600);
-        })
-        .subscribe();
-    } catch (e) {
-      console.warn('[Realtime AssignmentControl] Error subscribiendo canal:', e);
-    }
-
-    return () => {
-      if (timer) clearTimeout(timer);
-      if (channel) {
-        try { supabase.removeChannel(channel); } catch (e) {}
-      }
-    };
   }, [initPlanningFromDb]);
 
   const handleExportBackup = () => {

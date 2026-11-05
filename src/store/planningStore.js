@@ -559,8 +559,9 @@ export const fetchPlanningStateFromDb = async () => {
       supabase
         .from('planning_assignments')
         .select('*')
+        .neq('fecha', '__saved_history__')
         .not('fecha', 'like', '__pago_%'),
-      35000
+      25000
     );
     if (error) {
       console.warn('Error leyendo planning_assignments:', error);
@@ -620,6 +621,24 @@ export const fetchPlanningStateFromDb = async () => {
 export const fetchAssignmentsFromDb = async () => {
   const state = await fetchPlanningStateFromDb();
   return state?.assignmentsMap || null;
+};
+
+export const fetchHistoricalSnapshotsFromDb = async () => {
+  try {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .select('assignments')
+        .eq('fecha', '__saved_history__')
+        .maybeSingle(),
+      25000
+    );
+    if (error || !data) return null;
+    return data.assignments || [];
+  } catch (e) {
+    console.warn('Error fetching historical snapshots on-demand:', e);
+    return null;
+  }
 };
 
 const loadPersistedAssignments = () => {
@@ -1493,17 +1512,18 @@ export const usePlanningStore = create((set, get) => ({
     return true;
   },
 
-  // Inicializar y sincronizar asignaciones, ruteo overrides e histórico desde Supabase
+  // Inicializar y sincronizar asignaciones, ruteo overrides e histórico desde Supabase (Lectura pura sin escrituras automáticas)
   initPlanningFromDb: async () => {
     try {
+      const currentSync = get().cloudSyncStatus;
+      if (currentSync === 'syncing') return;
+
       set({ cloudSyncStatus: 'syncing' });
       const dbState = await fetchPlanningStateFromDb();
       if (!dbState) {
         set({ cloudSyncStatus: 'offline' });
         return;
       }
-
-      set({ cloudSyncStatus: 'synced', lastCloudSync: new Date().toISOString() });
 
       const { 
         assignmentsMap, 
@@ -1516,88 +1536,7 @@ export const usePlanningStore = create((set, get) => ({
 
       const currentState = get();
 
-      // 1. Detección y migración automática de fechas locales no presentes en BD o con asignaciones más completas
-      const localTransmitted = currentState.transmittedAssignments || {};
-      const datesToPushToDb = [];
-
-      Object.entries(localTransmitted).forEach(([localFecha, localRows]) => {
-        if (localFecha && !localFecha.startsWith('__') && Array.isArray(localRows) && localRows.length > 0) {
-          const cleanFecha = normalizeDate(localFecha) || localFecha;
-          const dbRows = assignmentsMap[cleanFecha];
-          if (!dbRows) {
-            console.log(`[Sync] Detectada fecha local ${cleanFecha} no presente en BD. Subiendo a Supabase...`);
-            datesToPushToDb.push({ fecha: cleanFecha, rows: localRows });
-            assignmentsMap[cleanFecha] = localRows;
-          } else {
-            const localAssignedCount = localRows.filter(r => r.conductor_name || r.camion).length;
-            const dbAssignedCount = dbRows.filter(r => r.conductor_name || r.camion).length;
-            if (localAssignedCount > dbAssignedCount) {
-              console.log(`[Sync] Fecha local ${cleanFecha} tiene más asignaciones que BD (${localAssignedCount} vs ${dbAssignedCount}). Sincronizando con BD...`);
-              const localRowMap = new Map();
-              localRows.forEach(lr => {
-                const k = `${lr.ruta || ''}:::${lr.id || ''}`;
-                localRowMap.set(k, lr);
-              });
-              const merged = dbRows.map(dbR => {
-                const k = `${dbR.ruta || ''}:::${dbR.id || ''}`;
-                const lr = localRowMap.get(k) || localRows.find(l => l.ruta && String(l.ruta).trim() === String(dbR.ruta).trim());
-                return (lr && (lr.conductor_name || lr.camion)) ? { ...dbR, ...lr } : dbR;
-              });
-              datesToPushToDb.push({ fecha: cleanFecha, rows: merged });
-              assignmentsMap[cleanFecha] = merged;
-            }
-          }
-        }
-      });
-
-      // También verificar si en transformedRoutes locales hay fechas no presentes en assignmentsMap
-      const localTransformed = currentState.transformedRoutes || [];
-      const transformedDates = Array.from(new Set(localTransformed.map(r => r.fecha).filter(Boolean)));
-      transformedDates.forEach(tFecha => {
-        if (tFecha && !tFecha.startsWith('__') && !assignmentsMap[tFecha]) {
-          console.log(`[Sync] Creando asignaciones automáticas para fecha ${tFecha} desde transformedRoutes...`);
-          const autoRows = localTransformed
-            .filter(r => r.fecha === tFecha)
-            .map((route, idx) => ({
-              id: `disp-${tFecha}-${route.ruta}-${Date.now()}-${idx}`,
-              fecha: tFecha,
-              conductor_name: '',
-              conductor_rut: '',
-              aux1_name: '',
-              aux1_rut: '',
-              aux2_name: '',
-              aux2_rut: '',
-              camion: '',
-              tipo_equipo: '',
-              rampla: '',
-              n_vuelta: '',
-              tipo_servicio: 'Centralizado',
-              ruta: route.ruta,
-              cliente: route.operacion || route.cliente || route.nombreRuta,
-              operacion: route.operacion || route.cliente || route.nombreRuta,
-              denominacion: route.denominacion || route.nombreRuta,
-              transportista: route.transportista || ensureRowTransportista(route),
-              referencia: '',
-              locales: route.recuentoDestino || 1,
-              m3: route.sumaVolumen || 0,
-              peso: route.sumaPeso || 0,
-              cantCJ: route.sumaCantCJ || 0,
-              paradas: route.paradas || []
-            }));
-          if (autoRows.length > 0) {
-            datesToPushToDb.push({ fecha: tFecha, rows: autoRows });
-            assignmentsMap[tFecha] = autoRows;
-          }
-        }
-      });
-
-      if (datesToPushToDb.length > 0) {
-        Promise.all(datesToPushToDb.map(item => persistAssignmentsToDb(item.fecha, item.rows)))
-          .then(() => console.log(`[Sync] Fechas locales subidas a Supabase exitosamente:`, datesToPushToDb.map(d => d.fecha)))
-          .catch(err => console.warn('[Sync] Error subiendo fechas locales a Supabase:', err));
-      }
-
-      // 2. Transformed Routes (Ruteo / Asignación Diaria):
+      // Transformed Routes (Ruteo / Asignación Diaria):
       let effectiveTransformed = currentState.transformedRoutes;
       if (transformedRoutesFromDb && Array.isArray(transformedRoutesFromDb) && transformedRoutesFromDb.length > 0) {
         effectiveTransformed = transformedRoutesFromDb.map(r => {
@@ -1612,11 +1551,6 @@ export const usePlanningStore = create((set, get) => ({
         try {
           localStorage.setItem('keylogistics_transformed_routes_v2', JSON.stringify(effectiveTransformed));
         } catch (e) {}
-      } else if (effectiveTransformed && effectiveTransformed.length > 0) {
-        persistTransformedRoutesToDb(effectiveTransformed, { 
-          fileName: currentState.fileName || 'Planificación Diaria',
-          date: effectiveTransformed[0]?.fecha || ''
-        });
       }
 
       set(state => {
@@ -1737,6 +1671,21 @@ export const usePlanningStore = create((set, get) => ({
     } catch (e) {
       console.warn('Error inicializando planning desde DB:', e);
       set({ cloudSyncStatus: 'offline' });
+    }
+  },
+
+  // Carga bajo demanda de históricos para no sobrecargar el inicio de la app
+  loadHistoricalSnapshots: async () => {
+    try {
+      const snapshots = await fetchHistoricalSnapshotsFromDb();
+      if (snapshots && Array.isArray(snapshots) && snapshots.length > 0) {
+        set({ savedHistoryList: snapshots });
+        try {
+          localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(snapshots));
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('Error en loadHistoricalSnapshots:', e);
     }
   },
 

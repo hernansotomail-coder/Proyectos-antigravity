@@ -165,11 +165,12 @@ function MultiSelectFilter({ label, options, selectedValues, onChange, placehold
 }
 
 export default function HistoricalAssignment() {
-  const { savedHistoryList, savedRuteoByDate, transmittedAssignments, initPlanningFromDb } = usePlanningStore();
+  const { savedHistoryList, savedRuteoByDate, transmittedAssignments, initPlanningFromDb, loadHistoricalSnapshots } = usePlanningStore();
 
   useEffect(() => {
     initPlanningFromDb?.();
-  }, [initPlanningFromDb]);
+    loadHistoricalSnapshots?.();
+  }, [initPlanningFromDb, loadHistoricalSnapshots]);
 
   // Fechas disponibles en el historial (ordenadas cronológicamente de más reciente a más antigua)
   const historyDates = useMemo(() => {

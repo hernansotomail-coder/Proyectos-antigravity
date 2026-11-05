@@ -61,8 +61,11 @@ function App() {
           console.log('[Realtime] Notificación de actualización en planning_assignments:', payload?.new?.fecha || payload);
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
-            initPlanningFromDb?.();
-          }, 600);
+            const status = usePlanningStore.getState().cloudSyncStatus;
+            if (status !== 'syncing') {
+              initPlanningFromDb?.();
+            }
+          }, 3500);
         })
         .subscribe();
 
