@@ -3,7 +3,8 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
   LogOut, ChevronDown, ChevronRight, ChevronLeft, Truck, Key, Layers, 
-  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen, DollarSign
+  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen, DollarSign,
+  BarChart3
 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { useAuthStore, canUserViewMenu } from '../store/authStore';
@@ -30,6 +31,7 @@ export default function Layout() {
   const allPlanificacionItems = [
     { key: 'daily-planning', name: 'Asignación diaria', path: '/daily-planning', icon: Layers },
     { key: 'ruteo', name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
+    { key: 'estatus-diario', name: 'Estatus diario', path: '/estatus-diario', icon: BarChart3 },
     { key: 'change-history', name: 'Histórico de cambios', path: '/change-history', icon: History },
     { key: 'briefing', name: 'Briefing', path: '/briefing', icon: FileText },
     { key: 'route-dispatch-external', name: 'Envío de rutas externos', path: '/route-dispatch-external', icon: Send },

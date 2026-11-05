@@ -22,6 +22,7 @@ import Briefing from './components/Briefing';
 import ChangeHistory from './components/ChangeHistory';
 import ManualDeUso from './components/ManualDeUso';
 import PagoDotacion from './components/PagoDotacion';
+import EstatusDiario from './components/EstatusDiario';
 import { usePlanningStore } from './store/planningStore';
 import { useFleetStore } from './store/fleetStore';
 import { useStaffStore } from './store/staffStore';
@@ -111,6 +112,7 @@ function App() {
           <Route path="fleet-washes" element={<Login><FleetWashes /></Login>} />
           <Route path="daily-planning" element={<Login><DailyPlanning /></Login>} />
           <Route path="ruteo" element={<Login><RuteoView /></Login>} />
+          <Route path="estatus-diario" element={<Login><EstatusDiario /></Login>} />
           <Route path="change-history" element={<Login><ChangeHistory /></Login>} />
           <Route path="briefing" element={<Login><Briefing /></Login>} />
           <Route path="manual-de-uso" element={<Login><ManualDeUso /></Login>} />
