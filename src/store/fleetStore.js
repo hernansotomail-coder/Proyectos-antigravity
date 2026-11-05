@@ -12,6 +12,18 @@ export const isValidVehicleKey = (k) => {
   return true;
 };
 
+// Helper de timeout estricto para evitar bloqueos por latencia de red
+export const withTimeout = (promise, ms = 4000) => {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout de conexión (${ms}ms)`)), ms);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    timeoutPromise
+  ]);
+};
+
 // Persistencia local para el listado completo de flota (Fallback offline y carga instantánea)
 const loadPersistedFleetList = () => {
   try {
@@ -206,10 +218,13 @@ export const useFleetStore = create((set, get) => ({
       set({ isLoading: true });
     }
     try {
-      const { data, error } = await supabase
-        .from('fleet')
-        .select('*')
-        .order('plate');
+      const { data, error } = await withTimeout(
+        supabase
+          .from('fleet')
+          .select('*')
+          .order('plate'),
+        4000
+      );
       
       if (error) throw error;
       if (!data || data.length === 0) {
@@ -331,14 +346,14 @@ export const useFleetStore = create((set, get) => ({
       set({ fleetList: enriched, isLoading: false });
       return enriched;
     } catch (err) {
-      console.warn(`[FleetStore] Error al cargar flota de Supabase (intento ${retryCount + 1}):`, err);
-      if (retryCount < 3) {
-        const delay = (retryCount + 1) * 1500;
+      console.warn(`[FleetStore] Sincronización en segundo plano de flota (intento ${retryCount + 1}):`, err?.message || err);
+      // Reintentar silenciosamente en segundo plano con backoff gradual sin mostrar alertas invasivas al usuario
+      if (retryCount < 8) {
+        const delays = [2000, 4000, 6000, 10000, 15000, 20000, 30000, 60000];
+        const delay = delays[retryCount] || 15000;
         setTimeout(() => {
           get().fetchFleet(retryCount + 1);
         }, delay);
-      } else if (get().fleetList.length === 0) {
-        toast.error('Error al conectar con la base de datos de flota. Reintentando en segundo plano...');
       }
     } finally {
       set({ isLoading: false });

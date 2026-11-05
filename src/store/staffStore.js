@@ -15,6 +15,19 @@ export const isStaffExternal = (s) => {
 export const inferTipoDotacion = (s) => {
   return isStaffExternal(s) ? 'Externo' : 'Propia';
 };
+
+// Helper de timeout estricto para evitar bloqueos por latencia de red
+export const withTimeout = (promise, ms = 4000) => {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timeout de conexión (${ms}ms)`)), ms);
+  });
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    timeoutPromise
+  ]);
+};
+
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
@@ -105,10 +118,13 @@ export const useStaffStore = create((set, get) => ({
       set({ isLoading: true });
     }
     try {
-      const { data, error } = await supabase
-        .from('staff')
-        .select('*')
-        .order('name', { ascending: true });
+      const { data, error } = await withTimeout(
+        supabase
+          .from('staff')
+          .select('*')
+          .order('name', { ascending: true }),
+        4000
+      );
 
       if (error) throw error;
       if (!data || data.length === 0) {
@@ -172,15 +188,14 @@ export const useStaffStore = create((set, get) => ({
       set({ staffList: enriched, error: null, isLoading: false });
       return enriched;
     } catch (err) {
-      console.warn(`[StaffStore] Error al cargar dotación de Supabase (intento ${retryCount + 1}):`, err);
-      if (retryCount < 3) {
-        const delay = (retryCount + 1) * 1500;
+      console.warn(`[StaffStore] Sincronización en segundo plano de dotación (intento ${retryCount + 1}):`, err?.message || err);
+      // Reintentar silenciosamente en segundo plano con backoff gradual sin mostrar alertas invasivas al usuario
+      if (retryCount < 8) {
+        const delays = [2000, 4000, 6000, 10000, 15000, 20000, 30000, 60000];
+        const delay = delays[retryCount] || 15000;
         setTimeout(() => {
           get().fetchStaff(retryCount + 1);
         }, delay);
-      } else if (get().staffList.length === 0) {
-        set({ error: err.message });
-        toast.error('Error al conectar con la base de datos de dotación. Reintentando en segundo plano...');
       }
     } finally {
       set({ isLoading: false });

@@ -59,8 +59,7 @@ export const useAttendanceStore = create((set) => ({
       set({ attendanceList: allData });
       return allData;
     } catch (err) {
-      console.error(err);
-      toast.error('Error al cargar la asistencia');
+      console.warn('[AttendanceStore] Error al cargar la asistencia en segundo plano:', err);
       return [];
     } finally {
       set({ isLoading: false });
