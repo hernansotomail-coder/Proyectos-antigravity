@@ -1,12 +1,15 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   FileSpreadsheet, UploadCloud, Calendar, Download, RefreshCw, 
   CheckCircle2, AlertTriangle, Building2, Fuel, TrendingUp, Layers, 
-  Search, Copy, Check, Info, FileText, ArrowUpRight, BarChart3
+  Search, Copy, Check, Info, FileText, ArrowUpRight, BarChart3,
+  Truck, ShieldCheck, XCircle, X, Eye
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from './ui/Button';
+import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { supabase } from '../lib/supabase';
 
 // Hojas oficiales a procesar
 export const HOJAS_OBJETIVO = [
@@ -135,6 +138,118 @@ export default function EstatusDiario() {
   const [copiedSection, setCopiedSection] = useState(null);
 
   const fileInputRef = useRef(null);
+
+  // Integración con Disponibilización
+  const { transmittedAssignments, savedRuteoByDate, initPlanningFromDb } = usePlanningStore();
+  const [dispRowsFromDb, setDispRowsFromDb] = useState(null);
+  const [isLoadingDisp, setIsLoadingDisp] = useState(false);
+  const [showUncoveredModal, setShowUncoveredModal] = useState(false);
+
+  useEffect(() => {
+    initPlanningFromDb?.();
+  }, [initPlanningFromDb]);
+
+  // Cargar disponibilización de Supabase si la fecha activa cambia
+  useEffect(() => {
+    if (!fechaCorte) {
+      setDispRowsFromDb(null);
+      return;
+    }
+    const cleanF = normalizeDate(fechaCorte) || fechaCorte;
+    let isMounted = true;
+    const fetchDisp = async () => {
+      setIsLoadingDisp(true);
+      try {
+        const { data, error } = await supabase
+          .from('planning_assignments')
+          .select('*')
+          .or(`fecha.eq.${cleanF},fecha.eq.${fechaCorte}`);
+        if (!error && data && data.length > 0 && isMounted) {
+          const found = data.find(d => Array.isArray(d.assignments) && d.assignments.length > 0);
+          if (found) {
+            setDispRowsFromDb(found.assignments);
+          }
+        }
+      } catch (e) {
+        console.warn('Error al consultar Disponibilización en Supabase:', e);
+      } finally {
+        if (isMounted) setIsLoadingDisp(false);
+      }
+    };
+    fetchDisp();
+    return () => { isMounted = false; };
+  }, [fechaCorte]);
+
+  // Obtener filas de disponibilización activas para la fecha
+  const activeDispRows = useMemo(() => {
+    if (!fechaCorte) return [];
+    const cleanF = normalizeDate(fechaCorte) || fechaCorte;
+    
+    if (dispRowsFromDb && dispRowsFromDb.length > 0) return dispRowsFromDb;
+    
+    if (transmittedAssignments) {
+      if (transmittedAssignments[cleanF]?.length > 0) return transmittedAssignments[cleanF];
+      if (transmittedAssignments[fechaCorte]?.length > 0) return transmittedAssignments[fechaCorte];
+      const match = Object.keys(transmittedAssignments).find(k => normalizeDate(k) === cleanF);
+      if (match && transmittedAssignments[match]?.length > 0) return transmittedAssignments[match];
+    }
+    
+    if (savedRuteoByDate) {
+      if (savedRuteoByDate[cleanF]?.length > 0) return savedRuteoByDate[cleanF];
+      if (savedRuteoByDate[fechaCorte]?.length > 0) return savedRuteoByDate[fechaCorte];
+    }
+    
+    return [];
+  }, [fechaCorte, dispRowsFromDb, transmittedAssignments, savedRuteoByDate]);
+
+  // Métricas de Rutas Cubiertas vs No Cubiertas
+  const dispMetrics = useMemo(() => {
+    if (!activeDispRows || activeDispRows.length === 0) {
+      return {
+        total: 0,
+        cubiertas: 0,
+        noCubiertas: 0,
+        pctCubiertas: 0,
+        rutasCubiertas: [],
+        rutasNoCubiertas: [],
+        hasData: false
+      };
+    }
+
+    const cubiertas = [];
+    const noCubiertas = [];
+
+    activeDispRows.forEach(r => {
+      const cond = String(r.conductor_name || r.conductor || '').trim();
+      const hasCond = cond !== '' && cond.toLowerCase() !== 'sin asignar';
+      
+      const cam = String(r.camion || r.patente || '').trim();
+      const hasCam = cam !== '' && cam.toLowerCase() !== 'sin asignar';
+
+      if (hasCond && hasCam) {
+        cubiertas.push(r);
+      } else {
+        noCubiertas.push({
+          ...r,
+          missingCond: !hasCond,
+          missingCam: !hasCam
+        });
+      }
+    });
+
+    const total = activeDispRows.length;
+    const pct = total > 0 ? (cubiertas.length / total) * 100 : 0;
+
+    return {
+      total,
+      cubiertas: cubiertas.length,
+      noCubiertas: noCubiertas.length,
+      pctCubiertas: pct,
+      rutasCubiertas: cubiertas,
+      rutasNoCubiertas: noCubiertas,
+      hasData: true
+    };
+  }, [activeDispRows]);
 
   // Manejo de carga de archivo Excel
   const handleFileUpload = (selectedFile) => {
@@ -546,7 +661,7 @@ export default function EstatusDiario() {
   };
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 space-y-6 w-full">
       
       {/* Encabezado Principal */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
@@ -743,44 +858,101 @@ export default function EstatusDiario() {
 
       {/* Tarjetas KPI de Resumen si hay datos procesados */}
       {processedData && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-in fade-in duration-300">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3.5 animate-in fade-in duration-300">
           
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          {/* TARJETA 1: RUTAS CUBIERTAS (DISPONIBILIZACIÓN) */}
+          <div className="bg-white p-3.5 rounded-xl border border-emerald-200/90 shadow-2xs bg-gradient-to-br from-emerald-50/40 to-white">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase">Fecha de Análisis</span>
-              <Calendar size={17} className="text-blue-500" />
+              <span className="text-[10px] font-black text-emerald-800 uppercase tracking-wider">Rutas Cubiertas</span>
+              <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                <Truck size={15} />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline gap-1.5">
+              <p className="text-2xl font-black text-emerald-700">
+                {dispMetrics.hasData ? dispMetrics.cubiertas : (isLoadingDisp ? '...' : 0)}
+              </p>
+              {dispMetrics.hasData && (
+                <span className="text-xs font-bold text-emerald-600">/ {dispMetrics.total}</span>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+              {dispMetrics.hasData 
+                ? `${dispMetrics.pctCubiertas.toFixed(1)}% cobertura flota`
+                : (isLoadingDisp ? 'Consultando disponibilización...' : 'Sin datos en disponibilización')}
+            </p>
+          </div>
+
+          {/* TARJETA 2: RUTAS NO CUBIERTAS (DISPONIBILIZACIÓN) */}
+          <div className="bg-white p-3.5 rounded-xl border border-rose-200/90 shadow-2xs bg-gradient-to-br from-rose-50/40 to-white">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black text-rose-800 uppercase tracking-wider">Rutas No Cubiertas</span>
+              <div className="w-7 h-7 rounded-lg bg-rose-100 text-rose-700 flex items-center justify-center">
+                <AlertTriangle size={15} />
+              </div>
+            </div>
+            <div className="mt-2 flex items-baseline justify-between">
+              <p className="text-2xl font-black text-rose-600">
+                {dispMetrics.hasData ? dispMetrics.noCubiertas : (isLoadingDisp ? '...' : 0)}
+              </p>
+              {dispMetrics.noCubiertas > 0 && (
+                <button
+                  onClick={() => setShowUncoveredModal(true)}
+                  className="text-[10px] font-bold text-rose-700 hover:text-rose-900 bg-rose-100/70 hover:bg-rose-100 px-2 py-0.5 rounded-md flex items-center gap-1 transition-all"
+                  title="Ver listado de rutas no cubiertas"
+                >
+                  <Eye size={12} />
+                  <span>Ver cuáles</span>
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 mt-0.5 truncate">
+              {dispMetrics.hasData 
+                ? (dispMetrics.noCubiertas === 0 ? '¡100% rutas con chofer y camión!' : `${dispMetrics.noCubiertas} rutas pendientes`)
+                : 'Sin disponibilización para la fecha'}
+            </p>
+          </div>
+
+          {/* TARJETA 3: FECHA DE CORTE */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Fecha Corte</span>
+              <Calendar size={15} className="text-blue-500" />
             </div>
             <p className="text-2xl font-black text-slate-800 mt-2">{processedData.fechaCorteDmy}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Día de corte normalizado</p>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">Día de corte normalizado</p>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          {/* TARJETA 4: TOTAL REGISTROS */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase">Total Registros</span>
-              <Layers size={17} className="text-indigo-500" />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Total Registros</span>
+              <Layers size={15} className="text-indigo-500" />
             </div>
             <p className="text-2xl font-black text-slate-800 mt-2">{processedData.totalRegistros}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">En {processedData.totalCuentas} cuentas activas</p>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">En {processedData.totalCuentas} cuentas activas</p>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          {/* TARJETA 5: ENTREGAS EXITOSAS */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase">Entregas Exitosas</span>
-              <CheckCircle2 size={17} className="text-emerald-500" />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Entregas Exitosas</span>
+              <CheckCircle2 size={15} className="text-emerald-500" />
             </div>
             <p className="text-2xl font-black text-emerald-600 mt-2">{processedData.grandExitosos}</p>
-            <p className="text-[11px] text-slate-400 mt-0.5">Estados de avance global</p>
+            <p className="text-[10px] text-slate-400 mt-0.5 truncate">Estados de avance global</p>
           </div>
 
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          {/* TARJETA 6: AVANCE GENERAL */}
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-500 uppercase">Avance General</span>
-              <TrendingUp size={17} className="text-amber-500" />
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Avance Global</span>
+              <TrendingUp size={15} className="text-amber-500" />
             </div>
             <p className="text-2xl font-black text-slate-800 mt-2">{processedData.pctGlobal.toFixed(2)}%</p>
-            <div className="w-full bg-slate-100 rounded-full h-1.5 mt-2 overflow-hidden">
+            <div className="w-full bg-slate-100 rounded-full h-1 mt-2 overflow-hidden">
               <div 
-                className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" 
+                className="bg-emerald-500 h-1 rounded-full transition-all duration-500" 
                 style={{ width: `${Math.min(processedData.pctGlobal, 100)}%` }} 
               />
             </div>
@@ -793,11 +965,11 @@ export default function EstatusDiario() {
       {processedData && (
         <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2 overflow-x-auto">
           {[
-            { id: 'all', label: 'Ver las 4 Tablas Consolidado' },
-            { id: 'rep1', label: '1. Cuentas de Destino' },
+            { id: 'all', label: 'Ver Todo Consolidado' },
+            { id: 'rep4', label: '1. Resumen de Avance por Cuenta' },
             { id: 'rep2', label: '2. Clientes Petroleras' },
             { id: 'rep3', label: '3. Formatos Copec' },
-            { id: 'rep4', label: '4. Resumen de Avance' },
+            { id: 'rep1', label: '4. Cuentas de Destino (General)' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -816,15 +988,282 @@ export default function EstatusDiario() {
 
       {/* CONTENIDO DE LAS TABLAS */}
       {processedData && (
-        <div className="space-y-6">
+        <div className="space-y-6 w-full">
           
-          {/* TABLA 1: CONSOLIDADO POR CUENTAS DE DESTINO */}
+          {/* TABLA 1 (SUPERIOR): RESUMEN DE AVANCE POR CUENTA DE DESTINO */}
+          {(activeTab === 'all' || activeTab === 'rep4') && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden w-full">
+              <div className="p-4 bg-amber-50/60 border-b border-amber-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-black text-amber-950 tracking-tight flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-md bg-amber-700 text-white flex items-center justify-center text-xs font-black">1</span>
+                    Resumen de Avance por Cuenta de Destino
+                  </h3>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Evaluado sobre estados exitosos: ENTREGADO, EN EL PUNTO, RECHAZADO, L. CERRADO, PARCIAL, NO SALIO, RETORNANDO
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleCopyTable(
+                    '1. Resumen de Avance por Cuenta de Destino',
+                    ['Cuenta de Destino', 'Registros Exitosos', 'Total General', 'Avance'],
+                    processedData.rep4,
+                    'rep4'
+                  )}
+                  className="text-xs px-2.5 py-1 rounded-lg border border-amber-200 bg-white hover:bg-amber-50 text-amber-800 flex items-center gap-1.5 transition-all"
+                  title="Copiar tabla al portapapeles"
+                >
+                  {copiedSection === 'rep4' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                  <span>{copiedSection === 'rep4' ? 'Copiado' : 'Copiar'}</span>
+                </button>
+              </div>
+
+              <div className="overflow-x-auto w-full">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-amber-800 text-white font-bold text-[11px] uppercase">
+                      <th className="py-2.5 px-4 border-r border-amber-700">Cuenta de Destino</th>
+                      <th className="py-2.5 px-4 text-center border-r border-amber-700">Registros Exitosos</th>
+                      <th className="py-2.5 px-4 text-center border-r border-amber-700">Total General</th>
+                      <th className="py-2.5 px-4 text-right bg-amber-900">Avance (%)</th>
+                      <th className="py-2.5 px-4 text-left bg-amber-950 w-52">Progreso Visual</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {processedData.rep4.map((row, idx) => {
+                      const isTotal = row['Cuenta de Destino'] === 'Total general';
+                      const pctNum = row._avanceNum || 0;
+                      return (
+                        <tr
+                          key={idx}
+                          className={isTotal 
+                            ? 'bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300' 
+                            : idx % 2 === 1 ? 'bg-slate-50/60 hover:bg-amber-50/30' : 'bg-white hover:bg-amber-50/30'
+                          }
+                        >
+                          <td className="py-2.5 px-4 font-semibold text-slate-800 border-r border-slate-100">
+                            {row['Cuenta de Destino']}
+                          </td>
+                          <td className="py-2.5 px-4 text-center font-bold text-slate-700 border-r border-slate-100">
+                            {row['Registros Exitosos']}
+                          </td>
+                          <td className="py-2.5 px-4 text-center font-bold text-slate-700 border-r border-slate-100">
+                            {row['Total General']}
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-black text-amber-900 bg-amber-50/30 border-r border-slate-100">
+                            {row['Avance']}
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
+                                <div
+                                  className={`h-2 rounded-full transition-all duration-500 ${
+                                    pctNum >= 80 ? 'bg-emerald-500' :
+                                    pctNum >= 50 ? 'bg-amber-500' : 'bg-blue-500'
+                                  }`}
+                                  style={{ width: `${Math.min(pctNum, 100)}%` }}
+                                />
+                              </div>
+                              <span className="text-[10px] font-bold text-slate-500 w-8 text-right">
+                                {pctNum.toFixed(0)}%
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* MATRIZ 2 Y MATRIZ 3: DESPLEGADAS HORIZONTALMENTE DE EXTREMO A EXTREMO */}
+          {(activeTab === 'all' || activeTab === 'rep2' || activeTab === 'rep3') && (
+            <div className={`grid gap-6 w-full ${
+              activeTab === 'all' ? 'grid-cols-1 xl:grid-cols-2' : 'grid-cols-1'
+            }`}>
+              
+              {/* TABLA 2: CLIENTES PETROLERAS */}
+              {(activeTab === 'all' || activeTab === 'rep2') && (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between w-full">
+                  <div>
+                    <div className="p-4 bg-emerald-50/60 border-b border-emerald-100 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-black text-emerald-950 tracking-tight flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-md bg-emerald-700 text-white flex items-center justify-center text-xs font-black">2</span>
+                          Consolidado por Clientes Petroleras
+                        </h3>
+                        <p className="text-[11px] text-emerald-800 mt-0.5">
+                          Filtrado para cuenta Petrolera (COPEC, ENEX, ESMAX)
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleCopyTable(
+                          '2. Consolidado por Clientes Petroleras',
+                          ['Clientes_Petroleras', ...processedData.rep2.stateCols, 'Total general', 'Avance'],
+                          processedData.rep2.matrix,
+                          'rep2'
+                        )}
+                        className="text-xs px-2.5 py-1 rounded-lg border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-800 flex items-center gap-1.5 transition-all"
+                      >
+                        {copiedSection === 'rep2' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                        <span>{copiedSection === 'rep2' ? 'Copiado' : 'Copiar'}</span>
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto w-full">
+                      <table className="w-full text-xs text-left border-collapse">
+                        <thead>
+                          <tr className="bg-emerald-800 text-white font-bold text-[11px] uppercase">
+                            <th className="py-2.5 px-3 border-r border-emerald-700">Clientes_Petroleras</th>
+                            {processedData.rep2.stateCols.map(col => (
+                              <th key={col} className="py-2.5 px-2.5 text-center border-r border-emerald-700 whitespace-nowrap">
+                                {col}
+                              </th>
+                            ))}
+                            <th className="py-2.5 px-3 text-right bg-emerald-900 border-r border-emerald-800">Total</th>
+                            <th className="py-2.5 px-3 text-right bg-emerald-950">Avance</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {processedData.rep2.matrix.map((row, idx) => {
+                            const isTotal = row['Clientes_Petroleras'] === 'Total general';
+                            return (
+                              <tr
+                                key={idx}
+                                className={isTotal 
+                                  ? 'bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300' 
+                                  : 'bg-white hover:bg-emerald-50/30'
+                                }
+                              >
+                                <td className="py-2.5 px-3 font-semibold text-slate-800 border-r border-slate-100">
+                                  {row['Clientes_Petroleras']}
+                                </td>
+                                {processedData.rep2.stateCols.map(col => (
+                                  <td key={col} className="py-2.5 px-2.5 text-center text-slate-600 border-r border-slate-100">
+                                    {row[col] > 0 ? (
+                                      <span className="font-semibold text-slate-800">{row[col]}</span>
+                                    ) : (
+                                      <span className="text-slate-300">0</span>
+                                    )}
+                                  </td>
+                                ))}
+                                <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-slate-50/50 border-r border-slate-200">
+                                  {row['Total general']}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-black text-emerald-700 bg-emerald-50/40">
+                                  {row['Avance']}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-emerald-50/30 border-t border-emerald-100 text-[11px] text-emerald-800 font-medium">
+                    * Avance = (ENTREGADO + EN EL PUNTO) / Total general
+                  </div>
+                </div>
+              )}
+
+              {/* TABLA 3: FORMATOS COPEC */}
+              {(activeTab === 'all' || activeTab === 'rep3') && (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between w-full">
+                  <div>
+                    <div className="p-4 bg-teal-50/60 border-b border-teal-100 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-sm font-black text-teal-950 tracking-tight flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-md bg-teal-700 text-white flex items-center justify-center text-xs font-black">3</span>
+                          Consolidado por Formatos (Copec)
+                        </h3>
+                        <p className="text-[11px] text-teal-800 mt-0.5">
+                          Segmentación Express, Barra y Pronto
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleCopyTable(
+                          '3. Consolidado por Formatos (Copec)',
+                          ['Formato_Copec', ...processedData.rep3.stateCols, 'Total general', 'Avance'],
+                          processedData.rep3.matrix,
+                          'rep3'
+                        )}
+                        className="text-xs px-2.5 py-1 rounded-lg border border-teal-200 bg-white hover:bg-teal-50 text-teal-800 flex items-center gap-1.5 transition-all"
+                      >
+                        {copiedSection === 'rep3' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+                        <span>{copiedSection === 'rep3' ? 'Copiado' : 'Copiar'}</span>
+                      </button>
+                    </div>
+
+                    <div className="overflow-x-auto w-full">
+                      <table className="w-full text-xs text-left border-collapse">
+                        <thead>
+                          <tr className="bg-teal-800 text-white font-bold text-[11px] uppercase">
+                            <th className="py-2.5 px-3 border-r border-teal-700">Formato_Copec</th>
+                            {processedData.rep3.stateCols.map(col => (
+                              <th key={col} className="py-2.5 px-2.5 text-center border-r border-teal-700 whitespace-nowrap">
+                                {col}
+                              </th>
+                            ))}
+                            <th className="py-2.5 px-3 text-right bg-teal-900 border-r border-teal-800">Total</th>
+                            <th className="py-2.5 px-3 text-right bg-teal-950">Avance</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {processedData.rep3.matrix.map((row, idx) => {
+                            const isTotal = row['Formato_Copec'] === 'Total general';
+                            return (
+                              <tr
+                                key={idx}
+                                className={isTotal 
+                                  ? 'bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300' 
+                                  : 'bg-white hover:bg-teal-50/30'
+                                }
+                              >
+                                <td className="py-2.5 px-3 font-semibold text-slate-800 border-r border-slate-100">
+                                  {row['Formato_Copec']}
+                                </td>
+                                {processedData.rep3.stateCols.map(col => (
+                                  <td key={col} className="py-2.5 px-2.5 text-center text-slate-600 border-r border-slate-100">
+                                    {row[col] > 0 ? (
+                                      <span className="font-semibold text-slate-800">{row[col]}</span>
+                                    ) : (
+                                      <span className="text-slate-300">0</span>
+                                    )}
+                                  </td>
+                                ))}
+                                <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-slate-50/50 border-r border-slate-200">
+                                  {row['Total general']}
+                                </td>
+                                <td className="py-2.5 px-3 text-right font-black text-teal-700 bg-teal-50/40">
+                                  {row['Avance']}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-teal-50/30 border-t border-teal-100 text-[11px] text-teal-800 font-medium">
+                    * Avance = (ENTREGADO + EN EL PUNTO) / Total general
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+          {/* TABLA 3 (INFERIOR): CONSOLIDADO POR CUENTAS DE DESTINO (GENERAL) */}
           {(activeTab === 'all' || activeTab === 'rep1') && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden w-full">
               <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
                 <div>
                   <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center text-xs font-black">1</span>
+                    <span className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center text-xs font-black">4</span>
                     Consolidado por Cuentas de Destino (General)
                   </h3>
                   <p className="text-[11px] text-slate-500 mt-0.5">
@@ -833,7 +1272,7 @@ export default function EstatusDiario() {
                 </div>
                 <button
                   onClick={() => handleCopyTable(
-                    '1. Consolidado por Cuentas de Destino',
+                    '4. Consolidado por Cuentas de Destino',
                     ['Cuenta', ...processedData.rep1.stateCols, 'Total general'],
                     processedData.rep1.matrix,
                     'rep1'
@@ -846,7 +1285,7 @@ export default function EstatusDiario() {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto w-full">
                 <table className="w-full text-xs text-left border-collapse">
                   <thead>
                     <tr className="bg-blue-900 text-white font-bold text-[11px] tracking-wider uppercase">
@@ -903,268 +1342,6 @@ export default function EstatusDiario() {
             </div>
           )}
 
-          {/* TABLA 2 Y TABLA 3 EN GRID */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* TABLA 2: CLIENTES PETROLERAS */}
-            {(activeTab === 'all' || activeTab === 'rep2') && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between">
-                <div>
-                  <div className="p-4 bg-emerald-50/60 border-b border-emerald-100 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-black text-emerald-950 tracking-tight flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-md bg-emerald-700 text-white flex items-center justify-center text-xs font-black">2</span>
-                        Consolidado por Clientes Petroleras
-                      </h3>
-                      <p className="text-[11px] text-emerald-800 mt-0.5">
-                        Filtrado para cuenta Petrolera (COPEC, ENEX, ESMAX)
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleCopyTable(
-                        '2. Consolidado por Clientes Petroleras',
-                        ['Clientes_Petroleras', ...processedData.rep2.stateCols, 'Total general', 'Avance'],
-                        processedData.rep2.matrix,
-                        'rep2'
-                      )}
-                      className="text-xs px-2.5 py-1 rounded-lg border border-emerald-200 bg-white hover:bg-emerald-50 text-emerald-800 flex items-center gap-1.5 transition-all"
-                    >
-                      {copiedSection === 'rep2' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                      <span>{copiedSection === 'rep2' ? 'Copiado' : 'Copiar'}</span>
-                    </button>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left border-collapse">
-                      <thead>
-                        <tr className="bg-emerald-800 text-white font-bold text-[11px] uppercase">
-                          <th className="py-2.5 px-3 border-r border-emerald-700">Clientes_Petroleras</th>
-                          {processedData.rep2.stateCols.map(col => (
-                            <th key={col} className="py-2.5 px-2.5 text-center border-r border-emerald-700 whitespace-nowrap">
-                              {col}
-                            </th>
-                          ))}
-                          <th className="py-2.5 px-3 text-right bg-emerald-900 border-r border-emerald-800">Total</th>
-                          <th className="py-2.5 px-3 text-right bg-emerald-950">Avance</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {processedData.rep2.matrix.map((row, idx) => {
-                          const isTotal = row['Clientes_Petroleras'] === 'Total general';
-                          return (
-                            <tr
-                              key={idx}
-                              className={isTotal 
-                                ? 'bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300' 
-                                : 'bg-white hover:bg-emerald-50/30'
-                              }
-                            >
-                              <td className="py-2.5 px-3 font-semibold text-slate-800 border-r border-slate-100">
-                                {row['Clientes_Petroleras']}
-                              </td>
-                              {processedData.rep2.stateCols.map(col => (
-                                <td key={col} className="py-2.5 px-2.5 text-center text-slate-600 border-r border-slate-100">
-                                  {row[col] > 0 ? (
-                                    <span className="font-semibold text-slate-800">{row[col]}</span>
-                                  ) : (
-                                    <span className="text-slate-300">0</span>
-                                  )}
-                                </td>
-                              ))}
-                              <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-slate-50/50 border-r border-slate-200">
-                                {row['Total general']}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-black text-emerald-700 bg-emerald-50/40">
-                                {row['Avance']}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-emerald-50/30 border-t border-emerald-100 text-[11px] text-emerald-800 font-medium">
-                  * Avance = (ENTREGADO + EN EL PUNTO) / Total general
-                </div>
-              </div>
-            )}
-
-            {/* TABLA 3: FORMATOS COPEC */}
-            {(activeTab === 'all' || activeTab === 'rep3') && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden flex flex-col justify-between">
-                <div>
-                  <div className="p-4 bg-teal-50/60 border-b border-teal-100 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-black text-teal-950 tracking-tight flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-md bg-teal-700 text-white flex items-center justify-center text-xs font-black">3</span>
-                        Consolidado por Formatos (Copec)
-                      </h3>
-                      <p className="text-[11px] text-teal-800 mt-0.5">
-                        Segmentación Express, Barra y Pronto
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleCopyTable(
-                        '3. Consolidado por Formatos (Copec)',
-                        ['Formato_Copec', ...processedData.rep3.stateCols, 'Total general', 'Avance'],
-                        processedData.rep3.matrix,
-                        'rep3'
-                      )}
-                      className="text-xs px-2.5 py-1 rounded-lg border border-teal-200 bg-white hover:bg-teal-50 text-teal-800 flex items-center gap-1.5 transition-all"
-                    >
-                      {copiedSection === 'rep3' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                      <span>{copiedSection === 'rep3' ? 'Copiado' : 'Copiar'}</span>
-                    </button>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs text-left border-collapse">
-                      <thead>
-                        <tr className="bg-teal-800 text-white font-bold text-[11px] uppercase">
-                          <th className="py-2.5 px-3 border-r border-teal-700">Formato_Copec</th>
-                          {processedData.rep3.stateCols.map(col => (
-                            <th key={col} className="py-2.5 px-2.5 text-center border-r border-teal-700 whitespace-nowrap">
-                              {col}
-                            </th>
-                          ))}
-                          <th className="py-2.5 px-3 text-right bg-teal-900 border-r border-teal-800">Total</th>
-                          <th className="py-2.5 px-3 text-right bg-teal-950">Avance</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {processedData.rep3.matrix.map((row, idx) => {
-                          const isTotal = row['Formato_Copec'] === 'Total general';
-                          return (
-                            <tr
-                              key={idx}
-                              className={isTotal 
-                                ? 'bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300' 
-                                : 'bg-white hover:bg-teal-50/30'
-                              }
-                            >
-                              <td className="py-2.5 px-3 font-semibold text-slate-800 border-r border-slate-100">
-                                {row['Formato_Copec']}
-                              </td>
-                              {processedData.rep3.stateCols.map(col => (
-                                <td key={col} className="py-2.5 px-2.5 text-center text-slate-600 border-r border-slate-100">
-                                  {row[col] > 0 ? (
-                                    <span className="font-semibold text-slate-800">{row[col]}</span>
-                                  ) : (
-                                    <span className="text-slate-300">0</span>
-                                  )}
-                                </td>
-                              ))}
-                              <td className="py-2.5 px-3 text-right font-bold text-slate-900 bg-slate-50/50 border-r border-slate-200">
-                                {row['Total general']}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-black text-teal-700 bg-teal-50/40">
-                                {row['Avance']}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-teal-50/30 border-t border-teal-100 text-[11px] text-teal-800 font-medium">
-                  * Avance = (ENTREGADO + EN EL PUNTO) / Total general
-                </div>
-              </div>
-            )}
-
-          </div>
-
-          {/* TABLA 4: RESUMEN DE AVANCE POR CUENTA */}
-          {(activeTab === 'all' || activeTab === 'rep4') && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-              <div className="p-4 bg-amber-50/60 border-b border-amber-100 flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-black text-amber-950 tracking-tight flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-md bg-amber-700 text-white flex items-center justify-center text-xs font-black">4</span>
-                    Resumen de Avance por Cuenta de Destino
-                  </h3>
-                  <p className="text-[11px] text-amber-800 mt-0.5">
-                    Evaluado sobre estados exitosos: ENTREGADO, EN EL PUNTO, RECHAZADO, L. CERRADO, PARCIAL, NO SALIO, RETORNANDO
-                  </p>
-                </div>
-                <button
-                  onClick={() => handleCopyTable(
-                    '4. Resumen de Avance por Cuenta de Destino',
-                    ['Cuenta de Destino', 'Registros Exitosos', 'Total General', 'Avance'],
-                    processedData.rep4,
-                    'rep4'
-                  )}
-                  className="text-xs px-2.5 py-1 rounded-lg border border-amber-200 bg-white hover:bg-amber-50 text-amber-800 flex items-center gap-1.5 transition-all"
-                >
-                  {copiedSection === 'rep4' ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-                  <span>{copiedSection === 'rep4' ? 'Copiado' : 'Copiar'}</span>
-                </button>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead>
-                    <tr className="bg-amber-800 text-white font-bold text-[11px] uppercase">
-                      <th className="py-2.5 px-4 border-r border-amber-700">Cuenta de Destino</th>
-                      <th className="py-2.5 px-4 text-center border-r border-amber-700">Registros Exitosos</th>
-                      <th className="py-2.5 px-4 text-center border-r border-amber-700">Total General</th>
-                      <th className="py-2.5 px-4 text-right bg-amber-900">Avance (%)</th>
-                      <th className="py-2.5 px-4 text-left bg-amber-950 w-44">Progreso Visual</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {processedData.rep4.map((row, idx) => {
-                      const isTotal = row['Cuenta de Destino'] === 'Total general';
-                      const pctNum = row._avanceNum || 0;
-                      return (
-                        <tr
-                          key={idx}
-                          className={isTotal 
-                            ? 'bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300' 
-                            : idx % 2 === 1 ? 'bg-slate-50/60 hover:bg-amber-50/30' : 'bg-white hover:bg-amber-50/30'
-                          }
-                        >
-                          <td className="py-2.5 px-4 font-semibold text-slate-800 border-r border-slate-100">
-                            {row['Cuenta de Destino']}
-                          </td>
-                          <td className="py-2.5 px-4 text-center font-bold text-slate-700 border-r border-slate-100">
-                            {row['Registros Exitosos']}
-                          </td>
-                          <td className="py-2.5 px-4 text-center font-bold text-slate-700 border-r border-slate-100">
-                            {row['Total General']}
-                          </td>
-                          <td className="py-2.5 px-4 text-right font-black text-amber-900 bg-amber-50/30 border-r border-slate-100">
-                            {row['Avance']}
-                          </td>
-                          <td className="py-2.5 px-4">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                <div
-                                  className={`h-2 rounded-full transition-all duration-500 ${
-                                    pctNum >= 80 ? 'bg-emerald-500' :
-                                    pctNum >= 50 ? 'bg-amber-500' : 'bg-blue-500'
-                                  }`}
-                                  style={{ width: `${Math.min(pctNum, 100)}%` }}
-                                />
-                              </div>
-                              <span className="text-[10px] font-bold text-slate-500 w-8 text-right">
-                                {pctNum.toFixed(0)}%
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
         </div>
       )}
 
@@ -1178,6 +1355,87 @@ export default function EstatusDiario() {
           <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
             Carga el archivo Excel de operaciones, especifica la fecha de corte requerida y presiona "Procesar y Generar Reporte" para visualizar las 4 tablas pivote y descargar el reporte consolidado.
           </p>
+        </div>
+      )}
+
+      {/* Modal Detalle Rutas no Cubiertas en Disponibilización */}
+      {showUncoveredModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in duration-200">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center font-bold">
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800">
+                    Rutas No Cubiertas en Disponibilización ({fechaCorte})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {dispMetrics.noCubiertas} de {dispMetrics.total} rutas tienen conductor o camión pendiente de asignación
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowUncoveredModal(false)}
+                className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 flex items-center justify-center transition-all"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 font-bold text-[11px] uppercase">
+                    <th className="py-2.5 px-3 border-b border-slate-200">Ruta</th>
+                    <th className="py-2.5 px-3 border-b border-slate-200">Destino / Cliente</th>
+                    <th className="py-2.5 px-3 border-b border-slate-200">Conductor</th>
+                    <th className="py-2.5 px-3 border-b border-slate-200">Camión</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {dispMetrics.rutasNoCubiertas.map((r, i) => (
+                    <tr key={i} className="hover:bg-slate-50">
+                      <td className="py-2.5 px-3 font-bold text-slate-800">
+                        {r.ruta || `Ruta #${i + 1}`}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-600">
+                        {r.cliente || r.servicio || '-'}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {r.missingCond ? (
+                          <span className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
+                            Sin Conductor
+                          </span>
+                        ) : (
+                          <span className="text-slate-700 font-medium">{r.conductor_name || r.conductor}</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        {r.missingCam ? (
+                          <span className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
+                            Sin Camión
+                          </span>
+                        ) : (
+                          <span className="text-slate-700 font-medium">{r.camion || r.patente}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <Button
+                onClick={() => setShowUncoveredModal(false)}
+                className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-1.5 rounded-lg"
+              >
+                Cerrar
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

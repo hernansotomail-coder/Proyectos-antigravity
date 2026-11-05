@@ -31,7 +31,6 @@ export default function Layout() {
   const allPlanificacionItems = [
     { key: 'daily-planning', name: 'Asignación diaria', path: '/daily-planning', icon: Layers },
     { key: 'ruteo', name: 'Ruteo', path: '/ruteo', icon: FileSpreadsheet },
-    { key: 'estatus-diario', name: 'Estatus diario', path: '/estatus-diario', icon: BarChart3 },
     { key: 'change-history', name: 'Histórico de cambios', path: '/change-history', icon: History },
     { key: 'briefing', name: 'Briefing', path: '/briefing', icon: FileText },
     { key: 'route-dispatch-external', name: 'Envío de rutas externos', path: '/route-dispatch-external', icon: Send },
@@ -42,6 +41,7 @@ export default function Layout() {
     { key: 'assignment', name: 'Disponibilización', path: '/assignment', icon: Truck },
     { key: 'historical-assignment', name: 'Histórico disponibilización', path: '/historical-assignment', icon: History },
     { key: 'route-dispatch', name: 'Envío de rutas', path: '/route-dispatch', icon: Send },
+    { key: 'estatus-diario', name: 'Estatus diario', path: '/estatus-diario', icon: BarChart3 },
   ];
 
   // 3. Menú Gestión de Flota

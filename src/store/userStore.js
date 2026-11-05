@@ -9,7 +9,6 @@ export const APP_MODULES = [
     menus: [
       { key: 'daily-planning', label: 'Asignación diaria', path: '/daily-planning' },
       { key: 'ruteo', label: 'Ruteo', path: '/ruteo' },
-      { key: 'estatus-diario', label: 'Estatus diario', path: '/estatus-diario' },
       { key: 'change-history', label: 'Histórico de cambios', path: '/change-history' },
       { key: 'briefing', label: 'Briefing', path: '/briefing' },
       { key: 'route-dispatch-external', label: 'Envío de rutas externos', path: '/route-dispatch-external' },
@@ -21,6 +20,7 @@ export const APP_MODULES = [
       { key: 'assignment', label: 'Disponibilización', path: '/assignment' },
       { key: 'historical-assignment', label: 'Histórico disponibilización', path: '/historical-assignment' },
       { key: 'route-dispatch', label: 'Envío de rutas', path: '/route-dispatch' },
+      { key: 'estatus-diario', label: 'Estatus diario', path: '/estatus-diario' },
     ]
   },
   {
