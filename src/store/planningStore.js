@@ -338,7 +338,7 @@ export const persistAssignmentsToDb = async (fecha, assignments, silent = false)
           assignments: sanitized,
           updated_at: new Date().toISOString()
         }, { onConflict: 'fecha' }),
-      4000
+      25000
     );
     if (error) {
       console.warn(`[Supabase] Error guardando asignaciones para fecha ${cleanFecha}:`, error);
@@ -368,7 +368,7 @@ export const persistRuteoOverridesToDb = async (overrides) => {
           assignments: overrides,
           updated_at: new Date().toISOString()
         }, { onConflict: 'fecha' }),
-      3500
+      25000
     );
     if (error) {
       console.warn('[Supabase] Error guardando overrides de ruteo:', error);
@@ -392,7 +392,7 @@ export const persistHistoryToDb = async (historyList) => {
           assignments: historyList,
           updated_at: new Date().toISOString()
         }, { onConflict: 'fecha' }),
-      3500
+      25000
     );
     if (error) {
       console.warn('[Supabase] Error guardando histórico:', error);
@@ -416,7 +416,7 @@ export const persistChangeHistoryToDb = async (changeList) => {
           assignments: changeList,
           updated_at: new Date().toISOString()
         }, { onConflict: 'fecha' }),
-      3500
+      25000
     );
     if (error) {
       console.warn('[Supabase] Error guardando change history:', error);
@@ -538,7 +538,7 @@ export const persistTransformedRoutesToDb = async (transformedRoutes, meta = {})
           assignments: payload,
           updated_at: new Date().toISOString()
         }, { onConflict: 'fecha' }),
-      3500
+      25000
     );
     if (error) {
       console.warn('[Supabase] Error guardando transformedRoutes:', error);
@@ -556,8 +556,9 @@ export const fetchPlanningStateFromDb = async () => {
     const { data, error } = await withTimeout(
       supabase
         .from('planning_assignments')
-        .select('*'),
-      4000
+        .select('*')
+        .not('fecha', 'like', '__pago_%'),
+      35000
     );
     if (error) {
       console.warn('Error leyendo planning_assignments:', error);
@@ -1493,6 +1494,7 @@ export const usePlanningStore = create((set, get) => ({
   // Inicializar y sincronizar asignaciones, ruteo overrides e histórico desde Supabase
   initPlanningFromDb: async () => {
     try {
+      set({ cloudSyncStatus: 'syncing' });
       const dbState = await fetchPlanningStateFromDb();
       if (!dbState) {
         set({ cloudSyncStatus: 'offline' });
@@ -1725,11 +1727,14 @@ export const usePlanningStore = create((set, get) => ({
             : mostRecentDispDate,
           selectedRuteoDate: (state.selectedRuteoDate && state.selectedRuteoDate !== '14-10-2026' && mergedSaved[state.selectedRuteoDate])
             ? state.selectedRuteoDate
-            : mostRecentRuteoDate
+            : mostRecentRuteoDate,
+          cloudSyncStatus: 'synced',
+          lastCloudSync: new Date().toISOString()
         };
       });
     } catch (e) {
       console.warn('Error inicializando planning desde DB:', e);
+      set({ cloudSyncStatus: 'offline' });
     }
   },
 

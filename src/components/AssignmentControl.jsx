@@ -1754,16 +1754,24 @@ export default function AssignmentControl() {
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 Nube Conectada
               </span>
-            ) : cloudSyncStatus === 'syncing' ? (
-              <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-50 border border-blue-300 text-blue-800 text-[10px] font-bold shadow-2xs">
+            ) : (cloudSyncStatus === 'syncing' || cloudSyncStatus === 'idle') ? (
+              <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-blue-50 border border-blue-300 text-blue-800 text-[10px] font-bold shadow-2xs" title="Consultando y sincronizando con la nube Supabase...">
                 <RefreshCw size={11} className="animate-spin text-blue-600" />
-                Sincronizando...
+                Conectando Nube...
               </span>
             ) : (
-              <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 border border-amber-300 text-amber-900 text-[10px] font-bold shadow-2xs" title="El servidor Supabase está en pausa o sin conexión. Los datos están guardados localmente en este equipo. Usa 'Sincronizar Nube' para reintentar.">
+              <button 
+                type="button"
+                onClick={() => {
+                  initPlanningFromDb?.();
+                  toast.loading('Reconectando con la nube...', { id: 'reconnect-cloud' });
+                }}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-[10px] font-bold shadow-2xs cursor-pointer transition-colors" 
+                title="Haz clic para reintentar la conexión con la nube"
+              >
                 <AlertTriangle size={11} className="text-amber-600 shrink-0" />
-                Modo Local (Sin Nube)
-              </span>
+                Modo Local (Clic para Reconectar)
+              </button>
             )}
 
             <Button 
