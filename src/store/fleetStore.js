@@ -13,15 +13,17 @@ export const isValidVehicleKey = (k) => {
 };
 
 // Helper de timeout estricto para evitar bloqueos por latencia de red
-export const withTimeout = (promise, ms = 4000) => {
+export const withTimeout = (promise, ms = 15000) => {
   let timer;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`Timeout de conexión (${ms}ms)`)), ms);
   });
   return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
+    Promise.resolve(promise),
     timeoutPromise
-  ]);
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 };
 
 // Persistencia local para el listado completo de flota (Fallback offline y carga instantánea)

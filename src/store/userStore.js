@@ -48,12 +48,14 @@ export const APP_MODULES = [
 export const ALL_MENU_KEYS = APP_MODULES.flatMap(m => m.menus.map(i => i.key));
 
 // Helper para envolver cualquier promesa en un timeout estricto para evitar bloqueos
-export const withTimeout = (promise, ms = 2500) => {
+export const withTimeout = (promise, ms = 15000) => {
   let timer;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error('Timeout de conexión a la base de datos')), ms);
   });
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+  return Promise.race([Promise.resolve(promise), timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 };
 
 // Generador de plantilla de permisos según rol

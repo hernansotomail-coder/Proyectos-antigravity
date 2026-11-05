@@ -309,16 +309,18 @@ export const ensureRowTransportista = (row) => {
   return 'T300';
 };
 
-// Helper para envolver cualquier promesa en un timeout estricto para evitar congelamientos en Supabase
-export const withTimeout = (promise, ms = 3500) => {
+// Helper para envolver cualquier promesa o thenable en un timeout estricto para evitar congelamientos en Supabase
+export const withTimeout = (promise, ms = 35000) => {
   let timer;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`Timeout de conexión a la base de datos (${ms}ms)`)), ms);
   });
   return Promise.race([
-    promise.finally(() => clearTimeout(timer)),
+    Promise.resolve(promise),
     timeoutPromise
-  ]);
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 };
 
 export const persistAssignmentsToDb = async (fecha, assignments, silent = false) => {
