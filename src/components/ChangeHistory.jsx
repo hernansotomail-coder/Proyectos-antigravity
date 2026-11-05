@@ -19,17 +19,17 @@ export default function ChangeHistory() {
     savedRuteoByDate,
     transmittedAssignments,
     savedHistoryList,
-    initPlanningFromDb
+    initPlanningFromDb,
+    loadChangeHistory
   } = usePlanningStore();
   const { user } = useAuthStore();
   const isAuthorized = useMemo(() => canUserDeleteHistory(user), [user]);
 
   // Sincronizar automáticamente el histórico centralizado desde Supabase
   useEffect(() => {
-    if (initPlanningFromDb) {
-      initPlanningFromDb();
-    }
-  }, [initPlanningFromDb]);
+    initPlanningFromDb?.();
+    loadChangeHistory?.();
+  }, [initPlanningFromDb, loadChangeHistory]);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterUser, setFilterUser] = useState('TODOS');

@@ -560,6 +560,7 @@ export const fetchPlanningStateFromDb = async () => {
         .from('planning_assignments')
         .select('*')
         .neq('fecha', '__saved_history__')
+        .neq('fecha', '__change_history__')
         .not('fecha', 'like', '__pago_%'),
       25000
     );
@@ -637,6 +638,24 @@ export const fetchHistoricalSnapshotsFromDb = async () => {
     return data.assignments || [];
   } catch (e) {
     console.warn('Error fetching historical snapshots on-demand:', e);
+    return null;
+  }
+};
+
+export const fetchChangeHistoryFromDb = async () => {
+  try {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .select('assignments')
+        .eq('fecha', '__change_history__')
+        .maybeSingle(),
+      25000
+    );
+    if (error || !data) return null;
+    return data.assignments || [];
+  } catch (e) {
+    console.warn('Error fetching change history on-demand:', e);
     return null;
   }
 };
@@ -1686,6 +1705,21 @@ export const usePlanningStore = create((set, get) => ({
       }
     } catch (e) {
       console.warn('Error en loadHistoricalSnapshots:', e);
+    }
+  },
+
+  // Carga bajo demanda del historial de cambios (auditoría)
+  loadChangeHistory: async () => {
+    try {
+      const changes = await fetchChangeHistoryFromDb();
+      if (changes && Array.isArray(changes) && changes.length > 0) {
+        set({ changeHistoryList: changes });
+        try {
+          localStorage.setItem('keylogistics_change_history', JSON.stringify(changes));
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.warn('Error en loadChangeHistory:', e);
     }
   },
 

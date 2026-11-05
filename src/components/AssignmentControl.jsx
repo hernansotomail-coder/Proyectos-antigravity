@@ -1738,7 +1738,7 @@ export default function AssignmentControl() {
               <button 
                 type="button"
                 onClick={async () => {
-                  toast.loading('Reconectando con la nube...', { id: 'reconnect-cloud' });
+                  toast.loading('Consultando estado de la nube...', { id: 'reconnect-cloud' });
                   try {
                     await initPlanningFromDb?.();
                     const state = usePlanningStore.getState();
@@ -1746,18 +1746,18 @@ export default function AssignmentControl() {
                       toast.success('¡Conectado exitosamente con la nube!', { id: 'reconnect-cloud', duration: 3000 });
                     } else {
                       toast.dismiss('reconnect-cloud');
-                      toast.error('No se pudo establecer conexión inmediata con la nube.', { duration: 3500 });
+                      toast('Operando en Modo Local. Todos tus datos están guardados y disponibles en este equipo.', { icon: '💾', duration: 4000 });
                     }
                   } catch (err) {
                     toast.dismiss('reconnect-cloud');
-                    toast.error('Error al conectar con la base de datos.', { duration: 3500 });
+                    toast('Modo Local activo. Tus datos continúan seguros.', { icon: '💾', duration: 3500 });
                   }
                 }}
                 className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-[10px] font-bold shadow-2xs cursor-pointer transition-colors" 
-                title="Haz clic para reintentar la conexión con la nube"
+                title="Haz clic para verificar o sincronizar con la nube"
               >
                 <AlertTriangle size={11} className="text-amber-600 shrink-0" />
-                Modo Local (Clic para Reconectar)
+                Modo Local (Clic para Reintentar Nube)
               </button>
             )}
 
