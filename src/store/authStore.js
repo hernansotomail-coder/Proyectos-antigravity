@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
+import { withTimeout } from './userStore';
 
 export const canUserDeleteHistory = (user) => {
   if (!user) return false;
@@ -117,21 +118,24 @@ export const useAuthStore = create((set, get) => ({
       const cleanUser = String(username || '').trim();
       const cleanPass = String(password || '').trim();
 
-      // 1. Intentar consultar usuario en Supabase DB
+      // 1. Intentar consultar usuario en Supabase DB con timeout
       let foundUser = null;
       try {
-        const { data, error } = await supabase
-          .from('app_users')
-          .select('*')
-          .ilike('username', cleanUser)
-          .eq('password', cleanPass)
-          .single();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('app_users')
+            .select('*')
+            .ilike('username', cleanUser)
+            .eq('password', cleanPass)
+            .maybeSingle(),
+          2000
+        );
           
         if (!error && data) {
           foundUser = data;
         }
       } catch (dbErr) {
-        console.warn('Error al consultar app_users en Supabase:', dbErr);
+        console.warn('Consulta a app_users remota no disponible o en timeout:', dbErr);
       }
 
       // 2. Si no lo encontró en BD, buscar en usuarios locales de userStore
@@ -154,11 +158,14 @@ export const useAuthStore = create((set, get) => ({
         // Cargar permisos desde Supabase DB (__user_permissions__)
         let permissions = null;
         try {
-          const { data: permData } = await supabase
-            .from('planning_assignments')
-            .select('*')
-            .eq('fecha', '__user_permissions__')
-            .maybeSingle();
+          const { data: permData } = await withTimeout(
+            supabase
+              .from('planning_assignments')
+              .select('*')
+              .eq('fecha', '__user_permissions__')
+              .maybeSingle(),
+            2000
+          );
 
           if (permData && permData.assignments) {
             permissions = permData.assignments[foundUser.username] || 

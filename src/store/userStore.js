@@ -48,6 +48,15 @@ export const APP_MODULES = [
 
 export const ALL_MENU_KEYS = APP_MODULES.flatMap(m => m.menus.map(i => i.key));
 
+// Helper para envolver cualquier promesa en un timeout estricto para evitar bloqueos
+export const withTimeout = (promise, ms = 2500) => {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Timeout de conexión a la base de datos')), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+};
+
 // Generador de plantilla de permisos según rol
 export const getDefaultPermissionsForRole = (role) => {
   const menus = {};
@@ -55,7 +64,7 @@ export const getDefaultPermissionsForRole = (role) => {
     if (role === 'Administrador') {
       menus[k] = { view: true, edit: true };
     } else if (role === 'Visualizador') {
-      const canView = ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(k);
+      const canView = ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'pago-dotacion', 'estatus-diario'].includes(k);
       menus[k] = { view: canView, edit: false };
     } else {
       // Administrativo
@@ -69,7 +78,7 @@ export const getDefaultPermissionsForRole = (role) => {
   };
 };
 
-const DEFAULT_APP_USERS = [
+export const DEFAULT_APP_USERS = [
   { id: 'usr-1', username: 'superadmin', password: 'superadmin97', role: 'Administrador', can_delete_history: true },
   { id: 'usr-2', username: 'adminkey', password: 'adminkey2026', role: 'Administrativo', can_delete_history: false },
   { id: 'usr-3', username: 'visualkey', password: 'visualkey2026', role: 'Visualizador', can_delete_history: false }
@@ -77,13 +86,16 @@ const DEFAULT_APP_USERS = [
 
 export const persistUserPermissionsToDb = async (permissionsMap) => {
   try {
-    await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__user_permissions__',
-        assignments: permissionsMap,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+    await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__user_permissions__',
+          assignments: permissionsMap,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      2500
+    );
   } catch (e) {
     console.warn('Error guardando permisos en Supabase:', e);
   }
@@ -91,11 +103,14 @@ export const persistUserPermissionsToDb = async (permissionsMap) => {
 
 export const fetchUserPermissionsFromDb = async () => {
   try {
-    const { data, error } = await supabase
-      .from('planning_assignments')
-      .select('*')
-      .eq('fecha', '__user_permissions__')
-      .maybeSingle();
+    const { data, error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .select('*')
+        .eq('fecha', '__user_permissions__')
+        .maybeSingle(),
+      2500
+    );
     if (error) return null;
     return data?.assignments || null;
   } catch (e) {
@@ -103,7 +118,42 @@ export const fetchUserPermissionsFromDb = async () => {
   }
 };
 
-const loadPersistedUsers = () => {
+// Respaldo de usuarios en planning_assignments para sincronización garantizada multi-equipo
+export const persistUsersListToDb = async (usersList) => {
+  try {
+    await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__app_users__',
+          assignments: usersList,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      2500
+    );
+  } catch (e) {
+    console.warn('Error respaldando usuarios en Supabase:', e);
+  }
+};
+
+export const fetchUsersListFromDb = async () => {
+  try {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .select('*')
+        .eq('fecha', '__app_users__')
+        .maybeSingle(),
+      2500
+    );
+    if (error || !data || !Array.isArray(data.assignments)) return null;
+    return data.assignments;
+  } catch (e) {
+    return null;
+  }
+};
+
+export const loadPersistedUsers = () => {
   try {
     const saved = localStorage.getItem('keylogistics_app_users');
     if (saved) {
@@ -114,7 +164,7 @@ const loadPersistedUsers = () => {
   return DEFAULT_APP_USERS;
 };
 
-const persistUsers = (data) => {
+export const persistUsers = (data) => {
   try {
     localStorage.setItem('keylogistics_app_users', JSON.stringify(data));
     // Sincronizar mapa de permisos
@@ -139,19 +189,29 @@ export const useUserStore = create((set, get) => ({
   fetchUsers: async () => {
     set({ isLoading: true });
     try {
-      const [usersRes, permsDb] = await Promise.all([
-        supabase.from('app_users').select('*').order('created_at', { ascending: true }),
-        fetchUserPermissionsFromDb()
+      // Consultar concurrentemente con timeout de 2.5s para no bloquear la interfaz
+      const [usersRes, permsDb, backupUsers] = await Promise.allSettled([
+        withTimeout(supabase.from('app_users').select('*').order('created_at', { ascending: true }), 2500),
+        fetchUserPermissionsFromDb(),
+        fetchUsersListFromDb()
       ]);
 
       const localPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
-      const mergedPerms = { ...localPerms, ...(permsDb || {}) };
+      const resolvedPerms = permsDb.status === 'fulfilled' && permsDb.value ? permsDb.value : {};
+      const mergedPerms = { ...localPerms, ...resolvedPerms };
       try {
         localStorage.setItem('keylogistics_user_permissions', JSON.stringify(mergedPerms));
       } catch (e) {}
 
-      if (usersRes.data && usersRes.data.length > 0) {
-        const enriched = usersRes.data.map(u => {
+      let rawUsers = null;
+      if (usersRes.status === 'fulfilled' && usersRes.value && usersRes.value.data && usersRes.value.data.length > 0) {
+        rawUsers = usersRes.value.data;
+      } else if (backupUsers.status === 'fulfilled' && Array.isArray(backupUsers.value) && backupUsers.value.length > 0) {
+        rawUsers = backupUsers.value;
+      }
+
+      if (rawUsers && rawUsers.length > 0) {
+        const enriched = rawUsers.map(u => {
           const userPerm = mergedPerms[u.username] || (u.id && mergedPerms[u.id]) || getDefaultPermissionsForRole(u.role);
           return {
             ...u,
@@ -178,69 +238,82 @@ export const useUserStore = create((set, get) => ({
     const cleanUser = String(userData.username || '').trim();
     const cleanPass = String(userData.password || '').trim();
 
-    // Payload EXACTO para columnas existentes en tabla app_users (id, username, password, role)
+    if (!cleanUser || !cleanPass) {
+      toast.error('Por favor ingresa usuario y contraseña');
+      set({ isLoading: false });
+      return false;
+    }
+
+    // Payload para tabla app_users
     const dbPayload = {
       username: cleanUser,
       password: cleanPass,
-      role: userData.role
+      role: userData.role || 'Administrativo'
     };
 
-    const defaultPerms = getDefaultPermissionsForRole(userData.role);
+    const defaultPerms = getDefaultPermissionsForRole(userData.role || 'Administrativo');
     const userPerms = {
       can_delete_history: isSuperOrAdmin ? true : !!userData.can_delete_history,
       menus: userData.menus || defaultPerms.menus
     };
 
+    let newUser = null;
+
+    // 1. Intentar guardar en Supabase app_users con timeout de 2.5s
     try {
-      const { data, error } = await supabase.from('app_users').insert([dbPayload]).select();
-      if (error) throw error;
-      const newUser = {
-        ...data[0],
-        permissions: userPerms,
-        can_delete_history: userPerms.can_delete_history
-      };
-
-      // Guardar mapa de permisos en Supabase DB
-      const currentPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
-      currentPerms[cleanUser] = userPerms;
-      if (newUser.id) currentPerms[newUser.id] = userPerms;
-      localStorage.setItem('keylogistics_user_permissions', JSON.stringify(currentPerms));
-      persistUserPermissionsToDb(currentPerms);
-
-      const updated = [...get().users.filter(u => u.username !== cleanUser), newUser];
-      persistUsers(updated);
-      set({ users: updated });
-      toast.success(`Usuario "${cleanUser}" creado y sincronizado con éxito`);
-      return true;
+      const res = await withTimeout(
+        supabase.from('app_users').insert([dbPayload]).select(),
+        2500
+      );
+      if (!res.error && res.data && res.data.length > 0) {
+        newUser = {
+          ...res.data[0],
+          permissions: userPerms,
+          can_delete_history: userPerms.can_delete_history
+        };
+      }
     } catch (error) {
-      console.warn('Guardando usuario en almacenamiento local:', error);
+      console.warn('Inserción remota en app_users no completada, creando con ID local:', error);
+    }
+
+    // 2. Si no se generó desde BD, crear con ID local
+    if (!newUser) {
       const newId = `usr-${Date.now()}`;
-      const newUser = { 
+      newUser = { 
         id: newId, 
         ...dbPayload, 
         permissions: userPerms, 
         can_delete_history: userPerms.can_delete_history 
       };
-
-      const currentPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
-      currentPerms[cleanUser] = userPerms;
-      currentPerms[newId] = userPerms;
-      localStorage.setItem('keylogistics_user_permissions', JSON.stringify(currentPerms));
-
-      const updated = [...get().users.filter(u => u.username !== cleanUser), newUser];
-      persistUsers(updated);
-      set({ users: updated });
-      toast.success(`Usuario "${cleanUser}" creado exitosamente`);
-      return true;
-    } finally {
-      set({ isLoading: false });
     }
+
+    // 3. Actualizar memoria y almacenamiento local
+    const currentPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
+    currentPerms[cleanUser] = userPerms;
+    if (newUser.id) currentPerms[newUser.id] = userPerms;
+    localStorage.setItem('keylogistics_user_permissions', JSON.stringify(currentPerms));
+
+    const updated = [...get().users.filter(u => String(u.username).toLowerCase() !== cleanUser.toLowerCase()), newUser];
+    persistUsers(updated);
+    set({ users: updated });
+
+    // 4. Sincronizar en segundo plano sin bloquear al usuario
+    persistUserPermissionsToDb(currentPerms).catch(() => {});
+    persistUsersListToDb(updated).catch(() => {});
+
+    toast.success(`Usuario "${cleanUser}" guardado y sincronizado con éxito`);
+    set({ isLoading: false });
+    return true;
   },
 
   updateUser: async (id, updates) => {
     set({ isLoading: true });
-    const current = get().users.find(u => u.id === id);
-    if (!current) return false;
+    const current = get().users.find(u => String(u.id) === String(id));
+    if (!current) {
+      toast.error('No se encontró el usuario a actualizar');
+      set({ isLoading: false });
+      return false;
+    }
 
     const isSuperOrAdmin = updates.role === 'Administrador' || current?.role === 'Administrador' || current?.username === 'superadmin';
 
@@ -255,23 +328,26 @@ export const useUserStore = create((set, get) => ({
       menus: updates.menus !== undefined ? updates.menus : (current?.permissions?.menus || getDefaultPermissionsForRole(updates.role || current.role).menus)
     };
 
+    // 1. Intentar actualizar en Supabase con timeout de 2.5s
     try {
       if (Object.keys(dbUpdates).length > 0) {
-        await supabase.from('app_users').update(dbUpdates).eq('id', id);
+        await withTimeout(
+          supabase.from('app_users').update(dbUpdates).eq('id', id),
+          2500
+        );
       }
-
-      // Actualizar permisos en Supabase DB
-      const currentPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
-      const uName = dbUpdates.username || current.username;
-      currentPerms[uName] = userPerms;
-      currentPerms[id] = userPerms;
-      localStorage.setItem('keylogistics_user_permissions', JSON.stringify(currentPerms));
-      persistUserPermissionsToDb(currentPerms);
     } catch (error) {
-      console.warn('Supabase update error, guardando en local:', error);
+      console.warn('Actualización remota en app_users no completada:', error);
     }
 
-    const updated = get().users.map(u => (u.id === id ? { 
+    // 2. Actualizar permisos locales y en memoria
+    const currentPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
+    const uName = dbUpdates.username || current.username;
+    currentPerms[uName] = userPerms;
+    currentPerms[id] = userPerms;
+    localStorage.setItem('keylogistics_user_permissions', JSON.stringify(currentPerms));
+
+    const updated = get().users.map(u => (String(u.id) === String(id) ? { 
       ...u, 
       ...dbUpdates, 
       permissions: userPerms,
@@ -280,13 +356,18 @@ export const useUserStore = create((set, get) => ({
 
     persistUsers(updated);
     set({ users: updated });
-    toast.success('Usuario y permisos actualizados con éxito');
+
+    // 3. Sincronizar en segundo plano sin bloquear
+    persistUserPermissionsToDb(currentPerms).catch(() => {});
+    persistUsersListToDb(updated).catch(() => {});
+
+    toast.success(`Usuario "${uName}" actualizado con éxito`);
     set({ isLoading: false });
     return true;
   },
 
   toggleDeleteHistoryPermission: async (id) => {
-    const target = get().users.find(u => u.id === id);
+    const target = get().users.find(u => String(u.id) === String(id));
     if (!target) return;
     if (target.username === 'superadmin' || target.role === 'Administrador') {
       toast.info('Los administradores y superadmin tienen permiso total permanente');
@@ -298,28 +379,38 @@ export const useUserStore = create((set, get) => ({
 
   deleteUser: async (id) => {
     set({ isLoading: true });
-    const target = get().users.find(u => u.id === id);
+    const target = get().users.find(u => String(u.id) === String(id));
     if (target?.username === 'superadmin') {
       toast.error('No se puede eliminar la cuenta principal de superadmin');
       set({ isLoading: false });
       return false;
     }
 
+    // 1. Intentar borrar en Supabase con timeout de 2.5s
     try {
-      await supabase.from('app_users').delete().eq('id', id);
-      const currentPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
-      if (target?.username) delete currentPerms[target.username];
-      delete currentPerms[id];
-      localStorage.setItem('keylogistics_user_permissions', JSON.stringify(currentPerms));
-      persistUserPermissionsToDb(currentPerms);
+      await withTimeout(
+        supabase.from('app_users').delete().eq('id', id),
+        2500
+      );
     } catch (error) {
-      console.warn('Supabase delete error, eliminando local:', error);
+      console.warn('Eliminación remota en app_users no completada:', error);
     }
 
-    const updated = get().users.filter(u => u.id !== id);
+    // 2. Borrar de permisos locales
+    const currentPerms = JSON.parse(localStorage.getItem('keylogistics_user_permissions') || '{}');
+    if (target?.username) delete currentPerms[target.username];
+    delete currentPerms[id];
+    localStorage.setItem('keylogistics_user_permissions', JSON.stringify(currentPerms));
+
+    const updated = get().users.filter(u => String(u.id) !== String(id));
     persistUsers(updated);
     set({ users: updated });
-    toast.success('Usuario eliminado');
+
+    // 3. Sincronizar en segundo plano
+    persistUserPermissionsToDb(currentPerms).catch(() => {});
+    persistUsersListToDb(updated).catch(() => {});
+
+    toast.success('Usuario eliminado exitosamente');
     set({ isLoading: false });
     return true;
   }

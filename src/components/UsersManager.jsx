@@ -1,15 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { useUserStore, APP_MODULES, ALL_MENU_KEYS, getDefaultPermissionsForRole } from '../store/userStore';
 import { useAuthStore } from '../store/authStore';
-import { ShieldAlert, Plus, Pencil, Trash2, Key, User, Check, X, Shield, Lock, Eye, Edit3 } from 'lucide-react';
+import { ShieldAlert, Plus, Pencil, Trash2, Key, User, Check, X, Shield, Lock, Eye, Edit3, RefreshCw } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
+import { toast } from 'sonner';
 
 export default function UsersManager() {
   const { user } = useAuthStore();
   const { users, isLoading, fetchUsers, addUser, updateUser, deleteUser, toggleDeleteHistoryPermission } = useUserStore();
   const [editingId, setEditingId] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({ 
     username: '', 
     password: '', 
@@ -44,6 +46,8 @@ export default function UsersManager() {
       can_delete_history: u.role === 'Administrador' || u.username === 'superadmin' || !!u.can_delete_history,
       menus: userMenus
     });
+    // Scroll suave hacia el formulario si está en móvil
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCancel = () => {
@@ -113,19 +117,32 @@ export default function UsersManager() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (editingId) {
-      await updateUser(editingId, formData);
-      setEditingId(null);
-    } else {
-      await addUser(formData);
+    if (!formData.username?.trim() || !formData.password?.trim()) {
+      toast.error('Por favor ingresa un nombre de usuario y contraseña.');
+      return;
     }
-    setFormData({ 
-      username: '', 
-      password: '', 
-      role: 'Administrativo', 
-      can_delete_history: false,
-      menus: getDefaultPermissionsForRole('Administrativo').menus
-    });
+
+    setIsSubmitting(true);
+    try {
+      if (editingId) {
+        await updateUser(editingId, formData);
+        setEditingId(null);
+      } else {
+        await addUser(formData);
+      }
+      setFormData({ 
+        username: '', 
+        password: '', 
+        role: 'Administrativo', 
+        can_delete_history: false,
+        menus: getDefaultPermissionsForRole('Administrativo').menus
+      });
+    } catch (err) {
+      console.error('Error al procesar usuario:', err);
+      toast.error('Ocurrió un error al guardar el usuario.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -144,6 +161,14 @@ export default function UsersManager() {
             Crea credenciales sincronizadas en Supabase y selecciona de forma granular los menús que cada usuario puede Ver y Editar.
           </p>
         </div>
+
+        {/* Indicador de estado de sincronización */}
+        {isLoading && (
+          <span className="text-xs text-slate-500 font-semibold flex items-center gap-1.5 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200">
+            <RefreshCw size={13} className="animate-spin text-blue-600" />
+            <span>Sincronizando...</span>
+          </span>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-12 gap-5 items-start">
@@ -192,7 +217,7 @@ export default function UsersManager() {
               ]}
             />
 
-            {/* Selector de Permisos de Menú (Requisito 4) */}
+            {/* Selector de Permisos de Menú */}
             <div className="bg-white p-3 rounded-xl border border-slate-200 space-y-2.5 flex flex-col">
               <div className="flex items-center justify-between pb-1 border-b border-slate-100">
                 <span className="text-xs font-black text-slate-800 uppercase tracking-wide">
@@ -298,11 +323,18 @@ export default function UsersManager() {
             </div>
 
             <div className="flex gap-2 pt-2 shrink-0">
-              <Button type="submit" className="flex-1 text-xs font-bold py-2" disabled={isLoading}>
-                {editingId ? 'Actualizar Usuario' : 'Crear y Sincronizar Usuario'}
+              <Button type="submit" className="flex-1 text-xs font-bold py-2.5" disabled={isSubmitting}>
+                {isSubmitting ? (
+                  <span className="flex items-center gap-1.5 justify-center">
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>{editingId ? 'Actualizando...' : 'Guardando...'}</span>
+                  </span>
+                ) : (
+                  editingId ? 'Actualizar Usuario' : 'Crear y Sincronizar Usuario'
+                )}
               </Button>
               {editingId && (
-                <Button type="button" variant="outline" onClick={handleCancel} className="text-xs">
+                <Button type="button" variant="outline" onClick={handleCancel} className="text-xs" disabled={isSubmitting}>
                   Cancelar
                 </Button>
               )}
@@ -331,6 +363,7 @@ export default function UsersManager() {
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {users.map(u => {
+                  const isEditingThis = String(u.id) === String(editingId);
                   const isSuper = u.username === 'superadmin' || u.role === 'Administrador';
                   const userMenus = u.permissions?.menus || getDefaultPermissionsForRole(u.role).menus;
                   const viewCount = isSuper ? ALL_MENU_KEYS.length : Object.values(userMenus).filter(p => p.view).length;
@@ -338,7 +371,13 @@ export default function UsersManager() {
                   const hasDeletePerm = isSuper || !!u.can_delete_history;
 
                   return (
-                    <tr key={u.id} className="hover:bg-slate-50 transition-colors">
+                    <tr 
+                      key={u.id} 
+                      className={isEditingThis 
+                        ? 'bg-amber-50/80 border-l-4 border-amber-500 transition-colors' 
+                        : 'hover:bg-slate-50 transition-colors'
+                      }
+                    >
                       {/* Usuario */}
                       <td className="px-3 py-2.5 font-bold text-slate-900">
                         <div className="flex items-center gap-1.5">
@@ -347,6 +386,11 @@ export default function UsersManager() {
                           {u.username === 'superadmin' && (
                             <span className="text-[9px] bg-purple-100 text-purple-800 font-black px-1.5 py-0.2 rounded">
                               MASTER
+                            </span>
+                          )}
+                          {isEditingThis && (
+                            <span className="text-[9px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.2 rounded">
+                              Editando
                             </span>
                           )}
                         </div>
@@ -412,7 +456,11 @@ export default function UsersManager() {
                           <button 
                             type="button"
                             onClick={() => handleEdit(u)} 
-                            className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors" 
+                            className={`p-1 rounded transition-colors ${
+                              isEditingThis 
+                                ? 'bg-amber-200 text-amber-900 font-bold' 
+                                : 'text-blue-600 hover:bg-blue-50'
+                            }`} 
                             title="Editar credenciales y permisos"
                           >
                             <Pencil size={13} />
