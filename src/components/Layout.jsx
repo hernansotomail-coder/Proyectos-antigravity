@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
@@ -6,7 +6,7 @@ import {
   FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen,
   BarChart3
 } from 'lucide-react';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { useAuthStore, canUserViewMenu } from '../store/authStore';
 
 export default function Layout() {
@@ -26,6 +26,49 @@ export default function Layout() {
     logout();
     navigate('/');
   };
+
+  // Monitoreo de inactividad de 10 minutos para usuarios con bloqueo asignado
+  useEffect(() => {
+    const isAutoLockEnabled = isAuthenticated && (user?.auto_lock_10min === true || user?.permissions?.auto_lock_10min === true);
+    if (!isAutoLockEnabled) return;
+
+    const INACTIVITY_LIMIT_MS = 10 * 60 * 1000; // 10 minutos (600.000 ms)
+    let lastActivity = Date.now();
+    let lastThrottledRecord = 0;
+
+    const handleUserActivity = () => {
+      const now = Date.now();
+      // Throttling: registrar actividad como máximo cada 4 segundos para no consumir CPU
+      if (now - lastThrottledRecord > 4000) {
+        lastActivity = now;
+        lastThrottledRecord = now;
+      }
+    };
+
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach(evt => {
+      window.addEventListener(evt, handleUserActivity, { passive: true });
+    });
+
+    const checkInterval = setInterval(() => {
+      const idleTime = Date.now() - lastActivity;
+      if (idleTime >= INACTIVITY_LIMIT_MS) {
+        const usernameToLock = user?.username || '';
+        if (usernameToLock) {
+          sessionStorage.setItem('keylogistics_locked_username', usernameToLock);
+        }
+        logout();
+        toast.warning('Sesión bloqueada por inactividad (10 minutos sin interacción). Ingresa tu contraseña para continuar.');
+      }
+    }, 10000); // Evaluar cada 10 segundos
+
+    return () => {
+      clearInterval(checkInterval);
+      activityEvents.forEach(evt => {
+        window.removeEventListener(evt, handleUserActivity);
+      });
+    };
+  }, [isAuthenticated, user, logout]);
 
   // 1. Menú Planificación
   const allPlanificacionItems = [

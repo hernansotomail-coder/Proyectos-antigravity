@@ -138,6 +138,27 @@ export function getChileLocalDateString(date = new Date()) {
   }).format(date);
 }
 
+// Formatea el timestamp ISO al horario de actualización en Chile (DD-MM-YYYY HH:mm:ss)
+export function formatUpdateTimestamp(isoString) {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('es-CL', {
+      timeZone: 'America/Santiago',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).format(d);
+  } catch (e) {
+    return '';
+  }
+}
+
 // Verifica si un registro guardado sigue siendo válido hoy en Chile (hasta las 23:59:59)
 export function isEstatusRecordValid(record) {
   if (!record || typeof record !== 'object') return false;
@@ -177,7 +198,7 @@ export default function EstatusDiario() {
   const [workbook, setWorkbook] = useState(null);
   const [availableSheets, setAvailableSheets] = useState([]);
   const [availableDates, setAvailableDates] = useState([]);
-  const [fechaCorte, setFechaCorte] = useState(''); // Formato DD-MM-YYYY
+  const [fechaCorte, setFechaCorte] = useState(() => isoToDmy(getChileLocalDateString(new Date()))); // Default estricto al día actual
   const [isProcessing, setIsProcessing] = useState(false);
   const [processedData, setProcessedData] = useState(null);
   const [remoteInfo, setRemoteInfo] = useState(null); // { uploadedBy, savedAt, dateChile }
@@ -460,35 +481,47 @@ export default function EstatusDiario() {
         );
         setAvailableSheets(found);
 
-        // Escanear fechas disponibles en el archivo para sugerirlas al usuario
+        // Configurar por defecto la fecha de corte al día actual en Chile
+        const todayChileIso = getChileLocalDateString(new Date());
+        const todayChileDmy = isoToDmy(todayChileIso);
+        setFechaCorte(todayChileDmy);
+
+        // Muestreo ultra-liviano (máximo 150 filas finales por hoja) para detectar fechas recientes sin saturar la RAM
         const datesSet = new Set();
-        found.forEach(sName => {
+        let todayDetectedInFile = false;
+
+        for (const sName of found) {
           const ws = wb.Sheets[sName];
-          if (!ws) return;
+          if (!ws) continue;
           const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-          if (rows.length < 2) return;
+          if (rows.length < 2) continue;
           const headers = rows[0].map(h => String(h || '').trim().toLowerCase());
           const fIdx = headers.findIndex(h => h === 'fecha');
-          if (fIdx === -1) return;
+          if (fIdx === -1) continue;
 
-          for (let i = 1; i < rows.length; i++) {
+          const startIdx = Math.max(1, rows.length - 150);
+          for (let i = rows.length - 1; i >= startIdx; i--) {
             const val = rows[i][fIdx];
             const iso = parseDateToIso(val);
             if (iso && iso.startsWith('20')) {
               datesSet.add(iso);
+              if (iso === todayChileIso) {
+                todayDetectedInFile = true;
+              }
             }
           }
-        });
+          if (todayDetectedInFile) break;
+        }
 
         const sortedDates = Array.from(datesSet).sort().reverse();
         setAvailableDates(sortedDates);
 
-        if (sortedDates.length > 0) {
-          const mostRecentDmy = isoToDmy(sortedDates[0]);
-          setFechaCorte(mostRecentDmy);
-          toast.success(`Archivo cargado con éxito. Se detectaron ${found.length} hojas operativas y ${sortedDates.length} fechas.`);
+        if (todayDetectedInFile) {
+          toast.success(`Archivo cargado (${found.length} hojas operativas). Se detectaron registros para el día actual (${todayChileDmy}).`);
+        } else if (sortedDates.length > 0) {
+          toast.info(`Archivo cargado (${found.length} hojas). Fecha seleccionada: ${todayChileDmy} (Modo optimizado: solo procesa el día actual).`);
         } else {
-          toast.info(`Archivo cargado. Hojas encontradas: ${found.length}`);
+          toast.info(`Archivo cargado con ${found.length} hojas operativas.`);
         }
       } catch (err) {
         console.error(err);
@@ -832,8 +865,9 @@ export default function EstatusDiario() {
       const { rep1, rep2, rep3, rep4, fechaCorteDmy } = processedData;
       const aoa = [];
 
-      // Título
-      aoa.push([`REPORTE GENERAL DE DISTRIBUCIÓN — FECHA: ${fechaCorteDmy}`]);
+      // Título con horario de última actualización
+      const lastUpdateStr = formatUpdateTimestamp(remoteInfo?.savedAt) || formatUpdateTimestamp(new Date().toISOString());
+      aoa.push([`REPORTE GENERAL DE DISTRIBUCIÓN — FECHA: ${fechaCorteDmy} | ÚLTIMA ACTUALIZACIÓN: ${lastUpdateStr} HRS`]);
       aoa.push([]);
 
       // 1. Reporte 1 (General)
@@ -1118,8 +1152,11 @@ export default function EstatusDiario() {
             {processedData ? (
               <div className="flex flex-wrap items-center gap-2">
                 {remoteInfo && (
-                  <div className="text-xs bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-slate-600">
-                    Cargado por: <strong className="font-bold text-slate-800">{remoteInfo.uploadedBy}</strong>
+                  <div className="text-xs bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-slate-700 flex items-center gap-1.5 shadow-2xs">
+                    <Clock size={14} className="text-blue-600 shrink-0" />
+                    <span>Última actualización: <strong className="font-bold text-slate-900">{formatUpdateTimestamp(remoteInfo.savedAt) || 'Reciente'} hrs</strong></span>
+                    <span className="text-slate-300">•</span>
+                    <span>Cargado por: <strong className="font-bold text-slate-900">{remoteInfo.uploadedBy}</strong></span>
                   </div>
                 )}
 
@@ -1210,6 +1247,36 @@ export default function EstatusDiario() {
           {processedData && (
             <div ref={fullReportRef} className="space-y-6 w-full p-2 bg-slate-50/60 rounded-2xl">
               
+              {/* Encabezado ejecutivo del reporte (incluido en captura de imagen) */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold shrink-0">
+                    <BarChart3 size={20} />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-black text-slate-800 tracking-tight">
+                      REPORTE GENERAL DE DISTRIBUCIÓN — {processedData.fechaCorteDmy}
+                    </h2>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Torre de Control • Consolidado exclusivo del día actual ({processedData.totalRegistros} registros)
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-slate-700 shrink-0 self-start sm:self-auto">
+                  <Clock size={15} className="text-blue-600 shrink-0" />
+                  <div>
+                    <span className="text-[10px] text-slate-400 block uppercase font-bold leading-none">Última Actualización</span>
+                    <span className="font-bold text-slate-900 leading-tight">
+                      {formatUpdateTimestamp(remoteInfo?.savedAt) || 'Reciente'} hrs
+                    </span>
+                  </div>
+                  {remoteInfo?.uploadedBy && (
+                    <span className="text-[11px] text-slate-500 ml-1 font-semibold">({remoteInfo.uploadedBy})</span>
+                  )}
+                </div>
+              </div>
+
               {/* Tarjetas KPI de Resumen si hay datos procesados */}
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3.5 animate-in fade-in duration-300">
                 
@@ -1829,8 +1896,15 @@ export default function EstatusDiario() {
                   <h4 className="text-sm font-black text-emerald-900">
                     Estatus diario activo cargado para el día {processedData.fechaCorteDmy}
                   </h4>
-                  <p className="text-xs text-emerald-700">
-                    {processedData.totalRegistros} registros consolidados • Publicado por <strong className="font-bold">{remoteInfo?.uploadedBy || 'Usuario'}</strong>.
+                  <p className="text-xs text-emerald-700 flex items-center gap-1.5 flex-wrap mt-0.5">
+                    <span>{processedData.totalRegistros} registros consolidados (Día actual)</span>
+                    <span>•</span>
+                    <span className="inline-flex items-center gap-1 font-semibold text-emerald-800">
+                      <Clock size={12} />
+                      Última actualización: <strong>{formatUpdateTimestamp(remoteInfo?.savedAt) || 'Reciente'} hrs</strong>
+                    </span>
+                    <span>•</span>
+                    <span>Publicado por <strong className="font-bold">{remoteInfo?.uploadedBy || 'Usuario'}</strong></span>
                   </p>
                 </div>
               </div>
@@ -1934,10 +2008,15 @@ export default function EstatusDiario() {
             {/* 2. Selector de Fecha de Corte y Acción */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between">
               <div className="space-y-4">
-                <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                  <Calendar size={17} className="text-blue-600" />
-                  2. Fecha de Corte para Análisis
-                </h2>
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                    <Calendar size={17} className="text-blue-600" />
+                    2. Fecha de Corte para Análisis
+                  </h2>
+                  <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                    ⚡ Optimizado: Día actual
+                  </span>
+                </div>
 
                 <div>
                   <label className="text-xs font-semibold text-slate-600 block mb-1">
@@ -1953,6 +2032,9 @@ export default function EstatusDiario() {
                     />
                     <Calendar size={16} className="absolute right-3.5 top-3.5 text-slate-400 pointer-events-none" />
                   </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Solo se cargan y procesan los datos del día para no saturar memoria RAM ni swap.
+                  </p>
                 </div>
 
                 {/* Sugerencias de fechas encontradas en el archivo */}

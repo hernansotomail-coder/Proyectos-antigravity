@@ -189,7 +189,8 @@ export const useAuthStore = create((set, get) => ({
         const enrichedUser = {
           ...foundUser,
           permissions: permissions || { menus: {} },
-          can_delete_history: isSuperOrAdmin ? true : (permissions?.can_delete_history === true || foundUser.can_delete_history === true)
+          can_delete_history: isSuperOrAdmin ? true : (permissions?.can_delete_history === true || foundUser.can_delete_history === true),
+          auto_lock_10min: permissions?.auto_lock_10min === true || foundUser.auto_lock_10min === true
         };
 
         localStorage.setItem('keylogistics_auth_user', JSON.stringify(enrichedUser));

@@ -80,9 +80,9 @@ export const getDefaultPermissionsForRole = (role) => {
 };
 
 export const DEFAULT_APP_USERS = [
-  { id: 'usr-1', username: 'superadmin', password: 'superadmin97', role: 'Administrador', can_delete_history: true },
-  { id: 'usr-2', username: 'adminkey', password: 'adminkey2026', role: 'Administrativo', can_delete_history: false },
-  { id: 'usr-3', username: 'visualkey', password: 'visualkey2026', role: 'Visualizador', can_delete_history: false }
+  { id: 'usr-1', username: 'superadmin', password: 'superadmin97', role: 'Administrador', can_delete_history: true, auto_lock_10min: false },
+  { id: 'usr-2', username: 'adminkey', password: 'adminkey2026', role: 'Administrativo', can_delete_history: false, auto_lock_10min: false },
+  { id: 'usr-3', username: 'visualkey', password: 'visualkey2026', role: 'Visualizador', can_delete_history: false, auto_lock_10min: false }
 ];
 
 export const persistUserPermissionsToDb = async (permissionsMap) => {
@@ -173,7 +173,8 @@ export const persistUsers = (data) => {
     data.forEach(u => {
       perms[u.username] = {
         can_delete_history: u.role === 'Administrador' || !!u.can_delete_history,
-        menus: u.permissions?.menus || perms[u.username]?.menus || getDefaultPermissionsForRole(u.role).menus
+        menus: u.permissions?.menus || perms[u.username]?.menus || getDefaultPermissionsForRole(u.role).menus,
+        auto_lock_10min: u.auto_lock_10min !== undefined ? !!u.auto_lock_10min : !!perms[u.username]?.auto_lock_10min
       };
       if (u.id) {
         perms[u.id] = perms[u.username];
@@ -217,7 +218,8 @@ export const useUserStore = create((set, get) => ({
           return {
             ...u,
             permissions: userPerm,
-            can_delete_history: u.role === 'Administrador' || u.username === 'superadmin' || !!userPerm.can_delete_history
+            can_delete_history: u.role === 'Administrador' || u.username === 'superadmin' || !!userPerm.can_delete_history,
+            auto_lock_10min: u.auto_lock_10min !== undefined ? !!u.auto_lock_10min : !!userPerm.auto_lock_10min
           };
         });
         persistUsers(enriched);
@@ -255,7 +257,8 @@ export const useUserStore = create((set, get) => ({
     const defaultPerms = getDefaultPermissionsForRole(userData.role || 'Administrativo');
     const userPerms = {
       can_delete_history: isSuperOrAdmin ? true : !!userData.can_delete_history,
-      menus: userData.menus || defaultPerms.menus
+      menus: userData.menus || defaultPerms.menus,
+      auto_lock_10min: !!userData.auto_lock_10min
     };
 
     let newUser = null;
@@ -270,7 +273,8 @@ export const useUserStore = create((set, get) => ({
         newUser = {
           ...res.data[0],
           permissions: userPerms,
-          can_delete_history: userPerms.can_delete_history
+          can_delete_history: userPerms.can_delete_history,
+          auto_lock_10min: userPerms.auto_lock_10min
         };
       }
     } catch (error) {
@@ -284,7 +288,8 @@ export const useUserStore = create((set, get) => ({
         id: newId, 
         ...dbPayload, 
         permissions: userPerms, 
-        can_delete_history: userPerms.can_delete_history 
+        can_delete_history: userPerms.can_delete_history,
+        auto_lock_10min: userPerms.auto_lock_10min 
       };
     }
 
@@ -326,7 +331,8 @@ export const useUserStore = create((set, get) => ({
 
     const userPerms = {
       can_delete_history: isSuperOrAdmin ? true : (updates.can_delete_history !== undefined ? updates.can_delete_history : current?.can_delete_history),
-      menus: updates.menus !== undefined ? updates.menus : (current?.permissions?.menus || getDefaultPermissionsForRole(updates.role || current.role).menus)
+      menus: updates.menus !== undefined ? updates.menus : (current?.permissions?.menus || getDefaultPermissionsForRole(updates.role || current.role).menus),
+      auto_lock_10min: updates.auto_lock_10min !== undefined ? !!updates.auto_lock_10min : (current?.auto_lock_10min !== undefined ? !!current.auto_lock_10min : !!current?.permissions?.auto_lock_10min)
     };
 
     // 1. Intentar actualizar en Supabase con timeout de 2.5s
@@ -352,7 +358,8 @@ export const useUserStore = create((set, get) => ({
       ...u, 
       ...dbUpdates, 
       permissions: userPerms,
-      can_delete_history: userPerms.can_delete_history 
+      can_delete_history: userPerms.can_delete_history,
+      auto_lock_10min: userPerms.auto_lock_10min 
     } : u));
 
     persistUsers(updated);
@@ -376,6 +383,15 @@ export const useUserStore = create((set, get) => ({
     }
     const newStatus = !target.can_delete_history;
     await get().updateUser(id, { can_delete_history: newStatus });
+  },
+
+  toggleAutoLock10Min: async (id) => {
+    const target = get().users.find(u => String(u.id) === String(id));
+    if (!target) return;
+    const currentStatus = target.auto_lock_10min !== undefined ? !!target.auto_lock_10min : !!target.permissions?.auto_lock_10min;
+    const newStatus = !currentStatus;
+    await get().updateUser(id, { auto_lock_10min: newStatus });
+    toast.success(`Bloqueo tras 10 min ${newStatus ? 'activado' : 'desactivado'} para ${target.username}`);
   },
 
   deleteUser: async (id) => {

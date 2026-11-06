@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useUserStore, APP_MODULES, ALL_MENU_KEYS, getDefaultPermissionsForRole } from '../store/userStore';
 import { useAuthStore } from '../store/authStore';
-import { ShieldAlert, Plus, Pencil, Trash2, Key, User, Check, X, Shield, Lock, Eye, Edit3, RefreshCw } from 'lucide-react';
+import { ShieldAlert, Plus, Pencil, Trash2, Key, User, Check, X, Shield, Lock, Eye, Edit3, RefreshCw, Clock } from 'lucide-react';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 
 export default function UsersManager() {
   const { user } = useAuthStore();
-  const { users, isLoading, fetchUsers, addUser, updateUser, deleteUser, toggleDeleteHistoryPermission } = useUserStore();
+  const { users, isLoading, fetchUsers, addUser, updateUser, deleteUser, toggleDeleteHistoryPermission, toggleAutoLock10Min } = useUserStore();
   const [editingId, setEditingId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({ 
@@ -17,6 +17,7 @@ export default function UsersManager() {
     password: '', 
     role: 'Administrativo',
     can_delete_history: false,
+    auto_lock_10min: false,
     menus: getDefaultPermissionsForRole('Administrativo').menus
   });
 
@@ -44,6 +45,7 @@ export default function UsersManager() {
       password: u.password, 
       role: u.role,
       can_delete_history: u.role === 'Administrador' || u.username === 'superadmin' || !!u.can_delete_history,
+      auto_lock_10min: u.auto_lock_10min !== undefined ? !!u.auto_lock_10min : !!u.permissions?.auto_lock_10min,
       menus: userMenus
     });
     // Scroll suave hacia el formulario si está en móvil
@@ -57,6 +59,7 @@ export default function UsersManager() {
       password: '', 
       role: 'Administrativo', 
       can_delete_history: false,
+      auto_lock_10min: false,
       menus: getDefaultPermissionsForRole('Administrativo').menus
     });
   };
@@ -135,6 +138,7 @@ export default function UsersManager() {
         password: '', 
         role: 'Administrativo', 
         can_delete_history: false,
+        auto_lock_10min: false,
         menus: getDefaultPermissionsForRole('Administrativo').menus
       });
     } catch (err) {
@@ -322,6 +326,27 @@ export default function UsersManager() {
               </label>
             </div>
 
+            {/* Inactividad: Bloqueo de sesión tras 10 minutos sin interacción */}
+            <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input 
+                  type="checkbox"
+                  checked={formData.auto_lock_10min}
+                  onChange={e => setFormData({...formData, auto_lock_10min: e.target.checked})}
+                  className="mt-0.5 rounded text-amber-600 focus:ring-amber-500 h-4 w-4"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                    <Clock size={13} className="text-amber-600" />
+                    Bloqueo por Inactividad (10 minutos)
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5 leading-tight">
+                    Si este usuario pasa 10 minutos sin interactuar (teclado/mouse), se bloqueará la pantalla y se le solicitará su contraseña para continuar.
+                  </span>
+                </div>
+              </label>
+            </div>
+
             <div className="flex gap-2 pt-2 shrink-0">
               <Button type="submit" className="flex-1 text-xs font-bold py-2.5" disabled={isSubmitting}>
                 {isSubmitting ? (
@@ -358,6 +383,7 @@ export default function UsersManager() {
                   <th className="px-3 py-2.5">Rol</th>
                   <th className="px-3 py-2.5 text-center">Menús Permitidos</th>
                   <th className="px-3 py-2.5 text-center">Eliminar Hist.</th>
+                  <th className="px-3 py-2.5 text-center">Bloqueo 10m</th>
                   <th className="px-3 py-2.5 text-right">Acciones</th>
                 </tr>
               </thead>
@@ -448,6 +474,23 @@ export default function UsersManager() {
                             {hasDeletePerm ? 'Sí' : 'No'}
                           </button>
                         )}
+                      </td>
+
+                      {/* Bloqueo 10m por Inactividad */}
+                      <td className="px-3 py-2.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleAutoLock10Min(u.id)}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
+                            u.auto_lock_10min
+                              ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100 shadow-2xs'
+                              : 'bg-slate-100 text-slate-400 border-slate-200 hover:bg-slate-200'
+                          }`}
+                          title="Clic para activar/desactivar cierre por inactividad tras 10 minutos"
+                        >
+                          <Clock size={10} className={u.auto_lock_10min ? 'text-amber-600' : 'text-slate-400'} />
+                          {u.auto_lock_10min ? '10 min' : 'Desactivado'}
+                        </button>
                       </td>
 
                       {/* Acciones */}
