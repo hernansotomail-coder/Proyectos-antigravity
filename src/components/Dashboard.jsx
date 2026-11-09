@@ -47,7 +47,7 @@ export default function Dashboard() {
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
   const [roleFilters, setRoleFilters] = useState([]); // Array of strings for multiselect
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Activo');
   const [searchFilter, setSearchFilter] = useState('');
   const [activeKpiFilter, setActiveKpiFilter] = useState(null); // 'Trabajado', 'Vacaciones', 'Licencia', 'Ausente'
   const [selectedStaffKpi, setSelectedStaffKpi] = useState(null); // ID of the selected staff to filter KPIs
@@ -136,7 +136,7 @@ export default function Dashboard() {
 
           if (isValidDate) {
              if (activeKpiFilter === 'Trabajado') {
-                 if (!['Vacaciones', 'Licencia', 'Baja', ''].includes(service)) return true;
+                 if (service && !['Vacaciones', 'Licencia', 'Baja', 'Ausente'].includes(service)) return true;
              } else {
                  if (service === activeKpiFilter) return true;
              }
@@ -184,7 +184,7 @@ export default function Dashboard() {
           return true;
         });
         staffAttendance.forEach(val => {
-          if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) totalTrabajado++;
+          if (val.service_type && !['Vacaciones', 'Licencia', 'Baja', 'Ausente'].includes(val.service_type)) totalTrabajado++;
           if (val.service_type === 'Vacaciones') totalVacaciones++;
           if (val.service_type === 'Licencia') totalLicencias++;
           if (val.service_type === 'Ausente') totalAusencias++;
@@ -211,7 +211,7 @@ export default function Dashboard() {
           return a.date >= todayStr;
         });
         staffAttendance.forEach(val => {
-          if (!['Vacaciones', 'Licencia', 'Baja'].includes(val.service_type)) efectivosSet.add(staff.id);
+          if (val.service_type && !['Vacaciones', 'Licencia', 'Baja', 'Ausente'].includes(val.service_type)) efectivosSet.add(staff.id);
           if (val.service_type === 'Vacaciones') vacacionesSet.add(staff.id);
           if (val.service_type === 'Licencia') licenciasSet.add(staff.id);
           if (val.service_type === 'Ausente') ausentesSet.add(staff.id);
@@ -357,9 +357,9 @@ export default function Dashboard() {
             value={statusFilter} 
             onChange={(e) => setStatusFilter(e.target.value)}
             options={[
-              { value: '', label: 'Todos los estados' },
               { value: 'Activo', label: 'Activo' },
-              { value: 'Inactivo', label: 'Inactivo' }
+              { value: 'Inactivo', label: 'Inactivo' },
+              { value: '', label: 'Todos los estados' }
             ]}
           />
         </div>
