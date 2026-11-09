@@ -128,6 +128,7 @@ function App() {
             <Route path="route-dispatch" element={<Login><RouteDispatch /></Login>} />
             <Route path="route-dispatch-external" element={<Login><RouteDispatch onlyExternal={true} /></Login>} />
             <Route path="fleet-dashboard" element={<Login><FleetDashboard /></Login>} />
+            <Route path="fleet-spid" element={<Login><FleetDashboard isSpidOnly={true} /></Login>} />
             <Route path="wash-dashboard" element={<Login><WashDashboard /></Login>} />
             <Route path="fleet" element={<Login><AddFleet /></Login>} />
             <Route path="manage-fleet" element={<Login><ManageFleet /></Login>} />

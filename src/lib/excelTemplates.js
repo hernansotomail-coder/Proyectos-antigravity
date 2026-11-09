@@ -275,3 +275,35 @@ export const downloadFleetNewTemplate = (category = 'Camiones/Camionetas') => {
   ];
   exportTemplate(columns, sampleRows, `Plantilla_Creacion_${category.replace(/[/\\?%*:|"<>]/g, '_')}.xlsx`, category);
 };
+
+/**
+ * Plantilla 6: Carga Masiva de Deshielo de Flota (FleetWashes)
+ */
+export const downloadFleetDeshieloTemplate = () => {
+  const columns = [
+    'Marca', 'Patente', 'Tipo de Equipo', 'Número Interno', 'Zona', 'Fecha Deshielo', 'Semana del Año', 'Observacion'
+  ];
+  const sampleRows = [
+    {
+      'Marca': 'MERCEDES BENZ',
+      'Patente': 'ABCD12',
+      'Tipo de Equipo': 'Camión',
+      'Número Interno': 'C200',
+      'Zona': 'Santiago',
+      'Fecha Deshielo': '05/11/2026',
+      'Semana del Año': 45,
+      'Observacion': 'Deshielo preventivo realizado'
+    },
+    {
+      'Marca': 'VOLVO',
+      'Patente': 'WXYZ34',
+      'Tipo de Equipo': 'Tracto',
+      'Número Interno': '1048',
+      'Zona': 'Valparaíso',
+      'Fecha Deshielo': '06/11/2026',
+      'Semana del Año': 45,
+      'Observacion': 'Deshielo completo OK'
+    }
+  ];
+  exportTemplate(columns, sampleRows, 'Plantilla_Carga_Deshielo.xlsx', 'Deshielo');
+};

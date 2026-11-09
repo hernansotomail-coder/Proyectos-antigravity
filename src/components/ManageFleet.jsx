@@ -264,12 +264,15 @@ export default function ManageFleet() {
       return;
     }
     const dataToSave = { ...editForm };
-    if (fleetTab === 'propia' || editForm.tipo_flota === 'Propia') {
+    if (editForm.tipo_flota === 'Propia') {
       dataToSave.tipo_flota = 'Propia';
       dataToSave.empresa_externa = '';
-    } else if (dataToSave.tipo_flota === 'Externa' && (!dataToSave.empresa_externa || !dataToSave.empresa_externa.trim())) {
-      toast.error('Debe ingresar el nombre de la empresa externa para un vehículo externo');
-      return;
+    } else if (editForm.tipo_flota === 'Externa') {
+      dataToSave.tipo_flota = 'Externa';
+      if (!dataToSave.empresa_externa || !dataToSave.empresa_externa.trim()) {
+        toast.error('Debe ingresar el nombre de la empresa externa para un vehículo externo');
+        return;
+      }
     }
     
     const { dashboardCategory, ...cleanedToSave } = dataToSave;

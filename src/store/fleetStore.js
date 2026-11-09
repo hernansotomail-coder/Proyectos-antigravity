@@ -127,15 +127,24 @@ export const isOperationalFleetStatus = (val) => {
   return STANDARD_FLEET_STATUSES.includes(lower);
 };
 
+export const isVehicleBaja = (f) => {
+  if (!f) return false;
+  const st = String(f.status || '').trim().toLowerCase();
+  const st2 = String(f.state2 || '').trim().toLowerCase();
+  return st === 'baja' || st === 'de baja' || st === 'dado de baja' || st.includes('baja') ||
+         st2 === 'baja' || st2 === 'de baja' || st2 === 'dado de baja' || st2.includes('baja');
+};
+
 export const inferTipoFlota = (f, overrideInfo = {}) => {
-  // Prioridad 1: Si está explícitamente fijado como Propia, NUNCA es Externa
+  // Prioridad 1: Override local explícito
+  if (overrideInfo?.tipo_flota === 'Externa') return 'Externa';
   if (overrideInfo?.tipo_flota === 'Propia') return 'Propia';
+
+  // Prioridad 2: Valor en registro / Supabase
+  if (f?.tipo_flota === 'Externa') return 'Externa';
   if (f?.tipo_flota === 'Propia') return 'Propia';
 
-  if (overrideInfo?.tipo_flota === 'Externa') return 'Externa';
-  if (f?.tipo_flota === 'Externa') return 'Externa';
-
-  // Si empresa_externa es un estado operativo (ej. Baja, En Taller), no es empresa externa
+  // Si empresa_externa es válida y no es un estado operativo (ej. Baja, En Taller), es Externa
   const overrideEmpresa = (overrideInfo?.empresa_externa || '').trim();
   const fEmpresa = (f?.empresa_externa || '').trim();
   if (overrideEmpresa && !isOperationalFleetStatus(overrideEmpresa)) return 'Externa';
@@ -159,7 +168,7 @@ export const inferTipoFlota = (f, overrideInfo = {}) => {
 };
 
 export const inferEmpresaExterna = (f, overrideInfo = {}) => {
-  if (overrideInfo?.tipo_flota === 'Propia' || f?.tipo_flota === 'Propia') {
+  if (overrideInfo?.tipo_flota === 'Propia' || (f?.tipo_flota === 'Propia' && !overrideInfo?.tipo_flota)) {
     return '';
   }
 
@@ -186,9 +195,8 @@ export const inferEmpresaExterna = (f, overrideInfo = {}) => {
 
 export const isVehicleExternal = (f) => {
   if (!f) return false;
-  // Regla absoluta: si tipo_flota es 'Propia', jamás es externo independientemente de su estado (Baja, En Taller, Por documentación)
-  if (f.tipo_flota === 'Propia') return false;
   if (f.tipo_flota === 'Externa') return true;
+  if (f.tipo_flota === 'Propia') return false;
 
   const emp = (f.empresa_externa || '').trim();
   if (emp && !isOperationalFleetStatus(emp)) return true;
@@ -286,11 +294,12 @@ export const useFleetStore = create((set, get) => ({
           tipo_flota: tipo,
           empresa_externa: empresa,
           ultima_certificacion: f.ultima_certificacion || washInfo.ultima_certificacion || null,
-          fecha_ultimo_lavado: f.fecha_ultimo_lavado || washInfo.fecha_ultimo_lavado || null
+          fecha_ultimo_lavado: f.fecha_ultimo_lavado || washInfo.fecha_ultimo_lavado || null,
+          fecha_deshielo: f.fecha_deshielo || washInfo.fecha_deshielo || overrideInfo.fecha_deshielo || null
         };
       });
 
-      // Auto-sincronizar hacia Supabase si en este equipo hay datos locales de lavados/certificaciones
+      // Auto-sincronizar hacia Supabase si en este equipo hay datos locales de lavados/certificaciones/deshielo
       const missingWashesInDb = (data || []).filter(f => {
         const intKey = f.internal_number ? String(f.internal_number).trim() : null;
         const normIntKey = f.internal_number ? normalizeVehicleCode(f.internal_number) : null;
@@ -306,7 +315,8 @@ export const useFleetStore = create((set, get) => ({
 
         const hasLocalCert = washInfo.ultima_certificacion && !f.ultima_certificacion;
         const hasLocalWash = washInfo.fecha_ultimo_lavado && !f.fecha_ultimo_lavado;
-        return hasLocalCert || hasLocalWash;
+        const hasLocalDeshielo = washInfo.fecha_deshielo && !f.fecha_deshielo;
+        return hasLocalCert || hasLocalWash || hasLocalDeshielo;
       });
 
       if (missingWashesInDb.length > 0) {
@@ -330,6 +340,9 @@ export const useFleetStore = create((set, get) => ({
             }
             if (washInfo.fecha_ultimo_lavado && !item.fecha_ultimo_lavado) {
               payload.fecha_ultimo_lavado = washInfo.fecha_ultimo_lavado;
+            }
+            if (washInfo.fecha_deshielo && !item.fecha_deshielo) {
+              payload.fecha_deshielo = washInfo.fecha_deshielo;
             }
 
             if (Object.keys(payload).length > 0) {
@@ -543,6 +556,8 @@ export const useFleetStore = create((set, get) => ({
           model: f.model ? String(f.model).trim() : null,
           year: f.year ? String(f.year).trim() : null,
           status: String(statusVal).trim(),
+          tipo_flota: tipoFlota,
+          empresa_externa: empresa || null,
           frio: f.frio ? String(f.frio).trim() : null,
           engine_number: f.engine_number ? String(f.engine_number).trim() : null,
           chassis_number: f.chassis_number ? String(f.chassis_number).trim() : null,
@@ -818,7 +833,8 @@ export const useFleetStore = create((set, get) => ({
           const newEntry = {
             ...currentEntry,
             ...(w.ultima_certificacion !== undefined ? { ultima_certificacion: w.ultima_certificacion } : {}),
-            ...(w.fecha_ultimo_lavado !== undefined ? { fecha_ultimo_lavado: w.fecha_ultimo_lavado } : {})
+            ...(w.fecha_ultimo_lavado !== undefined ? { fecha_ultimo_lavado: w.fecha_ultimo_lavado } : {}),
+            ...(w.fecha_deshielo !== undefined ? { fecha_deshielo: w.fecha_deshielo } : {})
           };
 
           if (key) {
@@ -846,6 +862,7 @@ export const useFleetStore = create((set, get) => ({
             const payload = {};
             if (w.ultima_certificacion !== undefined) payload.ultima_certificacion = w.ultima_certificacion;
             if (w.fecha_ultimo_lavado !== undefined) payload.fecha_ultimo_lavado = w.fecha_ultimo_lavado;
+            if (w.fecha_deshielo !== undefined) payload.fecha_deshielo = w.fecha_deshielo;
             if (Object.keys(payload).length > 0) {
               dbUpdates.push({ id: found.id, payload });
             }

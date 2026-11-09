@@ -3,15 +3,19 @@ import {
   Droplets, UploadCloud, Search, Calendar, FileSpreadsheet, 
   CheckCircle2, AlertCircle, Edit2, Trash2, X, Download, 
   Check, Filter, ArrowRight, ShieldCheck, Sparkles, RefreshCw,
-  Truck, ChevronDown, Building2, Layers, ArrowUpDown, ArrowUp, ArrowDown
+  Truck, ChevronDown, Building2, Layers, ArrowUpDown, ArrowUp, ArrowDown, Snowflake
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { useDropzone } from 'react-dropzone';
-import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal, isVehicleBaja } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
-import { downloadFleetWashesCertTemplate, downloadFleetWashesRecordsTemplate } from '../lib/excelTemplates';
+import { 
+  downloadFleetWashesCertTemplate, 
+  downloadFleetWashesRecordsTemplate,
+  downloadFleetDeshieloTemplate 
+} from '../lib/excelTemplates';
 
 // Helpers para normalizar texto
 const normalizeText = (txt) => {
@@ -284,24 +288,29 @@ export default function FleetWashes() {
     });
   };
 
-  // Conteo de flota propia y externa
-  const propiaCount = useMemo(() => {
-    return fleetList.filter(f => !isVehicleExternal(f)).length;
+  // Excluir camiones dados de baja (Requisito 1)
+  const activeFleet = useMemo(() => {
+    return fleetList.filter(f => !isVehicleBaja(f));
   }, [fleetList]);
 
+  // Conteo de flota propia y externa
+  const propiaCount = useMemo(() => {
+    return activeFleet.filter(f => !isVehicleExternal(f)).length;
+  }, [activeFleet]);
+
   const externaCount = useMemo(() => {
-    return fleetList.filter(f => isVehicleExternal(f)).length;
-  }, [fleetList]);
+    return activeFleet.filter(f => isVehicleExternal(f)).length;
+  }, [activeFleet]);
 
   // Regiones únicas de flota (Requisito 3)
   const regions = useMemo(() => {
-    const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
+    const rSet = new Set(activeFleet.map(f => f.region).filter(Boolean));
     return ['Todas', ...Array.from(rSet).sort()];
-  }, [fleetList]);
+  }, [activeFleet]);
 
   // Opciones únicas de camiones para el multi-select (Requisito 2)
   const truckOptions = useMemo(() => {
-    return fleetList
+    return activeFleet
       .filter(f => {
         if (fleetTab === 'propia' && isVehicleExternal(f)) return false;
         if (fleetTab === 'externa' && !isVehicleExternal(f)) return false;
@@ -321,7 +330,7 @@ export default function FleetWashes() {
       })
       .filter(opt => opt.value)
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-  }, [fleetList, fleetTab]);
+  }, [activeFleet, fleetTab]);
 
   // ------------------------------------------------------------------
   // 1. ESTADO: CARGA EXCEL 1 - CERTIFICACIONES (con selector de hoja)
@@ -358,6 +367,18 @@ export default function FleetWashes() {
   const [isUnmatchedModalOpen, setIsUnmatchedModalOpen] = useState(false);
   const [unmatchedRows, setUnmatchedRows] = useState([]); // Array de items no coincidentes editables
   const [matchedWashUpdates, setMatchedWashUpdates] = useState([]); // Array de items que sí coincidieron
+
+  // ------------------------------------------------------------------
+  // 3. ESTADO: CARGA EXCEL 3 - DESHIELO (Número Interno vs N° INTERNO)
+  // ------------------------------------------------------------------
+  const [isDeshieloModalOpen, setIsDeshieloModalOpen] = useState(false);
+  const [deshieloWorkbook, setDeshieloWorkbook] = useState(null);
+  const [deshieloSheets, setDeshieloSheets] = useState([]);
+  const [selectedDeshieloSheet, setSelectedDeshieloSheet] = useState('');
+  const [deshieloColumns, setDeshieloColumns] = useState([]);
+  const [deshieloInternalCol, setDeshieloInternalCol] = useState('');
+  const [deshieloDateCol, setDeshieloDateCol] = useState('');
+  const [deshieloRawRows, setDeshieloRawRows] = useState([]);
 
   // Fechas únicas disponibles en la columna "Creado" (orden descendente: más recientes primero)
   const availableCreadoDates = useMemo(() => {
@@ -455,7 +476,7 @@ export default function FleetWashes() {
 
   // Estado para Edición Manual Individual
   const [editingTruck, setEditingTruck] = useState(null);
-  const [editForm, setEditForm] = useState({ ultima_certificacion: '', fecha_ultimo_lavado: '' });
+  const [editForm, setEditForm] = useState({ ultima_certificacion: '', fecha_ultimo_lavado: '', fecha_deshielo: '' });
 
   useEffect(() => {
     fetchFleet();
@@ -463,7 +484,7 @@ export default function FleetWashes() {
 
   // Lista de N° Internos existentes en flota (para selectores de vinculación rápida)
   const fleetInternalsList = useMemo(() => {
-    return fleetList
+    return activeFleet
       .filter(f => f.internal_number)
       .map(f => ({
         internal: String(f.internal_number).trim(),
@@ -471,11 +492,11 @@ export default function FleetWashes() {
         type: f.type
       }))
       .sort((a, b) => a.internal.localeCompare(b.internal));
-  }, [fleetList]);
+  }, [activeFleet]);
 
   // Filtrado de la tabla principal de Lavados
   const filteredFleet = useMemo(() => {
-    return fleetList.filter(f => {
+    return activeFleet.filter(f => {
       // 1. Filtrado por Pestaña de Flota (Propia vs Externa vs Todas) (Requisito 2)
       const isExternal = isVehicleExternal(f);
       if (fleetTab === 'propia' && isExternal) return false;
@@ -508,6 +529,8 @@ export default function FleetWashes() {
       if (certFilter === 'sin_cert' && certDate) return false;
       if (certFilter === 'con_lavado' && !f.fecha_ultimo_lavado) return false;
       if (certFilter === 'sin_lavado' && f.fecha_ultimo_lavado) return false;
+      if (certFilter === 'con_deshielo' && !f.fecha_deshielo) return false;
+      if (certFilter === 'sin_deshielo' && f.fecha_deshielo) return false;
 
       if (searchTerm) {
         const lower = searchTerm.toLowerCase();
@@ -521,7 +544,7 @@ export default function FleetWashes() {
 
       return true;
     });
-  }, [fleetList, fleetTab, typeFilter, regionFilter, certFilter, searchTerm, selectedTrucks]);
+  }, [activeFleet, fleetTab, typeFilter, regionFilter, certFilter, searchTerm, selectedTrucks]);
 
   // Ordenamiento de columnas (Requisito 1)
   const sortedFleet = useMemo(() => {
@@ -539,13 +562,18 @@ export default function FleetWashes() {
       if (emptyA) return 1;
       if (emptyB) return -1;
 
-      // Si es una fecha (como ultima_certificacion o fecha_ultimo_lavado)
+      // Si es una fecha (como ultima_certificacion, fecha_ultimo_lavado o fecha_deshielo)
       if (key === 'ultima_certificacion') {
         const timeA = parseDateStrToTime(getTruckCertDate(a)) || 0;
         const timeB = parseDateStrToTime(getTruckCertDate(b)) || 0;
         return (timeA - timeB) * factor;
       }
       if (key === 'fecha_ultimo_lavado') {
+        const timeA = parseDateStrToTime(valA) || 0;
+        const timeB = parseDateStrToTime(valB) || 0;
+        return (timeA - timeB) * factor;
+      }
+      if (key === 'fecha_deshielo') {
         const timeA = parseDateStrToTime(valA) || 0;
         const timeB = parseDateStrToTime(valB) || 0;
         return (timeA - timeB) * factor;
@@ -911,13 +939,148 @@ export default function FleetWashes() {
   };
 
   // ------------------------------------------------------------------
+  // 3. MANEJADORES: CARGA 3 - DESHIELO (Número Interno vs N° INTERNO)
+  // ------------------------------------------------------------------
+  const onDropDeshieloExcel = async (acceptedFiles) => {
+    const file = acceptedFiles[0];
+    if (!file) return;
+
+    const fileName = (file.name || '').toLowerCase();
+    const isCsv = fileName.endsWith('.csv') || (file.type && file.type.includes('csv'));
+
+    try {
+      let workbook;
+      if (isCsv) {
+        const text = await file.text();
+        const firstLine = text.split(/\r?\n/)[0] || '';
+        const semicolonCount = (firstLine.match(/;/g) || []).length;
+        const commaCount = (firstLine.match(/,/g) || []).length;
+        const tabCount = (firstLine.match(/\t/g) || []).length;
+
+        let delimiter = ',';
+        if (semicolonCount > commaCount && semicolonCount > tabCount) delimiter = ';';
+        else if (tabCount > commaCount && tabCount > semicolonCount) delimiter = '\t';
+
+        workbook = XLSX.read(text, { type: 'string', FS: delimiter, cellDates: false, raw: true });
+      } else {
+        const buffer = await file.arrayBuffer();
+        workbook = XLSX.read(buffer, { type: 'array', cellDates: false, raw: true });
+      }
+
+      const sheets = workbook.SheetNames || [];
+      if (sheets.length === 0) {
+        toast.error('El archivo no contiene hojas');
+        return;
+      }
+
+      setDeshieloWorkbook(workbook);
+      setDeshieloSheets(sheets);
+      const initialSheet = sheets[0];
+      setSelectedDeshieloSheet(initialSheet);
+      processDeshieloSheet(workbook, initialSheet);
+      toast.success(`Archivo leído: ${sheets.length} hoja(s) encontradas. Selecciona la hoja para consultar.`);
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al procesar archivo de deshielo');
+    }
+  };
+
+  const processDeshieloSheet = (workbook, sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) return;
+
+    const json = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+    if (json.length === 0) {
+      setDeshieloColumns([]);
+      setDeshieloRawRows([]);
+      toast.warning('La hoja seleccionada está vacía');
+      return;
+    }
+
+    const cols = Object.keys(json[0] || {});
+    setDeshieloColumns(cols);
+    setDeshieloRawRows(json);
+
+    // Auto-detectar "Número Interno" (relación con "N° INTERNO" de la plataforma)
+    const detectedInternal = cols.find(c => {
+      const n = normalizeText(c);
+      return n.includes('numerointerno') || n.includes('ninterno') || n.includes('interno') || n === 'codigocamion' || n === 'codigo' || n === 'unidad';
+    }) || cols[0] || '';
+    setDeshieloInternalCol(detectedInternal);
+
+    // Auto-detectar "Fecha Deshielo"
+    const detectedDate = cols.find(c => {
+      const n = normalizeText(c);
+      return n.includes('fechadeshielo') || n.includes('deshielo') || n.includes('fecdeshielo');
+    }) || cols.find(c => normalizeText(c).includes('fecha')) || cols[1] || '';
+    setDeshieloDateCol(detectedDate);
+  };
+
+  const handleDeshieloSheetChange = (sheetName) => {
+    setSelectedDeshieloSheet(sheetName);
+    if (deshieloWorkbook) {
+      processDeshieloSheet(deshieloWorkbook, sheetName);
+    }
+  };
+
+  // Previsualización y conteo de deshielo
+  const deshieloPreviewUpdates = useMemo(() => {
+    if (!deshieloInternalCol || !deshieloDateCol || deshieloRawRows.length === 0) return [];
+
+    return deshieloRawRows.map((row, idx) => {
+      const internalVal = String(row[deshieloInternalCol] || '').trim();
+      const rawDateVal = row[deshieloDateCol];
+      const parsedDate = parseExcelDateValue(rawDateVal);
+
+      // Relacionar Número Interno con N° INTERNO de la plataforma
+      const matchedFleet = matchVehicleByCode(internalVal, '', activeFleet);
+
+      return {
+        rowIdx: idx + 1,
+        internal_number: internalVal,
+        matchedFleet,
+        newDeshieloDate: parsedDate,
+        isMatched: !!matchedFleet && !!internalVal && !!parsedDate
+      };
+    });
+  }, [deshieloInternalCol, deshieloDateCol, deshieloRawRows, activeFleet]);
+
+  const deshieloMatchedCount = useMemo(() => {
+    return deshieloPreviewUpdates.filter(u => u.isMatched).length;
+  }, [deshieloPreviewUpdates]);
+
+  const handleApplyDeshielo = async () => {
+    const validUpdates = deshieloPreviewUpdates
+      .filter(u => u.isMatched)
+      .map(u => ({
+        internal_number: u.matchedFleet?.internal_number || u.internal_number,
+        plate: u.matchedFleet?.plate,
+        fecha_deshielo: u.newDeshieloDate
+      }));
+
+    if (validUpdates.length === 0) {
+      toast.warning('No se encontraron coincidencias para aplicar deshielos');
+      return;
+    }
+
+    const success = await updateFleetWashes(validUpdates);
+    if (success) {
+      toast.success(`Se actualizaron ${validUpdates.length} registros de deshielo exitosamente`);
+      setIsDeshieloModalOpen(false);
+      setDeshieloWorkbook(null);
+      setDeshieloRawRows([]);
+    }
+  };
+
+  // ------------------------------------------------------------------
   // EDICIÓN MANUAL INDIVIDUAL
   // ------------------------------------------------------------------
   const handleStartManualEdit = (truck) => {
     setEditingTruck(truck);
     setEditForm({
       ultima_certificacion: truck.ultima_certificacion || '',
-      fecha_ultimo_lavado: truck.fecha_ultimo_lavado || ''
+      fecha_ultimo_lavado: truck.fecha_ultimo_lavado || '',
+      fecha_deshielo: truck.fecha_deshielo || ''
     });
   };
 
@@ -926,7 +1089,8 @@ export default function FleetWashes() {
     const key = editingTruck.internal_number || editingTruck.id;
     await updateSingleFleetWash(key, {
       ultima_certificacion: editForm.ultima_certificacion || null,
-      fecha_ultimo_lavado: editForm.fecha_ultimo_lavado || null
+      fecha_ultimo_lavado: editForm.fecha_ultimo_lavado || null,
+      fecha_deshielo: editForm.fecha_deshielo || null
     });
     setEditingTruck(null);
   };
@@ -942,7 +1106,8 @@ export default function FleetWashes() {
       'Marca': f.brand || '',
       'Región': f.region || 'Sin asignar',
       'Ultima certificación': f.ultima_certificacion || 'Sin registro',
-      'Fecha Último Lavado': f.fecha_ultimo_lavado || 'Sin registro'
+      'Fecha Último Lavado': f.fecha_ultimo_lavado || 'Sin registro',
+      'Fecha Deshielo': f.fecha_deshielo || 'Sin registro'
     }));
 
     const ws = XLSX.utils.json_to_sheet(dataToExport);
@@ -970,6 +1135,18 @@ export default function FleetWashes() {
     maxFiles: 1
   });
 
+  const { getRootProps: getDeshieloRoot, getInputProps: getDeshieloInput, isDragActive: isDeshieloDrag } = useDropzone({
+    onDrop: onDropDeshieloExcel,
+    accept: { 
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 
+      'application/vnd.ms-excel': ['.xls'],
+      'text/csv': ['.csv'],
+      'application/csv': ['.csv'],
+      'text/plain': ['.csv']
+    },
+    maxFiles: 1
+  });
+
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-full flex flex-col gap-4">
       
@@ -981,7 +1158,7 @@ export default function FleetWashes() {
             Lavados y Certificaciones de Flota
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Gestión y seguimiento de <strong>Ultima certificación</strong> y <strong>Fecha Último Lavado</strong> cruzados por N° Interno.
+            Gestión y seguimiento de <strong>Ultima certificación</strong>, <strong>Fecha Último Lavado</strong> y <strong>Deshielo</strong> cruzados por N° Interno.
           </p>
         </div>
 
@@ -1005,6 +1182,16 @@ export default function FleetWashes() {
           >
             <Droplets size={15} />
             Cargar Lavados
+          </Button>
+
+          {/* Botón Carga 3: Deshielo */}
+          <Button
+            onClick={() => setIsDeshieloModalOpen(true)}
+            className="flex items-center gap-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs h-9 px-3.5 rounded-xl shadow-xs"
+            title="Cargar archivo Excel de deshielo cruzando Número Interno con N° INTERNO"
+          >
+            <Snowflake size={15} />
+            Cargar Deshielo
           </Button>
 
           {/* Botón Exportar */}
@@ -1071,7 +1258,7 @@ export default function FleetWashes() {
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
             fleetTab === 'todas' ? 'bg-slate-700 text-white' : 'bg-slate-200 text-slate-700'
           }`}>
-            {fleetList.length}
+            {activeFleet.length}
           </span>
         </button>
       </div>
@@ -1136,7 +1323,7 @@ export default function FleetWashes() {
           <option value="Semirremolques">Semirremolques</option>
         </select>
 
-        {/* Filtro por Certificación / Lavado */}
+        {/* Filtro por Certificación / Lavado / Deshielo */}
         <select
           value={certFilter}
           onChange={(e) => setCertFilter(e.target.value)}
@@ -1147,6 +1334,8 @@ export default function FleetWashes() {
           <option value="sin_cert">Sin Certificación</option>
           <option value="con_lavado">Con Lavado Registrado</option>
           <option value="sin_lavado">Sin Lavado</option>
+          <option value="con_deshielo">Con Deshielo Registrado</option>
+          <option value="sin_deshielo">Sin Deshielo</option>
         </select>
 
         {(searchTerm || regionFilter !== 'Todas' || typeFilter !== 'Todos' || certFilter !== 'Todos' || selectedTrucks.length > 0) && (
@@ -1180,7 +1369,8 @@ export default function FleetWashes() {
                 { key: 'region', label: 'Región' },
                 ...(fleetTab === 'externa' ? [{ key: 'empresa_externa', label: 'Empresa Externa' }] : []),
                 { key: 'ultima_certificacion', label: 'Ultima certificación', className: 'text-blue-900 bg-blue-50/50' },
-                { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado', className: 'text-emerald-900 bg-emerald-50/50' }
+                { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado', className: 'text-emerald-900 bg-emerald-50/50' },
+                { key: 'fecha_deshielo', label: 'Deshielo', className: 'text-cyan-900 bg-cyan-50/50' }
               ].map(col => {
                 const isSorted = sortConfig.key === col.key;
                 return (
@@ -1211,7 +1401,7 @@ export default function FleetWashes() {
           <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
             {sortedFleet.length === 0 ? (
               <tr>
-                <td colSpan={fleetTab === 'externa' ? 9 : 8} className="py-12 text-center text-slate-400">
+                <td colSpan={fleetTab === 'externa' ? 10 : 9} className="py-12 text-center text-slate-400">
                   <Droplets size={32} className="mx-auto text-slate-300 mb-2" />
                   <p className="font-semibold text-sm">
                     {fleetTab === 'externa' ? 'No se encontraron vehículos de Flota Externa.' : 'No se encontraron vehículos.'}
@@ -1287,6 +1477,18 @@ export default function FleetWashes() {
                     )}
                   </td>
 
+                  {/* Deshielo */}
+                  <td className="px-3.5 py-2.5 font-medium bg-cyan-50/20">
+                    {truck.fecha_deshielo ? (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-bold bg-cyan-100 text-cyan-800 border border-cyan-200">
+                        <Snowflake size={12} className="text-cyan-600" />
+                        {truck.fecha_deshielo}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 italic text-[11px]">— Sin deshielo —</span>
+                    )}
+                  </td>
+
                   {/* Acciones */}
                   <td className="px-3.5 py-2.5 text-center">
                     <button
@@ -1305,7 +1507,7 @@ export default function FleetWashes() {
       </div>
 
       <div className="text-xs text-slate-400 flex items-center justify-between">
-        <span>Mostrando <strong>{sortedFleet.length}</strong> de <strong>{fleetList.length}</strong> vehículos</span>
+        <span>Mostrando <strong>{sortedFleet.length}</strong> de <strong>{activeFleet.length}</strong> vehículos</span>
       </div>
 
       {/* ------------------------------------------------------------------ */}
@@ -1917,6 +2119,215 @@ export default function FleetWashes() {
       )}
 
       {/* ------------------------------------------------------------------ */}
+      {/* MODAL 3: CARGAR ARCHIVO DE DESHIELO                                */}
+      {/* ------------------------------------------------------------------ */}
+      {isDeshieloModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full p-6 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-cyan-100 text-cyan-700 rounded-xl">
+                  <Snowflake size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-800">Cargar Archivo de Deshielo</h3>
+                  <p className="text-xs text-slate-400">
+                    Se cruzará por <strong>Número Interno</strong> con <strong>N° INTERNO</strong> de la plataforma y se registrará la <strong>Fecha Deshielo</strong>.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={downloadFleetDeshieloTemplate}
+                  className="text-xs h-8 px-2.5 flex items-center gap-1.5 text-cyan-700 border-cyan-200 hover:bg-cyan-50 font-bold rounded-lg"
+                  title="Descargar plantilla Excel con columnas Marca, Patente, Tipo de Equipo, Número Interno, Zona, Fecha Deshielo, Semana del Año, Observacion"
+                >
+                  <Download size={14} />
+                  Descargar Plantilla
+                </Button>
+                <button onClick={() => setIsDeshieloModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            <div className="py-4 space-y-4 overflow-y-auto flex-1">
+              {!deshieloWorkbook ? (
+                <div 
+                  {...getDeshieloRoot()}
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all ${
+                    isDeshieloDrag ? 'border-cyan-500 bg-cyan-50' : 'border-slate-300 hover:border-cyan-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <input {...getDeshieloInput()} />
+                  <Snowflake size={44} className="mx-auto text-cyan-500 mb-2" />
+                  <p className="text-sm font-bold text-slate-700">Arrastra tu archivo Excel / CSV de deshielo aquí</p>
+                  <p className="text-xs text-slate-400 mt-1">O haz clic para seleccionar archivo (.xlsx / .xls / .csv)</p>
+                  
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadFleetDeshieloTemplate();
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 rounded-lg text-xs font-bold transition-all shadow-xs"
+                      title="Descargar plantilla Excel oficial de Deshielo"
+                    >
+                      <Download size={14} />
+                      Descargar Plantilla Oficial (8 Columnas)
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-2">
+                    Columnas esperadas: Marca, Patente, Tipo de Equipo, Número Interno, Zona, Fecha Deshielo, Semana del Año, Observacion
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Selector de Hoja si hay más de una */}
+                  {deshieloSheets.length > 1 && (
+                    <div className="p-3.5 bg-cyan-50/60 border border-cyan-200 rounded-xl">
+                      <label className="block text-xs font-bold text-cyan-900 mb-1">
+                        ¿En qué hoja deseas buscar la información de deshielo?:
+                      </label>
+                      <select
+                        value={selectedDeshieloSheet}
+                        onChange={(e) => handleDeshieloSheetChange(e.target.value)}
+                        className="w-full text-xs font-bold border border-cyan-300 rounded-lg p-2 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                      >
+                        {deshieloSheets.map(sh => (
+                          <option key={sh} value={sh}>{sh}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Columnas detectadas */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Columna de Número Interno (hace relación con N° INTERNO):
+                      </label>
+                      <select
+                        value={deshieloInternalCol}
+                        onChange={(e) => setDeshieloInternalCol(e.target.value)}
+                        className="w-full text-xs border border-slate-200 rounded-lg p-2 bg-white"
+                      >
+                        {deshieloColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-cyan-800 mb-1">
+                        Columna de Fecha Deshielo:
+                      </label>
+                      <select
+                        value={deshieloDateCol}
+                        onChange={(e) => setDeshieloDateCol(e.target.value)}
+                        className="w-full text-xs font-bold border border-cyan-300 rounded-lg p-2 bg-cyan-50 text-cyan-950"
+                      >
+                        {deshieloColumns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Resumen de coincidencia */}
+                  <div className="border border-slate-200 rounded-xl p-3 bg-slate-50 flex items-center justify-between text-xs">
+                    <span>Filas detectadas en archivo: <strong>{deshieloRawRows.length}</strong></span>
+                    <span className="font-bold text-cyan-700 bg-cyan-100 px-2.5 py-0.5 rounded-full">
+                      {deshieloMatchedCount} coinciden con vehículos de flota
+                    </span>
+                  </div>
+
+                  {/* Muestra de datos */}
+                  <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-slate-100 text-slate-700 sticky top-0 font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="px-3 py-2">Fila</th>
+                          <th className="px-3 py-2">Número Interno (Archivo)</th>
+                          <th className="px-3 py-2">Vehículo Encontrado (Plataforma)</th>
+                          <th className="px-3 py-2">Fecha Deshielo</th>
+                          <th className="px-3 py-2 text-center">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {deshieloPreviewUpdates.slice(0, 100).map((u) => (
+                          <tr key={u.rowIdx} className="hover:bg-slate-50">
+                            <td className="px-3 py-1.5 text-slate-400 font-mono">{u.rowIdx}</td>
+                            <td className="px-3 py-1.5 font-bold font-mono">{u.internal_number || '—'}</td>
+                            <td className="px-3 py-1.5">
+                              {u.matchedFleet ? (
+                                <span className="font-semibold text-slate-800">
+                                  {u.matchedFleet.plate} - {u.matchedFleet.brand || ''} (N° {u.matchedFleet.internal_number})
+                                </span>
+                              ) : (
+                                <span className="text-red-500 italic">No coincide en flota activa</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 font-bold text-cyan-800 font-mono">
+                              {u.newDeshieloDate || <span className="text-slate-400 italic font-normal">Fecha inválida</span>}
+                            </td>
+                            <td className="px-3 py-1.5 text-center">
+                              {u.isMatched ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                  <Check size={12} /> Listo
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                                  <AlertCircle size={12} /> Descartado
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setDeshieloWorkbook(null);
+                  setDeshieloRawRows([]);
+                  setIsDeshieloModalOpen(false);
+                }}
+                className="text-xs"
+              >
+                Cancelar
+              </Button>
+              {deshieloWorkbook && (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setDeshieloWorkbook(null);
+                      setDeshieloRawRows([]);
+                    }}
+                    className="text-xs"
+                  >
+                    Cambiar archivo
+                  </Button>
+                  <Button
+                    onClick={handleApplyDeshielo}
+                    disabled={deshieloMatchedCount === 0}
+                    className="text-xs font-bold bg-cyan-600 hover:bg-cyan-700 text-white"
+                  >
+                    Aplicar Deshielo ({deshieloMatchedCount} vehículos)
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
       {/* MODAL 4: EDICIÓN MANUAL DE FECHAS DE UN VEHÍCULO                   */}
       {/* ------------------------------------------------------------------ */}
       {editingTruck && (
@@ -1955,6 +2366,19 @@ export default function FleetWashes() {
                   value={editForm.fecha_ultimo_lavado}
                   onChange={(e) => setEditForm({ ...editForm, fecha_ultimo_lavado: e.target.value })}
                   className="w-full text-xs border border-slate-200 rounded-lg p-2 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-cyan-800 mb-1">
+                  Fecha Deshielo:
+                </label>
+                <input
+                  type="text"
+                  placeholder="ej: DD/MM/AAAA"
+                  value={editForm.fecha_deshielo || ''}
+                  onChange={(e) => setEditForm({ ...editForm, fecha_deshielo: e.target.value })}
+                  className="w-full text-xs border border-slate-200 rounded-lg p-2 font-mono bg-cyan-50/40 border-cyan-200 focus:border-cyan-500 focus:outline-none"
                 />
               </div>
             </div>

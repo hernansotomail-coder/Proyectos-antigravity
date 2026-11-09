@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { useLocation } from 'react-router-dom';
+import { useFleetStore, isVehicleExternal, isVehicleBaja } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { 
   Download, ChevronDown, ChevronUp, ArrowUpDown, Truck, 
-  Building2, Layers, Search, Filter 
+  Building2, Layers, Search, Filter, Zap
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 
@@ -111,7 +112,9 @@ const MultiSelectDropdown = ({ options, selectedValues, onChange, placeholder })
   );
 };
 
-export default function FleetDashboard() {
+export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
+  const location = useLocation();
+  const isSpidOnly = Boolean(propIsSpidOnly || location.pathname === '/fleet-spid');
   const { fleetList, fetchFleet } = useFleetStore();
   const [typeFilter, setTypeFilter] = useState([]);
   const [regionFilter, setRegionFilter] = useState([]);
@@ -140,19 +143,26 @@ export default function FleetDashboard() {
     fetchFleet();
   }, [fetchFleet]);
 
+  // Flota activa: Excluir camiones dados de baja (Requisito 1) y filtrar por SPID si corresponde (Requisito 2)
+  const activeFleet = useMemo(() => {
+    return fleetList
+      .filter(f => !isVehicleBaja(f))
+      .filter(f => !isSpidOnly || String(f.operation || '').toUpperCase().includes('SPID'));
+  }, [fleetList, isSpidOnly]);
+
   const frios = useMemo(() => {
-    const fSet = new Set(fleetList.map(f => f.type2 || 'N/A'));
+    const fSet = new Set(activeFleet.map(f => f.type2 || 'N/A'));
     return Array.from(fSet).sort();
-  }, [fleetList]);
+  }, [activeFleet]);
 
   const regions = useMemo(() => {
-    const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
+    const rSet = new Set(activeFleet.map(f => f.region).filter(Boolean));
     return ['Todas', ...Array.from(rSet).sort()];
-  }, [fleetList]);
+  }, [activeFleet]);
 
   // Categorización y cálculo documental incluyendo "Resolución" en formato fecha (Requisito 1)
   const categorized = useMemo(() => {
-    return fleetList.map(f => {
+    return activeFleet.map(f => {
       let category = 'Camiones/Camionetas';
       const t = (f.type || '').toLowerCase();
       if (t.includes('tracto')) category = 'Tractos';
@@ -172,7 +182,7 @@ export default function FleetDashboard() {
         resolutionStatus: getDocumentStatus(getDaysDiff(parsedRes || f.resolution)),
       };
     });
-  }, [fleetList]);
+  }, [activeFleet]);
 
   const baseFilteredVehicles = useMemo(() => {
     return categorized.filter(f => {
@@ -275,6 +285,7 @@ export default function FleetDashboard() {
     const dataToExport = sortedVehicles.map(f => ({
       'Tipo de Flota': isVehicleExternal(f) ? 'Externa' : 'Propia',
       'Empresa Externa': f.empresa_externa || '',
+      'Operación': f.operation || '',
       'Tipo': f.type || 'N/A', 
       'Patente': f.plate, 
       'N° Interno': f.internal_number || 'N/A',
@@ -292,8 +303,10 @@ export default function FleetDashboard() {
     }));
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Dashboard Flota");
-    XLSX.writeFile(workbook, "Reporte_Dashboard_Flota.xlsx");
+    const sheetTitle = isSpidOnly ? "Flota SPID" : "Dashboard Flota";
+    const fileName = isSpidOnly ? "Reporte_Flota_SPID.xlsx" : "Reporte_Dashboard_Flota.xlsx";
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetTitle);
+    XLSX.writeFile(workbook, fileName);
   };
 
   const DynamicCard = ({ id, title, data }) => {
@@ -390,8 +403,22 @@ export default function FleetDashboard() {
   return (
     <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <div className="flex items-center gap-4">
-          <h2 className="text-xl font-bold text-slate-800">Dashboard Flota</h2>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {isSpidOnly && (
+              <div className="p-1.5 bg-amber-100 text-amber-700 rounded-lg">
+                <Zap size={20} className="fill-amber-500 text-amber-600" />
+              </div>
+            )}
+            <h2 className="text-xl font-bold text-slate-800">
+              {isSpidOnly ? 'Dashboard Flota SPID' : 'Dashboard Flota'}
+            </h2>
+            {isSpidOnly && (
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 uppercase tracking-wide">
+                Operación SPID
+              </span>
+            )}
+          </div>
           <Button onClick={exportToExcel} variant="outline" className="flex items-center gap-2 h-9">
             <Download size={16} /> Exportar Excel
           </Button>

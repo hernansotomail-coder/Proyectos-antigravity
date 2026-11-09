@@ -33,6 +33,9 @@ export const canUserViewMenu = (user, menuKey) => {
   if (userMenus && userMenus[menuKey] !== undefined) {
     return !!userMenus[menuKey].view;
   }
+  if (menuKey === 'fleet-spid' && userMenus && userMenus['fleet-dashboard'] !== undefined) {
+    return !!userMenus['fleet-dashboard'].view;
+  }
   if (menuKey === 'route-dispatch-external' && userMenus && userMenus['route-dispatch'] !== undefined) {
     return !!userMenus['route-dispatch'].view;
   }
@@ -45,6 +48,9 @@ export const canUserViewMenu = (user, menuKey) => {
       if (userPerm?.menus && userPerm.menus[menuKey] !== undefined) {
         return !!userPerm.menus[menuKey].view;
       }
+      if (menuKey === 'fleet-spid' && userPerm?.menus && userPerm.menus['fleet-dashboard'] !== undefined) {
+        return !!userPerm.menus['fleet-dashboard'].view;
+      }
       if (menuKey === 'route-dispatch-external' && userPerm?.menus && userPerm.menus['route-dispatch'] !== undefined) {
         return !!userPerm.menus['route-dispatch'].view;
       }
@@ -54,7 +60,7 @@ export const canUserViewMenu = (user, menuKey) => {
   // Fallbacks predeterminados por Rol
   if (user.role === 'Visualizador') {
     // Por defecto el visualizador puede ver reportes/dashboards
-    return ['dashboard', 'fleet-dashboard', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(menuKey);
+    return ['dashboard', 'fleet-dashboard', 'fleet-spid', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(menuKey);
   }
 
   // Administrativo por defecto ve todos excepto mantenedor de usuarios
@@ -75,6 +81,9 @@ export const canUserEditMenu = (user, menuKey) => {
   if (userMenus && userMenus[menuKey] !== undefined) {
     return !!userMenus[menuKey].edit;
   }
+  if (menuKey === 'fleet-spid' && userMenus && userMenus['fleet-dashboard'] !== undefined) {
+    return !!userMenus['fleet-dashboard'].edit;
+  }
   if (menuKey === 'route-dispatch-external' && userMenus && userMenus['route-dispatch'] !== undefined) {
     return !!userMenus['route-dispatch'].edit;
   }
@@ -86,6 +95,9 @@ export const canUserEditMenu = (user, menuKey) => {
       const userPerm = perms[username] || (user.id && perms[user.id]);
       if (userPerm?.menus && userPerm.menus[menuKey] !== undefined) {
         return !!userPerm.menus[menuKey].edit;
+      }
+      if (menuKey === 'fleet-spid' && userPerm?.menus && userPerm.menus['fleet-dashboard'] !== undefined) {
+        return !!userPerm.menus['fleet-dashboard'].edit;
       }
       if (menuKey === 'route-dispatch-external' && userPerm?.menus && userPerm.menus['route-dispatch'] !== undefined) {
         return !!userPerm.menus['route-dispatch'].edit;

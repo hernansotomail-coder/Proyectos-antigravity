@@ -613,9 +613,12 @@ export default function EstatusDiario() {
             continue;
           }
 
-          // Estado: strip().upper()
-          const estado = String(row[estadoIdx] || '').trim().toUpperCase();
+          // Estado: strip().upper() y normalización de 'ENTREGADO F/H' -> 'ENTREGADO' (Requisito 5)
+          let estado = String(row[estadoIdx] || '').trim().toUpperCase();
           if (!estado) continue;
+          if (estado === 'ENTREGADO F/H' || estado === 'ENTREGADO F / H' || estado === 'ENTREGADO FH' || estado === 'ENTREGADO F-H') {
+            estado = 'ENTREGADO';
+          }
 
           // Destino para reglas de Petrolera
           const destino = destinoIdx !== -1 ? String(row[destinoIdx] || '').trim() : '';

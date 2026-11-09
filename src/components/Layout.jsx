@@ -4,7 +4,7 @@ import {
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
   LogOut, ChevronDown, ChevronRight, ChevronLeft, Truck, Key, Layers, 
   FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen,
-  BarChart3
+  BarChart3, Zap
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { useAuthStore, canUserViewMenu } from '../store/authStore';
@@ -90,6 +90,7 @@ export default function Layout() {
   // 3. Menú Gestión de Flota
   const allAdminFlotaItems = [
     { key: 'fleet-dashboard', name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
+    { key: 'fleet-spid', name: 'Flota SPID', path: '/fleet-spid', icon: Zap },
     { key: 'wash-dashboard', name: 'Dashboard de lavados', path: '/wash-dashboard', icon: Sparkles },
     { key: 'fleet', name: 'Agregar Flota', path: '/fleet', icon: Truck },
     { key: 'manage-fleet', name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },

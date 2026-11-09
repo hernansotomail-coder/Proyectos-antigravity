@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal, isVehicleBaja } from '../store/fleetStore';
 import { Button } from './ui/Button';
 import { 
   Download, ChevronDown, ChevronUp, ArrowUpDown, Search, Droplets, ShieldCheck, 
@@ -243,15 +243,20 @@ export default function WashDashboard() {
     fetchFleet();
   }, [fetchFleet]);
 
+  // Excluir camiones dados de baja (Requisito 1)
+  const activeFleet = useMemo(() => {
+    return fleetList.filter(f => !isVehicleBaja(f));
+  }, [fleetList]);
+
   // Regiones disponibles en flota (Requisito 3)
   const regions = useMemo(() => {
-    const rSet = new Set(fleetList.map(f => f.region).filter(Boolean));
+    const rSet = new Set(activeFleet.map(f => f.region).filter(Boolean));
     return ['Todas', ...Array.from(rSet).sort()];
-  }, [fleetList]);
+  }, [activeFleet]);
 
   // Opciones únicas de camiones para el multi-select (Requisito 2)
   const truckOptions = useMemo(() => {
-    return fleetList
+    return activeFleet
       .filter(f => {
         const isExt = isVehicleExternal(f);
         if (fleetTypeFilter === 'Flota Propia' && isExt) return false;
@@ -272,11 +277,11 @@ export default function WashDashboard() {
       })
       .filter(opt => opt.value)
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-  }, [fleetList, fleetTypeFilter]);
+  }, [activeFleet, fleetTypeFilter]);
 
   // Enriquecer flota con categorías y estado de semáforo de certificación (1 mes de vigencia)
   const enrichedFleet = useMemo(() => {
-    return fleetList.map(f => {
+    return activeFleet.map(f => {
       let category = 'Camiones/Camionetas';
       const t = (f.type || '').toLowerCase();
       if (t.includes('tracto')) category = 'Tractos';
@@ -295,7 +300,7 @@ export default function WashDashboard() {
         washDays
       };
     });
-  }, [fleetList]);
+  }, [activeFleet]);
 
   // Flota con filtros base aplicados (Tipo, Región, Camiones, Búsqueda, Flota Propia/Externa) para que los KPIs respondan
   const baseFilteredFleet = useMemo(() => {
