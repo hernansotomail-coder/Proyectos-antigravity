@@ -220,49 +220,129 @@ export default function EstatusDiario() {
   const fullReportRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Sincronización Realtime con Supabase y verificación de vigencia diaria (23:59 hrs Chile)
+  // Referencias para sincronización multi-computador (Realtime Broadcast + Polling liviano)
+  const channelRef = useRef(null);
+  const lastSavedAtRef = useRef(null);
+  const lastUpdatedAtRef = useRef(null);
+
+  // Sincronización Realtime con Supabase + Polling automático cada 5s y verificación de vigencia diaria (23:59 hrs Chile)
   useEffect(() => {
     let isMounted = true;
 
-    // 1. Cargar estatus activo al montar
-    const loadRemoteStatus = async () => {
+    const applyRemoteRecord = (record, updatedAt = null, notifyUser = false) => {
+      if (!isMounted) return;
+      if (!isEstatusRecordValid(record)) {
+        if (lastSavedAtRef.current !== null) {
+          lastSavedAtRef.current = null;
+          lastUpdatedAtRef.current = null;
+          setProcessedData(null);
+          setRemoteInfo(null);
+          setCachedDispMetrics(null);
+        }
+        return;
+      }
+
+      const incomingStamp = record.savedAt || updatedAt || '';
+      const isNewUpdate = incomingStamp && incomingStamp !== lastSavedAtRef.current;
+
+      lastSavedAtRef.current = incomingStamp;
+      if (updatedAt) {
+        lastUpdatedAtRef.current = updatedAt;
+      }
+
+      setProcessedData(record.processedData);
+      if (record.fechaCorte) setFechaCorte(record.fechaCorte);
+      if (record.dispMetrics) setCachedDispMetrics(record.dispMetrics);
+      setRemoteInfo({
+        uploadedBy: record.uploadedBy || 'Usuario',
+        savedAt: record.savedAt,
+        dateChile: record.dateChile
+      });
+
+      if (!lastSavedAtRef.current || isNewUpdate) {
+        setMainTab('matrices');
+      }
+
+      if (notifyUser && isNewUpdate) {
+        toast.info(`Estatus diario actualizado automáticamente por ${record.uploadedBy || 'otro computador'}.`);
+      }
+    };
+
+    const handleRemoteClear = (notifyUser = false) => {
+      if (!isMounted) return;
+      if (lastSavedAtRef.current !== null) {
+        lastSavedAtRef.current = null;
+        lastUpdatedAtRef.current = null;
+        setProcessedData(null);
+        setRemoteInfo(null);
+        setCachedDispMetrics(null);
+        if (notifyUser) {
+          toast.info('El estatus diario fue reiniciado desde otro computador.');
+        }
+      }
+    };
+
+    // 1. Cargar o verificar estatus activo en Supabase
+    const loadRemoteStatus = async (isBackgroundCheck = false) => {
       try {
+        // Si es chequeo periódico y ya tenemos versión cargada, consultar primero solo updated_at (~150 bytes)
+        if (isBackgroundCheck && lastUpdatedAtRef.current) {
+          const { data: meta, error: metaErr } = await supabase
+            .from('planning_assignments')
+            .select('updated_at')
+            .eq('fecha', '__estatus_diario__')
+            .maybeSingle();
+
+          if (metaErr || !isMounted) return;
+
+          if (!meta) {
+            handleRemoteClear(true);
+            return;
+          }
+
+          if (meta.updated_at && meta.updated_at === lastUpdatedAtRef.current) {
+            return; // Sin cambios en el servidor
+          }
+        }
+
         const { data, error } = await supabase
           .from('planning_assignments')
           .select('*')
           .eq('fecha', '__estatus_diario__')
           .maybeSingle();
 
-        if (!error && data && data.assignments && isMounted) {
-          const record = data.assignments;
-          if (isEstatusRecordValid(record)) {
-            setProcessedData(record.processedData);
-            if (record.fechaCorte) setFechaCorte(record.fechaCorte);
-            if (record.dispMetrics) setCachedDispMetrics(record.dispMetrics);
-            setRemoteInfo({
-              uploadedBy: record.uploadedBy || 'Usuario',
-              savedAt: record.savedAt,
-              dateChile: record.dateChile
-            });
-            // Si hay datos válidos cargados, posicionarse en la pestaña de matrices
-            setMainTab('matrices');
-          } else {
-            // El registro expiró o no es válido para hoy.
-            // NOTA IMPORTANTE: No se ejecuta .delete() desde el cliente lector para evitar borrados accidentales
-            setProcessedData(null);
-            setRemoteInfo(null);
-          }
+        if (error || !isMounted) return;
+
+        if (data && data.assignments) {
+          applyRemoteRecord(data.assignments, data.updated_at, isBackgroundCheck);
+        } else {
+          handleRemoteClear(isBackgroundCheck);
         }
       } catch (err) {
         console.warn('Error al consultar estatus diario remoto en Supabase:', err);
       }
     };
 
-    loadRemoteStatus();
+    loadRemoteStatus(false);
 
-    // 2. Suscripción en Tiempo Real para recibir cambios instantáneos desde cualquier computador
+    // 2. Canal Realtime con Broadcast directo + Postgres Changes para actualización instantánea entre computadores
     const channel = supabase
-      .channel('realtime:estatus_diario')
+      .channel('realtime:estatus_diario', {
+        config: { broadcast: { self: false } }
+      })
+      .on('broadcast', { event: 'estatus_diario_updated' }, (msg) => {
+        if (!isMounted) return;
+        const payload = msg?.payload;
+        if (payload?.record) {
+          applyRemoteRecord(payload.record, payload.updatedAt, true);
+        } else {
+          loadRemoteStatus(true);
+        }
+      })
+      .on('broadcast', { event: 'estatus_diario_reset' }, () => {
+        if (!isMounted) return;
+        handleRemoteClear(true);
+      })
       .on('postgres_changes', { 
         event: '*', 
         schema: 'public', 
@@ -271,32 +351,36 @@ export default function EstatusDiario() {
       }, (payload) => {
         if (!isMounted) return;
         if (payload.eventType === 'DELETE' || !payload.new || !payload.new.assignments) {
-          setProcessedData(null);
-          setRemoteInfo(null);
+          handleRemoteClear(true);
           return;
         }
-
-        const record = payload.new.assignments;
-        if (isEstatusRecordValid(record)) {
-          setProcessedData(record.processedData);
-          if (record.fechaCorte) setFechaCorte(record.fechaCorte);
-          if (record.dispMetrics) setCachedDispMetrics(record.dispMetrics);
-          setRemoteInfo({
-            uploadedBy: record.uploadedBy || 'Usuario',
-            savedAt: record.savedAt,
-            dateChile: record.dateChile
-          });
-          setMainTab('matrices');
-          toast.info(`Estatus diario actualizado en vivo por ${record.uploadedBy || 'otro usuario'}.`);
-        } else {
-          setProcessedData(null);
-          setRemoteInfo(null);
-        }
+        applyRemoteRecord(payload.new.assignments, payload.new.updated_at, true);
       })
       .subscribe();
 
+    channelRef.current = channel;
+
+    // 3. Respaldo de sincronización continua (Polling ligero cada 5 segundos + al enfocar ventana)
+    const syncInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      loadRemoteStatus(true);
+    }, 5000);
+
+    const handleVisibilityOrFocus = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        loadRemoteStatus(true);
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
     return () => {
       isMounted = false;
+      clearInterval(syncInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      channelRef.current = null;
       supabase.removeChannel(channel);
     };
   }, []);
@@ -324,12 +408,23 @@ export default function EstatusDiario() {
   const handleResetStatus = async () => {
     if (!window.confirm('¿Deseas reiniciar y limpiar el estatus diario para todos los computadores?')) return;
     try {
+      lastSavedAtRef.current = null;
+      lastUpdatedAtRef.current = null;
       setProcessedData(null);
       setRemoteInfo(null);
       setCachedDispMetrics(null);
       setFile(null);
       setWorkbook(null);
       await supabase.from('planning_assignments').delete().eq('fecha', '__estatus_diario__');
+      if (channelRef.current) {
+        try {
+          await channelRef.current.send({
+            type: 'broadcast',
+            event: 'estatus_diario_reset',
+            payload: { resetAt: new Date().toISOString() }
+          });
+        } catch (bErr) {}
+      }
       toast.success('Estatus diario reiniciado exitosamente.');
     } catch (e) {
       toast.error('Error al reiniciar: ' + e.message);
@@ -815,17 +910,40 @@ export default function EstatusDiario() {
       }
 
       if (metricsToSave) {
+        // Optimizar tamaño del payload eliminando listas de paradas pesadas para sincronización instantánea
+        metricsToSave = {
+          total: metricsToSave.total,
+          cubiertas: metricsToSave.cubiertas,
+          noCubiertas: metricsToSave.noCubiertas,
+          pctCubiertas: metricsToSave.pctCubiertas,
+          rutasNoCubiertas: (metricsToSave.rutasNoCubiertas || []).map(r => ({
+            ruta: r.ruta,
+            cliente: r.cliente,
+            servicio: r.servicio,
+            conductor_name: r.conductor_name,
+            conductor: r.conductor,
+            camion: r.camion,
+            patente: r.patente,
+            missingCond: r.missingCond,
+            missingCam: r.missingCam
+          })),
+          hasData: true
+        };
         setCachedDispMetrics(metricsToSave);
       }
 
+      const nowIso = new Date().toISOString();
       const payload = {
         processedData: dataToSave,
         dispMetrics: metricsToSave,
         fechaCorte: isoToDmy(isoTarget),
         dateChile: todayChile,
-        savedAt: new Date().toISOString(),
+        savedAt: nowIso,
         uploadedBy: user?.name || user?.username || 'Usuario'
       };
+
+      lastSavedAtRef.current = nowIso;
+      lastUpdatedAtRef.current = nowIso;
 
       setRemoteInfo({
         uploadedBy: payload.uploadedBy,
@@ -834,13 +952,32 @@ export default function EstatusDiario() {
       });
 
       try {
-        await supabase
+        const { error: upsertErr } = await supabase
           .from('planning_assignments')
           .upsert({
             fecha: '__estatus_diario__',
             assignments: payload,
-            updated_at: new Date().toISOString()
+            updated_at: nowIso
           }, { onConflict: 'fecha' });
+
+        if (upsertErr) throw upsertErr;
+
+        // Emitir evento Broadcast en tiempo real a todos los demás computadores conectados
+        if (channelRef.current) {
+          try {
+            await channelRef.current.send({
+              type: 'broadcast',
+              event: 'estatus_diario_updated',
+              payload: {
+                record: payload,
+                updatedAt: nowIso
+              }
+            });
+          } catch (bErr) {
+            console.warn('Error enviando broadcast de estatus diario:', bErr);
+          }
+        }
+
         toast.success(`Estatus diario generado y sincronizado en tiempo real para todos los computadores.`);
       } catch (dbErr) {
         console.warn('Error al persistir estatus diario en Supabase:', dbErr);
