@@ -279,16 +279,12 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
       else vehiculos++;
 
       // Contabilizar todo lo que diga "En Taller" en Gestión Flota columna "Estado"
-      // y aplicar a la tarjeta el color del camión con mayor rango de días en taller:
-      // 0 a 4 días: Verde | 5 a 11 días: Amarillo | >= 12 días: Rojo
       if (f.isEnTaller) {
         alertTaller.count++;
         if (f.tallerStatus === 'red') {
           alertTaller.redCount++;
-          alertTaller.severity = 'red';
         } else if (f.tallerStatus === 'yellow') {
           alertTaller.yellowCount++;
-          if (alertTaller.severity !== 'red') alertTaller.severity = 'yellow';
         } else {
           alertTaller.greenCount++;
         }
@@ -302,6 +298,18 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
       updateWorst(alertResolution, f.resolutionStatus);
       updateWorst(alertCertificacion, f.certificacionStatus);
     });
+
+    // Semáforo de la tarjeta "En Taller" en función de la CANTIDAD de camiones en taller:
+    // 0 a 4 camiones: Verde ('green')
+    // 5 a 11 camiones: Amarillo ('yellow')
+    // >= 12 camiones: Rojo ('red')
+    if (alertTaller.count >= 12) {
+      alertTaller.severity = 'red';
+    } else if (alertTaller.count >= 5) {
+      alertTaller.severity = 'yellow';
+    } else {
+      alertTaller.severity = 'green';
+    }
 
     return { vehiculos, semiremolques, alertTaller, alertRt, alertGases, alertPc, alertSoap, alertCarnes, alertResolution, alertCertificacion };
   }, [baseFilteredVehicles]);
@@ -582,9 +590,9 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
           title="En Taller"
           data={stats.alertTaller}
           subtitle={
-            stats.alertTaller.severity === 'red' ? '≥ 12 días' :
-            stats.alertTaller.severity === 'yellow' ? '5 a 11 días' :
-            '0 a 4 días'
+            stats.alertTaller.severity === 'red' ? '≥ 12 camiones' :
+            stats.alertTaller.severity === 'yellow' ? '5 a 11 camiones' :
+            '0 a 4 camiones'
           }
         />
         <DynamicCard id="rt" title="Alerta Rev. Téc." data={stats.alertRt} />
@@ -658,9 +666,9 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
                   {f.isEnTaller ? (
                     <div className="inline-flex items-center justify-center gap-1">
                       <ColorBadge
-                        status={f.tallerStatus}
+                        status="yellow"
                         text="En Taller"
-                        title={`En Taller (${f.tallerDays ?? 0} días) - Semáforo: 0-4d Verde, 5-11d Amarillo, ≥12d Rojo`}
+                        title={`En Taller (${f.tallerDays ?? 0} días)`}
                       />
                       {editingTallerId === f.id ? (
                         <div className="inline-flex items-center gap-0.5 bg-white border border-slate-300 rounded px-1 py-0.5 shadow-xs">

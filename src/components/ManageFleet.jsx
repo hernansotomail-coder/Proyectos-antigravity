@@ -1012,7 +1012,7 @@ export default function ManageFleet() {
                                   : 'bg-green-100 text-green-700 border border-green-200';
                                 return (
                                   <>
-                                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${badgeCls}`}>
+                                    <span className="px-2 py-1 rounded-md text-[10px] font-bold bg-yellow-100 text-yellow-800 border border-yellow-300">
                                       En Taller
                                     </span>
                                     {editingTallerId === truck.id ? (
