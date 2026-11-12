@@ -53,13 +53,34 @@ function App() {
     useFleetStore.getState().fetchFleet?.();
     useStaffStore.getState().fetchStaff?.();
 
-    // 2. Intervalo periódico en segundo plano para refrescar flota y dotación si la conexión falló
+    // 2. Auto-detección de nueva versión desplegada en producción (recarga automática sin requerir Ctrl+F5)
+    const checkAppVersionUpdate = async () => {
+      try {
+        if (typeof document === 'undefined' || document.hidden) return;
+        const currentScript = document.querySelector('script[type="module"][src*="/assets/index-"]');
+        const currentSrc = currentScript?.getAttribute('src');
+        if (!currentSrc) return; // En modo dev local no aplica
+        const res = await fetch(`/index.html?_v=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) return;
+        const html = await res.text();
+        const match = html.match(/\/assets\/index-[A-Za-z0-9_-]+\.js/);
+        if (match && match[0] && match[0] !== currentSrc) {
+          console.log('[VersionSync] Nueva versión detectada en producción, recargando aplicación...', match[0]);
+          window.location.reload();
+        }
+      } catch (e) {}
+    };
+
+    const versionInterval = setInterval(checkAppVersionUpdate, 45000);
+    window.addEventListener('focus', checkAppVersionUpdate);
+
+    // 3. Intervalo periódico en segundo plano para refrescar flota y dotación si la conexión falló
     const refreshInterval = setInterval(() => {
       // Optimización: si la pestaña está en segundo plano u oculta, pausar para no gastar red ni CPU
       if (typeof document !== 'undefined' && document.hidden) return;
       useFleetStore.getState().fetchFleet?.();
       useStaffStore.getState().fetchStaff?.();
-    }, 180000); // Cada 3 minutos
+    }, 60000); // Cada 1 minuto
 
     // 3. Suscripciones Realtime a Supabase: sincroniza automáticamente entre notebooks
     let debounceTimer = null;
@@ -110,6 +131,8 @@ function App() {
 
       return () => {
         clearInterval(refreshInterval);
+        clearInterval(versionInterval);
+        window.removeEventListener('focus', checkAppVersionUpdate);
         if (debounceTimer) clearTimeout(debounceTimer);
         if (fleetTimer) clearTimeout(fleetTimer);
         if (staffTimer) clearTimeout(staffTimer);
@@ -121,7 +144,11 @@ function App() {
       };
     } catch (err) {
       console.warn('[Realtime] Error iniciando suscripción:', err);
-      return () => clearInterval(refreshInterval);
+      return () => {
+        clearInterval(refreshInterval);
+        clearInterval(versionInterval);
+        window.removeEventListener('focus', checkAppVersionUpdate);
+      };
     }
   }, [initPlanningFromDb]);
 

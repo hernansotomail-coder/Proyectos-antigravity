@@ -161,7 +161,11 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
 
   useEffect(() => {
     fetchFleet();
-    // Refrescar automáticamente al volver a enfocar la ventana/pestaña para mantener sincronización entre computadores
+    // Refrescar automáticamente cada 15s y al volver a enfocar la ventana/pestaña para mantener sincronización entre computadores
+    const pollTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchFleet();
+    }, 15000);
     const onFocus = () => {
       fetchFleet();
     };
@@ -171,6 +175,7 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
+      clearInterval(pollTimer);
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onVisibility);
     };
@@ -529,7 +534,24 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
             <Download size={16} /> Exportar Excel
           </Button>
           <Button
-            onClick={() => fetchFleet()}
+            onClick={async () => {
+              try {
+                const currentScript = document.querySelector('script[type="module"][src*="/assets/index-"]');
+                const currentSrc = currentScript?.getAttribute('src');
+                if (currentSrc) {
+                  const res = await fetch(`/index.html?_v=${Date.now()}`, { cache: 'no-store' });
+                  if (res.ok) {
+                    const html = await res.text();
+                    const match = html.match(/\/assets\/index-[A-Za-z0-9_-]+\.js/);
+                    if (match && match[0] && match[0] !== currentSrc) {
+                      window.location.reload();
+                      return;
+                    }
+                  }
+                }
+              } catch (e) {}
+              fetchFleet();
+            }}
             variant="outline"
             className="flex items-center gap-1.5 h-9 text-xs"
             title="Sincronizar datos de flota con la nube"
