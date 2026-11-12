@@ -323,6 +323,86 @@ export const withTimeout = (promise, ms = 35000) => {
   });
 };
 
+export const computeDispMetricsSummary = (rows = []) => {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return {
+      total: 0,
+      cubiertas: 0,
+      noCubiertas: 0,
+      pctCubiertas: 0,
+      rutasNoCubiertas: [],
+      hasData: false
+    };
+  }
+  const cubiertas = [];
+  const noCubiertas = [];
+  rows.forEach(r => {
+    const cond = String(r.conductor_name || r.conductor || '').trim();
+    const hasCond = cond !== '' && cond.toLowerCase() !== 'sin asignar';
+    const cam = String(r.camion || r.patente || '').trim();
+    const hasCam = cam !== '' && cam.toLowerCase() !== 'sin asignar';
+    if (hasCond && hasCam) {
+      cubiertas.push(r);
+    } else {
+      noCubiertas.push({
+        ruta: r.ruta,
+        cliente: r.cliente,
+        servicio: r.servicio,
+        conductor_name: r.conductor_name,
+        conductor: r.conductor,
+        camion: r.camion,
+        patente: r.patente,
+        missingCond: !hasCond,
+        missingCam: !hasCam
+      });
+    }
+  });
+  return {
+    total: rows.length,
+    cubiertas: cubiertas.length,
+    noCubiertas: noCubiertas.length,
+    pctCubiertas: (cubiertas.length / rows.length) * 100,
+    rutasNoCubiertas: noCubiertas,
+    hasData: true
+  };
+};
+
+// Sincroniza automáticamente las métricas de Rutas Cubiertas / No Cubiertas dentro de __estatus_diario__
+// cada vez que se modifica la Disponibilización de la fecha activa
+export const syncDispMetricsToEstatusDiario = async (cleanFecha, sanitizedRows) => {
+  try {
+    if (!cleanFecha || !Array.isArray(sanitizedRows)) return;
+    const { data, error } = await supabase
+      .from('planning_assignments')
+      .select('*')
+      .eq('fecha', '__estatus_diario__')
+      .maybeSingle();
+
+    if (error || !data || !data.assignments) return;
+    const currentRecord = data.assignments;
+    const recFecha = normalizeDate(currentRecord.fechaCorte || currentRecord.processedData?.fechaCorteDmy || '');
+    if (recFecha && recFecha !== cleanFecha) return;
+
+    const newDispMetrics = computeDispMetricsSummary(sanitizedRows);
+    const nowIso = new Date().toISOString();
+    const updatedRecord = {
+      ...currentRecord,
+      dispMetrics: newDispMetrics,
+      savedAt: nowIso
+    };
+
+    await supabase
+      .from('planning_assignments')
+      .upsert({
+        fecha: '__estatus_diario__',
+        assignments: updatedRecord,
+        updated_at: nowIso
+      }, { onConflict: 'fecha' });
+  } catch (e) {
+    console.warn('[Supabase] Error sincronizando dispMetrics con Estatus Diario:', e);
+  }
+};
+
 export const persistAssignmentsToDb = async (fecha, assignments, silent = false) => {
   try {
     if (!fecha || !assignments) return false;
@@ -331,6 +411,15 @@ export const persistAssignmentsToDb = async (fecha, assignments, silent = false)
 
     // Sanitizar datos para asegurar serialización JSON limpia sin referencias circulares ni campos inválidos
     const sanitized = JSON.parse(JSON.stringify(assignments));
+
+    // Notificar inmediatamente en la misma sesión de navegador (ej. Estatus Diario)
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent('disponibilizacion-updated', {
+          detail: { fecha: cleanFecha, assignments: sanitized }
+        }));
+      } catch (e) {}
+    }
 
     const { error } = await withTimeout(
       supabase
@@ -349,6 +438,10 @@ export const persistAssignmentsToDb = async (fecha, assignments, silent = false)
       }
       return false;
     }
+
+    // Actualizar en segundo plano el resumen de Rutas No Cubiertas en __estatus_diario__
+    syncDispMetricsToEstatusDiario(cleanFecha, sanitized);
+
     return true;
   } catch (e) {
     console.warn('[Supabase] Excepción guardando asignaciones:', e);

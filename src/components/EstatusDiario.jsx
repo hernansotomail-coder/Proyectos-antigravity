@@ -441,58 +441,141 @@ export default function EstatusDiario() {
     initPlanningFromDb?.();
   }, [initPlanningFromDb]);
 
-  // Cargar disponibilización de Supabase si la fecha activa cambia
+  // Cargar y sincronizar continuamente Disponibilización (Realtime + Evento local + Polling cada 5s)
+  const activeDispDate = processedData?.fechaCorteDmy || fechaCorte;
+
   useEffect(() => {
-    if (!fechaCorte) {
+    if (!activeDispDate) {
       setDispRowsFromDb(null);
       return;
     }
-    const cleanF = normalizeDate(fechaCorte) || fechaCorte;
+    const cleanF = normalizeDate(activeDispDate) || activeDispDate;
     let isMounted = true;
-    const fetchDisp = async () => {
-      setIsLoadingDisp(true);
+    let lastDispUpdatedAt = null;
+
+    const applyIncomingDispRows = (rows, updatedAt = null) => {
+      if (!isMounted || !Array.isArray(rows)) return;
+      if (updatedAt) lastDispUpdatedAt = updatedAt;
+      setDispRowsFromDb(rows);
+      usePlanningStore.setState((state) => ({
+        transmittedAssignments: {
+          ...(state.transmittedAssignments || {}),
+          [cleanF]: rows
+        }
+      }));
+    };
+
+    const fetchDisp = async (isBackgroundPoll = false) => {
+      if (!isBackgroundPoll) setIsLoadingDisp(true);
       try {
+        if (isBackgroundPoll && lastDispUpdatedAt) {
+          const { data: meta, error: metaErr } = await supabase
+            .from('planning_assignments')
+            .select('fecha,updated_at')
+            .or(`fecha.eq.${cleanF},fecha.eq.${activeDispDate}`);
+
+          if (metaErr || !isMounted || !meta || meta.length === 0) return;
+          const latestMeta = meta[0];
+          if (latestMeta?.updated_at && latestMeta.updated_at === lastDispUpdatedAt) {
+            return; // Sin cambios en Disponibilización
+          }
+        }
+
         const { data, error } = await supabase
           .from('planning_assignments')
           .select('*')
-          .or(`fecha.eq.${cleanF},fecha.eq.${fechaCorte}`);
+          .or(`fecha.eq.${cleanF},fecha.eq.${activeDispDate}`);
         if (!error && data && data.length > 0 && isMounted) {
-          const found = data.find(d => Array.isArray(d.assignments) && d.assignments.length > 0);
-          if (found) {
-            setDispRowsFromDb(found.assignments);
+          const found = data.find(d => Array.isArray(d.assignments));
+          if (found && Array.isArray(found.assignments)) {
+            applyIncomingDispRows(found.assignments, found.updated_at);
           }
         }
       } catch (e) {
         console.warn('Error al consultar Disponibilización en Supabase:', e);
       } finally {
-        if (isMounted) setIsLoadingDisp(false);
+        if (isMounted && !isBackgroundPoll) setIsLoadingDisp(false);
       }
     };
-    fetchDisp();
-    return () => { isMounted = false; };
-  }, [fechaCorte]);
 
-  // Obtener filas de disponibilización activas para la fecha
+    fetchDisp(false);
+
+    // 1. Escuchar cambios inmediatos hechos en Disponibilización en este mismo computador
+    const handleLocalDispEvent = (ev) => {
+      const evFecha = normalizeDate(ev?.detail?.fecha || '');
+      if (evFecha === cleanF && Array.isArray(ev?.detail?.assignments)) {
+        applyIncomingDispRows(ev.detail.assignments, new Date().toISOString());
+      }
+    };
+    window.addEventListener('disponibilizacion-updated', handleLocalDispEvent);
+
+    // 2. Suscripción Realtime a cambios de Disponibilización en Supabase para la fecha activa
+    const dispChannel = supabase
+      .channel(`realtime:disp_estatus_${cleanF}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'planning_assignments'
+      }, (payload) => {
+        if (!isMounted) return;
+        const changedFecha = normalizeDate(payload?.new?.fecha || payload?.old?.fecha || '');
+        if (changedFecha === cleanF && Array.isArray(payload?.new?.assignments)) {
+          applyIncomingDispRows(payload.new.assignments, payload.new.updated_at);
+        }
+      })
+      .subscribe();
+
+    // 3. Polling ligero cada 5 segundos + al enfocar pestaña para garantizar actualización en todo momento
+    const dispPollInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchDisp(true);
+    }, 5000);
+
+    const handleDispFocus = () => {
+      if (typeof document !== 'undefined' && !document.hidden) {
+        fetchDisp(true);
+      }
+    };
+    window.addEventListener('focus', handleDispFocus);
+    document.addEventListener('visibilitychange', handleDispFocus);
+
+    return () => {
+      isMounted = false;
+      clearInterval(dispPollInterval);
+      window.removeEventListener('disponibilizacion-updated', handleLocalDispEvent);
+      window.removeEventListener('focus', handleDispFocus);
+      document.removeEventListener('visibilitychange', handleDispFocus);
+      supabase.removeChannel(dispChannel);
+    };
+  }, [activeDispDate]);
+
+  // Obtener filas de disponibilización activas para la fecha (priorizando el estado más reciente sincronizado)
   const activeDispRows = useMemo(() => {
-    if (!fechaCorte) return [];
-    const cleanF = normalizeDate(fechaCorte) || fechaCorte;
-    
-    if (dispRowsFromDb && dispRowsFromDb.length > 0) return dispRowsFromDb;
+    if (!activeDispDate) return [];
+    const cleanF = normalizeDate(activeDispDate) || activeDispDate;
     
     if (transmittedAssignments) {
-      if (transmittedAssignments[cleanF]?.length > 0) return transmittedAssignments[cleanF];
-      if (transmittedAssignments[fechaCorte]?.length > 0) return transmittedAssignments[fechaCorte];
+      if (Array.isArray(transmittedAssignments[cleanF]) && transmittedAssignments[cleanF].length > 0) {
+        return transmittedAssignments[cleanF];
+      }
+      if (Array.isArray(transmittedAssignments[activeDispDate]) && transmittedAssignments[activeDispDate].length > 0) {
+        return transmittedAssignments[activeDispDate];
+      }
       const match = Object.keys(transmittedAssignments).find(k => normalizeDate(k) === cleanF);
-      if (match && transmittedAssignments[match]?.length > 0) return transmittedAssignments[match];
+      if (match && Array.isArray(transmittedAssignments[match]) && transmittedAssignments[match].length > 0) {
+        return transmittedAssignments[match];
+      }
     }
+
+    if (dispRowsFromDb && dispRowsFromDb.length > 0) return dispRowsFromDb;
     
     if (savedRuteoByDate) {
       if (savedRuteoByDate[cleanF]?.length > 0) return savedRuteoByDate[cleanF];
-      if (savedRuteoByDate[fechaCorte]?.length > 0) return savedRuteoByDate[fechaCorte];
+      if (savedRuteoByDate[activeDispDate]?.length > 0) return savedRuteoByDate[activeDispDate];
     }
     
     return [];
-  }, [fechaCorte, dispRowsFromDb, transmittedAssignments, savedRuteoByDate]);
+  }, [activeDispDate, dispRowsFromDb, transmittedAssignments, savedRuteoByDate]);
 
   // Métricas de Rutas Cubiertas vs No Cubiertas calculadas localmente
   const dispMetrics = useMemo(() => {
