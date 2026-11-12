@@ -69,7 +69,15 @@ function App() {
       const channelPlanning = supabase
         .channel('realtime:planning_assignments')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'planning_assignments' }, (payload) => {
-          console.log('[Realtime] Notificación de actualización en planning_assignments:', payload?.new?.fecha || payload);
+          const changedFecha = payload?.new?.fecha || payload?.old?.fecha;
+          console.log('[Realtime] Notificación de actualización en planning_assignments:', changedFecha || payload);
+          if (changedFecha === '__fleet_extended_meta__') {
+            if (fleetTimer) clearTimeout(fleetTimer);
+            fleetTimer = setTimeout(() => {
+              useFleetStore.getState().fetchFleet?.();
+            }, 600);
+            return;
+          }
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             const status = usePlanningStore.getState().cloudSyncStatus;

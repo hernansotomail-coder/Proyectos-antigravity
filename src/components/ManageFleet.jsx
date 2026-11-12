@@ -7,7 +7,7 @@ import {
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { useDropzone } from 'react-dropzone';
-import { useFleetStore, isVehicleExternal, isOperationalFleetStatus } from '../store/fleetStore';
+import { useFleetStore, isVehicleExternal, isOperationalFleetStatus, isVehicleEnTaller, getVehicleTallerDays, getVehicleTallerStatus } from '../store/fleetStore';
 import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { Button } from './ui/Button';
@@ -48,10 +48,12 @@ export const FLEET_COLUMNS = [
   { key: 'neo_tac', label: 'NEO TAC' },
   { key: 'pallet_capacity', label: 'Cap. Pallet' },
   { key: 'ultima_certificacion', label: 'Última Certificación', type: 'date' },
-  { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado', type: 'date' }
+  { key: 'fecha_ultimo_lavado', label: 'Fecha Último Lavado', type: 'date' },
+  { key: 'dias_taller', label: 'Días en Taller', type: 'number' },
+  { key: 'fecha_ingreso_taller', label: 'Fecha Ingreso Taller', type: 'date' }
 ];
 
-export const TABLE_COLUMNS = FLEET_COLUMNS.filter(c => !['plate', 'type', 'status'].includes(c.key));
+export const TABLE_COLUMNS = FLEET_COLUMNS.filter(c => !['plate', 'type', 'status', 'dias_taller', 'fecha_ingreso_taller'].includes(c.key));
 
 // Columnas específicas solicitadas para Flota Externa
 export const EXTERNAL_FLEET_COLUMNS = [
@@ -128,12 +130,14 @@ const formatExcelCellValue = (val, colType) => {
 };
 
 export default function ManageFleet() {
-  const { fleetList, fetchFleet, updateFleet, deleteFleet, updateFleetBulkColumns, isLoading } = useFleetStore();
+  const { fleetList, fetchFleet, updateFleet, updateVehicleTallerInfo, deleteFleet, updateFleetBulkColumns, isLoading } = useFleetStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [fleetTab, setFleetTab] = useState('propia'); // 'propia' | 'externa' | 'todas'
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
+  const [editingTallerId, setEditingTallerId] = useState(null);
+  const [tallerDaysInput, setTallerDaysInput] = useState(0);
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
 
   const handleSort = (key) => {
@@ -881,16 +885,38 @@ export default function ManageFleet() {
                     editingId === truck.id ? (
                       <>
                         <td className="px-2 py-1">
-                          <select 
-                            value={editForm.status || 'Activo'} 
-                            onChange={(e) => setEditForm({...editForm, status: e.target.value})}
-                            className="h-7 text-xs border border-slate-200 rounded px-1 min-w-[120px]"
-                          >
-                            <option value="Activo">Activo</option>
-                            <option value="Baja">Baja</option>
-                            <option value="En Taller">En Taller</option>
-                            <option value="Por documentación">Por documentación</option>
-                          </select>
+                          <div className="flex items-center gap-1">
+                            <select 
+                              value={editForm.status || 'Activo'} 
+                              onChange={(e) => {
+                                const nextSt = e.target.value;
+                                setEditForm({
+                                  ...editForm,
+                                  status: nextSt,
+                                  dias_taller: nextSt === 'En Taller' ? (editForm.dias_taller ?? 0) : null
+                                });
+                              }}
+                              className="h-7 text-xs border border-slate-200 rounded px-1 min-w-[115px]"
+                            >
+                              <option value="Activo">Activo</option>
+                              <option value="Baja">Baja</option>
+                              <option value="En Taller">En Taller</option>
+                              <option value="Por documentación">Por documentación</option>
+                            </select>
+                            {editForm.status === 'En Taller' && (
+                              <div className="flex items-center gap-1" title="Días en taller (0-4: Verde, 5-11: Amarillo, ≥12: Rojo)">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={editForm.dias_taller ?? 0}
+                                  onChange={(e) => setEditForm({ ...editForm, dias_taller: e.target.value })}
+                                  className="h-7 w-14 text-xs border border-amber-300 bg-amber-50 rounded px-1.5 font-bold text-center"
+                                  placeholder="Días"
+                                />
+                                <span className="text-[10px] text-slate-500 font-semibold">días</span>
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="px-2 py-1">
                           <input 
@@ -974,15 +1000,78 @@ export default function ManageFleet() {
                     ) : (
                       <>
                         <td className="px-3 py-2">
-                          <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${
-                            truck.status === 'Activo' ? 'bg-green-100 text-green-700' : 
-                            truck.status === 'Baja' ? 'bg-red-100 text-red-700' : 
-                            truck.status === 'En Taller' ? 'bg-amber-100 text-amber-700' : 
-                            truck.status === 'Por documentación' ? 'bg-orange-100 text-orange-700' : 
-                            'bg-slate-100 text-slate-600'
-                          }`}>
-                            {truck.status}
-                          </span>
+                          {isVehicleEnTaller(truck) ? (
+                            <div className="flex items-center gap-1.5">
+                              {(() => {
+                                const days = getVehicleTallerDays(truck) ?? 0;
+                                const sem = getVehicleTallerStatus(days);
+                                const badgeCls = sem === 'red'
+                                  ? 'bg-red-100 text-red-700 border border-red-200'
+                                  : sem === 'yellow'
+                                  ? 'bg-yellow-100 text-yellow-800 border border-yellow-300'
+                                  : 'bg-green-100 text-green-700 border border-green-200';
+                                return (
+                                  <>
+                                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${badgeCls}`}>
+                                      En Taller
+                                    </span>
+                                    {editingTallerId === truck.id ? (
+                                      <div className="flex items-center gap-1 bg-white border border-slate-300 rounded-md px-1 py-0.5 shadow-xs">
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          value={tallerDaysInput}
+                                          onChange={(e) => setTallerDaysInput(e.target.value)}
+                                          className="w-11 text-[10px] font-bold text-center outline-none"
+                                          autoFocus
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={async () => {
+                                            await updateVehicleTallerInfo(truck.id, { dias_taller: tallerDaysInput });
+                                            setEditingTallerId(null);
+                                          }}
+                                          className="text-green-600 hover:bg-green-50 p-0.5 rounded"
+                                          title="Guardar días en taller"
+                                        >
+                                          <Check size={12} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingTallerId(null)}
+                                          className="text-slate-400 hover:bg-slate-100 p-0.5 rounded"
+                                          title="Cancelar"
+                                        >
+                                          <X size={12} />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingTallerId(truck.id);
+                                          setTallerDaysInput(days);
+                                        }}
+                                        className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-black cursor-pointer hover:opacity-80 transition-opacity ${badgeCls}`}
+                                        title="Clic para ajustar días en taller (0-4d: Verde, 5-11d: Amarillo, ≥12d: Rojo)"
+                                      >
+                                        {days}d
+                                      </button>
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          ) : (
+                            <span className={`px-2 py-1 rounded-md text-[10px] font-bold ${
+                              truck.status === 'Activo' ? 'bg-green-100 text-green-700' : 
+                              truck.status === 'Baja' ? 'bg-red-100 text-red-700' : 
+                              truck.status === 'Por documentación' ? 'bg-orange-100 text-orange-700' : 
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {truck.status}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2 font-bold text-slate-700">{truck.plate}</td>
                         <td className="px-3 py-2 text-slate-600 font-mono font-bold">{truck.internal_number || '-'}</td>
