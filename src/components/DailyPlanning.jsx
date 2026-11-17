@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { isFiveDigitRoute } from '../data/operacionesMaster';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 
@@ -349,7 +350,7 @@ export default function DailyPlanning() {
     rows.forEach((row, idx) => {
       const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
       const ruta = String(rutaRaw).trim();
-      if (!ruta) return;
+      if (!ruta || isFiveDigitRoute(ruta)) return;
 
       const nombreRuta = String(row['Nombre Ruta'] || row.nombre_ruta || row.NombreRuta || row.Cliente || '').trim();
       const destino = String(row.Destino || row.destino || '').trim();
@@ -362,7 +363,10 @@ export default function DailyPlanning() {
       const ambiente = String(row.Ambiente || row.ambiente || row.Amb || 'S').trim().toUpperCase() || 'S';
       const horaIni = row.HoraIni || row.hora_ini || '';
       const horaFin = row.HoraFin || row.hora_fin || '';
-      const transportista = String(row.Transportista || row.transportista || row.Transp || '').trim();
+      const horaIni2 = row.HoraIni2 || row.hora_ini2 || '';
+      const horaFin2 = row.HoraFin2 || row.hora_fin2 || '';
+      const transportista = String(row.Transportista || row.transportista || row.Transp || '').trim().toUpperCase();
+      const owner = String(row.Owner || row.owner || '').trim().toUpperCase();
 
       const groupKey = String(ruta).trim();
       if (!groups.has(groupKey)) {
@@ -390,19 +394,21 @@ export default function DailyPlanning() {
       g.sumaPeso += peso;
       g.sumaCantCJ += cantCJ;
 
-      const paradaKey = `${secuencia}:::${ambiente}`;
+      const paradaKey = `${secuencia}:::${ambiente}:::${transportista}`;
       if (g.paradasMap.has(paradaKey)) {
         const p = g.paradasMap.get(paradaKey);
         p.volumen = Number((p.volumen + volumen).toFixed(4));
-        p.peso = Number((p.peso + peso).toFixed(2));
+        p.peso = Number((p.peso + peso).toFixed(3));
         p.cantCJ = Math.round(p.cantCJ + cantCJ);
         if (!p.destino && destino) p.destino = destino;
         if (!p.direccion && direccion) p.direccion = direccion;
         if (!p.comuna && comuna) p.comuna = comuna;
+        if (!p.horaIni2 && horaIni2) p.horaIni2 = horaIni2;
+        if (!p.horaFin2 && horaFin2) p.horaFin2 = horaFin2;
       } else {
         const isNewDest = destino ? !transmittedDestinos.has(destino.toUpperCase()) : true;
         g.paradasMap.set(paradaKey, {
-          id: `sp-${ruta}-s${secuencia}-${ambiente}-${g.paradasMap.size}`,
+          id: `sp-${ruta}-s${secuencia}-${ambiente}-${transportista || 'T'}-${g.paradasMap.size}`,
           secuencia,
           ambiente,
           destino,
@@ -410,10 +416,13 @@ export default function DailyPlanning() {
           comuna,
           horaIni,
           horaFin,
+          horaIni2,
+          horaFin2,
           cantCJ: Math.round(cantCJ),
-          peso: Number(peso.toFixed(2)),
+          peso: Number(peso.toFixed(3)),
           volumen: Number(volumen.toFixed(4)),
           transportista,
+          owner,
           isNewDestino: isNewDest
         });
       }

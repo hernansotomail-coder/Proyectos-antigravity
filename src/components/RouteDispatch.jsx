@@ -1,18 +1,21 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   MessageSquare, Send, Copy, Check, Search, Calendar, 
   Users, Truck, Layers, Filter, Eye, Phone, 
   Sparkles, ExternalLink, CheckCircle2, AlertCircle, X, ChevronDown, ChevronRight, ChevronUp,
-  Download, Smartphone, Save, UserCheck, RefreshCw, PhoneCall, Clock
+  Download, Smartphone, Save, UserCheck, RefreshCw, PhoneCall, Clock, Edit3, Star, Image as ImageIcon, MapPin
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { usePlanningStore, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useStaffStore } from '../store/staffStore';
 import { useFleetStore } from '../store/fleetStore';
+import { useTiendasCriticasStore, normalizeDestino } from '../store/tiendasCriticasStore';
 import { findFarthestComunaForRoute, getComunaDistance } from './RuteoView';
 import { matchVehicleByCode } from '../lib/vehicleMatcher';
 import { isAssignmentExternal } from './Briefing';
+import { resolveBodegasForRoutes, resolveClienteForStop, isFiveDigitRoute } from '../data/operacionesMaster';
+import { getHtml2Canvas } from '../lib/html2canvasWrapper';
 import { Button } from './ui/Button';
 
 // Persistencia local para teléfonos de conductores (para compatibilidad de envíos por WhatsApp Personal)
@@ -152,6 +155,7 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   const m3Val = (parseFloat(row.m3) || 0).toFixed(3);
   const camionText = formatCamionWithPlate(row.camion, fleetList) || 'Sin camión';
   const farthestComuna = findFarthestComunaForTrip([row]);
+  const bodegaInfo = resolveBodegasForRoutes([row]);
 
   // Hora Cita en el apartado general (Requisito 1: solo aparece en la cabecera general)
   const rawCita = (row.hora_cita || '').trim();
@@ -175,6 +179,7 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   if (citaGeneralHeader) {
     msg += `⏰ *Hora Cita / Presentación:* ${citaGeneralHeader}\n`;
   }
+  msg += `🏭 *${bodegaInfo.prefix}:* ${bodegaInfo.fullText}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `${tripIcon} *VIAJE ${vueltaNum} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
   msg += `   ▫️ *Ruta ${ruta}* (${cliente}): ${locales} ${localesWord} | ${m3Val} m³`;
@@ -225,6 +230,8 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     }
   }
 
+  const bodegaGroupInfo = resolveBodegasForRoutes(rows);
+
   let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `👤 *Conductor:* ${conductorName || 'Sin Conductor'}\n`;
@@ -233,6 +240,7 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
   if (citasGeneralText) {
     msg += `⏰ *Hora Cita / Presentación:* ${citasGeneralText}\n`;
   }
+  msg += `🏭 *${bodegaGroupInfo.prefix}:* ${bodegaGroupInfo.fullText}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
 
   // Agrupar filas por N° Vuelta (cada N° Vuelta representa UN SOLO VIAJE)
@@ -259,11 +267,13 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     const viajeIndex = idx + 1;
     const viajeRows = viaje.rows;
     const farthestComuna = findFarthestComunaForTrip(viajeRows);
+    const tripBodega = resolveBodegasForRoutes(viajeRows);
 
     // Requisito 2: El icono 📦 debe aparecer en cada Viaje planificado
     const tripIcon = '   📦';
 
     msg += `${tripIcon} *VIAJE ${viajeIndex} (VUELTA ${viaje.vueltaNum})* [${farthestComuna}]\n`;
+    msg += `   🏭 *${tripBodega.prefix}:* ${tripBodega.fullText}\n`;
 
     // Desglose de cada ruta incluida en este viaje (Requisito 1: solo en cabecera general)
     viajeRows.forEach(r => {
@@ -321,12 +331,14 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinuto
     const m3 = (parseFloat(r.m3) || 0).toFixed(2);
     const loc = r.locales || (getUniqueParadas(r.paradas).length || 1);
     const prioTag = r.prioridad && r.prioridad !== 'Normal' ? ` [${r.prioridad.toUpperCase()}]` : '';
+    const bodegaInfo = resolveBodegasForRoutes([r]);
     
     const turnoTag = r.turno ? ` | 🕐 T.${r.turno}` : '';
     const prioDest = r.destino_prioritario ? `\n   ⭐ Destino Prioritario: ${r.destino_prioritario}` : '';
 
     msg += `${idx + 1}️⃣ *Ruta ${r.ruta}* ${vuelta} - ${r.cliente}${prioTag}\n`;
     msg += `   👤 Cond: *${cond}* | 👥 Aux: *${aux}*\n`;
+    msg += `   🏭 ${bodegaInfo.prefix}: ${bodegaInfo.fullText}\n`;
     if (turnoTag) msg += `  ${turnoTag}\n`;
     if (prioDest) msg += `${prioDest}\n`;
     msg += `   📍 Locales: ${loc} | 📦 ${m3} m³\n\n`;
@@ -337,10 +349,186 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinuto
   return msg;
 };
 
+// Helpers para "Envío de Rutas Externos" (Formato Imagen Oficial)
+export const formatVueltaOrdinal = (vueltaNum) => {
+  const n = parseInt(String(vueltaNum || '1').replace(/\D/g, ''), 10) || 1;
+  if (n === 1) return '1era vuelta';
+  if (n === 2) return '2da vuelta';
+  if (n === 3) return '3ra vuelta';
+  if (n === 4) return '4ta vuelta';
+  return `${n}ta vuelta`;
+};
+
+export const extractShortTruckCode = (rawCamion) => {
+  if (!rawCamion) return '';
+  const str = String(rawCamion).trim();
+  const m = str.match(/^([^\(\s]+)\s*\(/);
+  if (m) return m[1].trim();
+  return str;
+};
+
+export const resolveEmpresaExternaDisplay = (rows = [], fleetList = [], staffList = [], customOverride = '') => {
+  if (customOverride && customOverride.trim()) {
+    return customOverride.trim().toUpperCase();
+  }
+  let raw = '';
+  for (const r of rows) {
+    if (r.empresa_externa && r.empresa_externa.trim()) {
+      raw = r.empresa_externa.trim();
+      break;
+    }
+  }
+  if (!raw && rows.length > 0) {
+    const cam = rows[0].camion;
+    if (cam && fleetList && fleetList.length > 0) {
+      const v = matchVehicleByCode(cam, '', fleetList);
+      if (v && v.empresa_externa) raw = v.empresa_externa.trim();
+    }
+  }
+  if (!raw && rows.length > 0) {
+    const cond = (rows[0].conductor_name || '').trim().toLowerCase();
+    const rut = (rows[0].conductor_rut || '').trim();
+    if (staffList && staffList.length > 0) {
+      const st = staffList.find(s => (rut && s.rut === rut) || (cond && (s.name || '').trim().toLowerCase() === cond));
+      if (st && st.empresa_externa) raw = st.empresa_externa.trim();
+    }
+  }
+  if (!raw) return 'TRANSPORTE EXTERNO';
+  const upper = raw.toUpperCase().trim();
+  if (upper === 'VALENCIA') return 'TRANSPORTES VALENCIA';
+  if (upper === 'CATALÁN' || upper === 'CATALAN') return 'TRANSPORTES CATALÁN';
+  return upper;
+};
+
+// Consolida paradas de una ruta por (Secuencia + Destino) sumando Peso, Cajas y Volumen (multi-ambiente C/R/S)
+export const consolidateRouteStopsForExternal = (routeRow) => {
+  const paradas = Array.isArray(routeRow?.paradas) ? routeRow.paradas : [];
+  if (paradas.length === 0) {
+    const clienteDisplay = resolveClienteForStop({}, routeRow);
+    const pesoVal = parseFloat(routeRow?.kilos) || 0;
+    const cjVal = parseInt(routeRow?.cajas, 10) || 0;
+    const volVal = parseFloat(routeRow?.m3) || 0;
+    return [
+      {
+        stopId: `${routeRow?.ruta || 'R'}:::1:::unico`,
+        secuencia: 1,
+        cliente: clienteDisplay,
+        destino: routeRow?.destino_prioritario || routeRow?.cliente || 'Destino',
+        direccion: routeRow?.direccion || '',
+        comuna: routeRow?.comuna || '',
+        horaIni: routeRow?.horaIni || '',
+        horaFin: routeRow?.horaFin || '',
+        horaIni2: routeRow?.horaIni2 || '',
+        horaFin2: routeRow?.horaFin2 || '',
+        peso: pesoVal,
+        cantCJ: cjVal,
+        volumen: volVal,
+        transportista: routeRow?.transportista || ''
+      }
+    ];
+  }
+
+  const groupedMap = new Map();
+  paradas.forEach((p, idx) => {
+    const seq = p.secuencia !== undefined && p.secuencia !== null && p.secuencia !== '' ? Number(p.secuencia) : idx + 1;
+    const dest = String(p.destino || p.local || '').trim();
+    const key = `${seq}:::${dest.toUpperCase()}`;
+    const clienteStop = resolveClienteForStop(p, routeRow);
+
+    if (!groupedMap.has(key)) {
+      groupedMap.set(key, {
+        stopId: `${routeRow?.ruta || 'R'}:::${seq}:::${dest}`,
+        secuencia: seq,
+        cliente: clienteStop,
+        destino: dest,
+        direccion: String(p.direccion || '').trim(),
+        comuna: String(p.comuna || '').trim(),
+        horaIni: p.horaIni !== undefined && p.horaIni !== null ? String(p.horaIni).trim() : '',
+        horaFin: p.horaFin !== undefined && p.horaFin !== null ? String(p.horaFin).trim() : '',
+        horaIni2: p.horaIni2 !== undefined && p.horaIni2 !== null ? String(p.horaIni2).trim() : '',
+        horaFin2: p.horaFin2 !== undefined && p.horaFin2 !== null ? String(p.horaFin2).trim() : '',
+        peso: 0,
+        cantCJ: 0,
+        volumen: 0,
+        transportista: p.transportista || routeRow?.transportista || ''
+      });
+    }
+
+    const entry = groupedMap.get(key);
+    entry.peso = Number((entry.peso + (parseFloat(p.peso) || 0)).toFixed(3));
+    entry.cantCJ += parseInt(p.cajas, 10) || 0;
+    entry.volumen = Number((entry.volumen + (parseFloat(p.volumen) || 0)).toFixed(4));
+    if (!entry.direccion && p.direccion) entry.direccion = String(p.direccion).trim();
+    if (!entry.comuna && p.comuna) entry.comuna = String(p.comuna).trim();
+    if (!entry.horaIni && p.horaIni) entry.horaIni = String(p.horaIni).trim();
+    if (!entry.horaFin && p.horaFin) entry.horaFin = String(p.horaFin).trim();
+    if (!entry.horaIni2 && p.horaIni2) entry.horaIni2 = String(p.horaIni2).trim();
+    if (!entry.horaFin2 && p.horaFin2) entry.horaFin2 = String(p.horaFin2).trim();
+  });
+
+  return Array.from(groupedMap.values()).sort((a, b) => a.secuencia - b.secuencia);
+};
+
+// Formateadores numéricos estilo tabla imagen (coma decimal, punto miles)
+export const formatPesoCl = (num) => {
+  const val = Number(num) || 0;
+  return val.toLocaleString('de-DE', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+};
+
+export const formatVolumenCl = (num) => {
+  const val = Number(num) || 0;
+  return val.toLocaleString('de-DE', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+};
+
+export const formatCajasCl = (num) => {
+  const val = Math.round(Number(num) || 0);
+  return val.toLocaleString('de-DE');
+};
+
+export const buildExternalTripWhatsAppMessage = (tripCard, fecha) => {
+  let formattedDate = fecha;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    const [y, m, d] = fecha.split('-');
+    formattedDate = `${d}-${m}-${y}`;
+  }
+
+  let msg = `🚛 *${tripCard.vueltaLabel} ${tripCard.camionDisplay} ${tripCard.conductorDisplay}* (${formattedDate})\n`;
+  msg += `🏢 *${tripCard.empresaDisplay}* · Citación *${tripCard.citacionDisplay || 'Por definir'}*\n`;
+  msg += `🏭 *${tripCard.bodegaInfo.prefix}:* ${tripCard.bodegaInfo.fullText}\n`;
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+
+  tripCard.routeBlocks.forEach(rb => {
+    msg += `📦 *Ruta ${rb.ruta}* (${rb.clientesSummary}) — ${rb.stops.length} ${rb.stops.length === 1 ? 'destino' : 'destinos'}\n`;
+    rb.stops.forEach(st => {
+      const critIcon = st.isCritical ? '🟡 ⭐ ' : '   • ';
+      const ventana = st.horaIni || st.horaFin ? ` [${st.horaIni}-${st.horaFin}]` : '';
+      msg += `${critIcon}Sec ${st.secuencia} (${st.cliente}): *${st.destino}* — ${st.direccion}, ${st.comuna}${ventana} | ${formatPesoCl(st.peso)} kg | ${st.cantCJ} CJ | ${formatVolumenCl(st.volumen)} m³\n`;
+    });
+    msg += `   *Total ${rb.ruta}:* ${formatPesoCl(rb.totalPeso)} kg | ${rb.totalCJ} CJ | ${formatVolumenCl(rb.totalVolumen)} m³\n\n`;
+  });
+
+  msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
+  msg += `📊 *TOTAL GENERAL · ${tripCard.totalDestinos} ${tripCard.totalDestinos === 1 ? 'destino' : 'destinos'}:* ${formatPesoCl(tripCard.totalPeso)} kg | ${formatCajasCl(tripCard.totalCJ)} CJ | ${formatVolumenCl(tripCard.totalVolumen)} m³\n`;
+  if (tripCard.criticalDestinations.length > 0) {
+    msg += `⚠️ *Observaciones - Destino prioritario:* ${tripCard.criticalDestinations.join(' / ')}\n`;
+  }
+  return msg.trim();
+};
+
 export default function RouteDispatch({ onlyExternal = false }) {
   const { fleetList } = useFleetStore();
-  const { savedHistoryList, savedRuteoByDate, transmittedAssignments, ruteoOverrides, initPlanningFromDb } = usePlanningStore();
+  const {
+    savedHistoryList,
+    savedRuteoByDate,
+    transmittedAssignments,
+    ruteoOverrides,
+    initPlanningFromDb,
+    updateAssignmentField,
+    updateRuteoTripField
+  } = usePlanningStore();
   const { staffList, fetchStaff, updateStaffPhone } = useStaffStore();
+  const { tiendas: tiendasCriticasList, findTiendaCritica } = useTiendasCriticasStore();
+  const cardRefs = useRef({});
 
   useEffect(() => {
     fetchStaff();
@@ -521,6 +709,104 @@ export default function RouteDispatch({ onlyExternal = false }) {
     return (savedHistoryList || []).find(h => h.fecha === selectedDate);
   }, [savedHistoryList, selectedDate]);
 
+  // Ediciones en línea para Envío de Rutas Externos (Camión, Conductor, Horario de Cita, Empresa, Observaciones)
+  const [externalEditsMap, setExternalEditsMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('keylogistics_external_dispatch_edits_v1');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  // Marcado manual de rutas/destinos críticos en amarillo (además del cruce automático con Tiendas Críticas)
+  const [criticalOverridesMap, setCriticalOverridesMap] = useState(() => {
+    try {
+      const saved = localStorage.getItem('keylogistics_external_critical_overrides_v1');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+
+  const handleUpdateExternalTripEdit = (tripId, field, value, tripRows = []) => {
+    setExternalEditsMap(prev => {
+      const dateMap = prev[selectedDate] || {};
+      const tripEdits = dateMap[tripId] || {};
+      const updated = {
+        ...prev,
+        [selectedDate]: {
+          ...dateMap,
+          [tripId]: {
+            ...tripEdits,
+            [field]: value
+          }
+        }
+      };
+      try {
+        localStorage.setItem('keylogistics_external_dispatch_edits_v1', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Error saving external edits:', e);
+      }
+      return updated;
+    });
+
+    // Sincronizar también en planningStore si la fecha tiene asignaciones/ruteo activos
+    if (field === 'hora_cita' && updateRuteoTripField) {
+      updateRuteoTripField(selectedDate, tripId, 'hora_cita', value);
+    }
+    if ((field === 'camion' || field === 'conductor_name') && updateAssignmentField) {
+      tripRows.forEach(r => {
+        if (r.id) {
+          updateAssignmentField(selectedDate, r.id, field, value);
+        }
+      });
+    }
+  };
+
+  const handleToggleCriticalStop = (stopKey) => {
+    setCriticalOverridesMap(prev => {
+      const dateMap = prev[selectedDate] || {};
+      const currentVal = dateMap[stopKey];
+      const nextVal = currentVal === undefined ? true : !currentVal;
+      const updated = {
+        ...prev,
+        [selectedDate]: {
+          ...dateMap,
+          [stopKey]: nextVal
+        }
+      };
+      try {
+        localStorage.setItem('keylogistics_external_critical_overrides_v1', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Error saving critical overrides:', e);
+      }
+      return updated;
+    });
+  };
+
+  const handleToggleCriticalRoute = (routeBlock) => {
+    if (!routeBlock || !Array.isArray(routeBlock.stops)) return;
+    const allCrit = routeBlock.stops.every(s => s.isCritical);
+    const targetVal = !allCrit;
+    setCriticalOverridesMap(prev => {
+      const dateMap = { ...(prev[selectedDate] || {}) };
+      routeBlock.stops.forEach(s => {
+        dateMap[s.stopId] = targetVal;
+      });
+      const updated = {
+        ...prev,
+        [selectedDate]: dateMap
+      };
+      try {
+        localStorage.setItem('keylogistics_external_critical_overrides_v1', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Error saving route critical overrides:', e);
+      }
+      return updated;
+    });
+  };
+
   // Obtener las filas de datos con información que fue guardada al presionar "Guardar Disponibilización", enriquecida con metadatos de Ruteo
   const rawRows = useMemo(() => {
     let rows = [];
@@ -532,6 +818,9 @@ export default function RouteDispatch({ onlyExternal = false }) {
       rows = transmittedAssignments[selectedDate] || [];
     }
 
+    // Excluir rutas de 5 dígitos en Ruteo / Envío / Briefing
+    rows = (rows || []).filter(r => !isFiveDigitRoute(r.ruta));
+
     const dateOverrides = ruteoOverrides?.[selectedDate] || {};
     return rows.map(r => {
       const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
@@ -542,6 +831,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
       const ov = dateOverrides[tripKey] || {};
       return {
         ...r,
+        tripKey,
         turno: ov.turno !== undefined ? ov.turno : (r.turno || ''),
         hora_cita: ov.hora_cita !== undefined ? ov.hora_cita : (r.hora_cita || ''),
         prioridad: ov.prioridad !== undefined ? ov.prioridad : (r.prioridad || 'Normal'),
@@ -569,12 +859,221 @@ export default function RouteDispatch({ onlyExternal = false }) {
         (r.aux1_name || '').toLowerCase().includes(term) ||
         (r.ruta || '').toLowerCase().includes(term) ||
         (r.cliente || '').toLowerCase().includes(term) ||
-        (r.camion || '').toLowerCase().includes(term)
+        (r.camion || '').toLowerCase().includes(term) ||
+        (r.empresa_externa || '').toLowerCase().includes(term)
       );
     }
 
     return list;
-  }, [rawRows, vueltaFilter, searchTerm]);
+  }, [rawRows, onlyExternal, fleetList, staffList, vueltaFilter, searchTerm]);
+
+  // Tarjetas de Viajes Externos (Formato Oficial Imagen Adjunta para onlyExternal = true)
+  const externalTripCards = useMemo(() => {
+    if (!onlyExternal) return [];
+    const tripsMap = new Map();
+    const dateEdits = externalEditsMap[selectedDate] || {};
+    const dateCritOverrides = criticalOverridesMap[selectedDate] || {};
+
+    filteredRows.forEach(r => {
+      const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const hasAssignment = !!(r.camion && r.conductor_name);
+      const tKey = hasAssignment
+        ? `${r.camion.trim()}:::${r.conductor_name.trim()}:::${vueltaKey}`
+        : `single:::${r.ruta}:::${r.id}`;
+      if (!tripsMap.has(tKey)) {
+        tripsMap.set(tKey, {
+          tripId: tKey,
+          vueltaNum: parseInt(vueltaKey.replace(/\D/g, ''), 10) || 1,
+          baseCamion: r.camion || '',
+          baseConductor: r.conductor_name || '',
+          conductorRut: r.conductor_rut || '',
+          baseHoraCita: r.hora_cita || '',
+          rows: []
+        });
+      }
+      const grp = tripsMap.get(tKey);
+      if (!grp.baseHoraCita && r.hora_cita) grp.baseHoraCita = r.hora_cita;
+      grp.rows.push(r);
+    });
+
+    const cards = Array.from(tripsMap.values()).map(trip => {
+      const edits = dateEdits[trip.tripId] || {};
+      const sortedRows = [...trip.rows].sort((a, b) =>
+        String(a.ruta || '').localeCompare(String(b.ruta || ''), undefined, { numeric: true })
+      );
+
+      const rawCamionVal = edits.camion !== undefined ? edits.camion : trip.baseCamion;
+      const camionDisplay = extractShortTruckCode(rawCamionVal) || 'S/C';
+      const conductorDisplay = (edits.conductor_name !== undefined ? edits.conductor_name : (trip.baseConductor || 'SIN CONDUCTOR')).trim().toUpperCase();
+      const baseCita = edits.hora_cita !== undefined ? edits.hora_cita : (trip.baseHoraCita || '6:00');
+      const citacionDisplay = anticipacionMinutos > 0 && baseCita
+        ? subtractMinutesFromTime(baseCita, anticipacionMinutos)
+        : (baseCita || '6:00');
+      const empresaDisplay = resolveEmpresaExternaDisplay(sortedRows, fleetList, staffList, edits.empresa_externa);
+      const bodegaInfo = resolveBodegasForRoutes(sortedRows);
+
+      let totalDestinos = 0;
+      let totalPeso = 0;
+      let totalCJ = 0;
+      let totalVolumen = 0;
+      const criticalDestinationsSet = new Set();
+
+      const routeBlocks = sortedRows.map(routeRow => {
+        const rawStops = consolidateRouteStopsForExternal(routeRow);
+        const routeClientesSeen = [];
+        let rPeso = 0;
+        let rCJ = 0;
+        let rVol = 0;
+
+        const stopsWithMeta = rawStops.map((st, sIdx) => {
+          const prevStop = sIdx > 0 ? rawStops[sIdx - 1] : null;
+          const showRuta = sIdx === 0;
+          const showCliente = sIdx === 0 || !prevStop || prevStop.cliente !== st.cliente;
+
+          if (st.cliente && !routeClientesSeen.includes(st.cliente)) {
+            routeClientesSeen.push(st.cliente);
+          }
+
+          // Determinar si el destino/ruta es crítico (amarillo)
+          const matchedCrit = findTiendaCritica ? findTiendaCritica(st.destino) : null;
+          const matchesRowPrioDest = routeRow.destino_prioritario &&
+            normalizeDestino(st.destino).includes(normalizeDestino(routeRow.destino_prioritario));
+          const isRouteUrgent = routeRow.prioridad && routeRow.prioridad !== 'Normal' && rawStops.length === 1;
+          const autoCritical = !!(matchedCrit || matchesRowPrioDest || isRouteUrgent);
+
+          const manualOverride = dateCritOverrides[st.stopId];
+          const isCritical = manualOverride !== undefined ? manualOverride : autoCritical;
+
+          if (isCritical && st.destino) {
+            criticalDestinationsSet.add(st.destino);
+          }
+
+          rPeso = Number((rPeso + st.peso).toFixed(3));
+          rCJ += st.cantCJ;
+          rVol = Number((rVol + st.volumen).toFixed(4));
+
+          return {
+            ...st,
+            showRuta,
+            showCliente,
+            isCritical,
+            matchedCritInfo: matchedCrit
+          };
+        });
+
+        totalDestinos += stopsWithMeta.length;
+        totalPeso = Number((totalPeso + rPeso).toFixed(3));
+        totalCJ += rCJ;
+        totalVolumen = Number((totalVolumen + rVol).toFixed(4));
+
+        return {
+          ruta: routeRow.ruta || 'S/N',
+          rowId: routeRow.id,
+          clientesSummary: routeClientesSeen.join(' + ') || routeRow.cliente || 'Centralizado',
+          stops: stopsWithMeta,
+          totalPeso: rPeso,
+          totalCJ: rCJ,
+          totalVolumen: rVol
+        };
+      });
+
+      const criticalDestinations = Array.from(criticalDestinationsSet);
+      const defaultObs = criticalDestinations.length > 0
+        ? `Destino prioritario: ${criticalDestinations.join(' / ')}`
+        : '';
+      const observacionesText = edits.observaciones !== undefined ? edits.observaciones : defaultObs;
+
+      return {
+        ...trip,
+        vueltaLabel: formatVueltaOrdinal(trip.vueltaNum),
+        rawCamionVal,
+        camionDisplay,
+        conductorDisplay,
+        baseCita,
+        citacionDisplay,
+        empresaDisplay,
+        bodegaInfo,
+        routeBlocks,
+        totalDestinos,
+        totalPeso,
+        totalCJ,
+        totalVolumen,
+        criticalDestinations,
+        observacionesText
+      };
+    });
+
+    return cards.sort((a, b) => {
+      if (a.vueltaNum !== b.vueltaNum) return a.vueltaNum - b.vueltaNum;
+      return a.camionDisplay.localeCompare(b.camionDisplay, undefined, { numeric: true });
+    });
+  }, [onlyExternal, filteredRows, externalEditsMap, criticalOverridesMap, selectedDate, anticipacionMinutos, fleetList, staffList, findTiendaCritica, tiendasCriticasList]);
+
+  // Capturar tarjeta de Ruta Externa como imagen PNG al portapapeles o descarga
+  const renderExternalCardCanvas = async (tripId) => {
+    const el = cardRefs.current[tripId];
+    if (!el) return null;
+    const html2canvas = getHtml2Canvas();
+    if (!html2canvas) return null;
+
+    return await html2canvas(el, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      ignoreElements: (node) => node.classList && node.classList.contains('no-export')
+    });
+  };
+
+  const handleCopyExternalCardImage = async (tripCard) => {
+    const toastId = toast.loading(`Generando imagen de ${tripCard.vueltaLabel} ${tripCard.camionDisplay}...`);
+    try {
+      const canvas = await renderExternalCardCanvas(tripCard.tripId);
+      if (!canvas) throw new Error('No se pudo renderizar la tarjeta');
+      const pngBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (pngBlob && navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+        toast.success(`¡Imagen de ${tripCard.camionDisplay} (${tripCard.conductorDisplay}) copiada al portapapeles! Lista para pegar (Ctrl+V) en WhatsApp o Correo.`, { id: toastId });
+      } else if (pngBlob) {
+        const url = URL.createObjectURL(pngBlob);
+        const link = document.createElement('a');
+        link.download = `Ruta_Externa_${tripCard.camionDisplay}_${selectedDate}.png`;
+        link.href = url;
+        link.click();
+        URL.revokeObjectURL(url);
+        toast.info('Imagen descargada en PNG.', { id: toastId });
+      }
+    } catch (err) {
+      console.error('Error copiando imagen externa:', err);
+      toast.error('Error al copiar la imagen al portapapeles.', { id: toastId });
+    }
+  };
+
+  const handleDownloadExternalCardImage = async (tripCard) => {
+    const toastId = toast.loading(`Descargando imagen de ${tripCard.camionDisplay}...`);
+    try {
+      const canvas = await renderExternalCardCanvas(tripCard.tripId);
+      if (!canvas) throw new Error('No se pudo renderizar la tarjeta');
+      const pngBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (pngBlob) {
+        const url = URL.createObjectURL(pngBlob);
+        const link = document.createElement('a');
+        link.download = `${tripCard.vueltaLabel.replace(/\s+/g, '_')}_${tripCard.camionDisplay}_${tripCard.conductorDisplay.replace(/\s+/g, '_')}_${selectedDate}.png`;
+        link.href = url;
+        document.body.appendChild(link);
+        link.click();
+        setTimeout(() => {
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        }, 1000);
+        toast.success('Imagen PNG descargada exitosamente', { id: toastId });
+      }
+    } catch (err) {
+      console.error('Error descargando imagen externa:', err);
+      toast.error('Error al descargar la imagen PNG', { id: toastId });
+    }
+  };
 
   // Agrupación consolidada por Conductor (Requisito 2)
   const groupedByConductor = useMemo(() => {
@@ -623,11 +1122,14 @@ export default function RouteDispatch({ onlyExternal = false }) {
         })
       );
 
+      const bodegaInfo = resolveBodegasForRoutes(sorted);
+
       return {
         ...g,
         camionStr: Array.from(g.camiones).join(', ') || 'Sin Camión Asignado',
         totalM3Formatted: g.totalM3.toFixed(3),
         totalViajes: uniqueVueltasSet.size,
+        bodegaInfo,
         rows: sorted
       };
     });
@@ -1115,9 +1617,364 @@ export default function RouteDispatch({ onlyExternal = false }) {
         )}
       </div>
 
-      {/* 5. Vista Principal: AGRUPADO SOLO POR CONDUCTOR (Requisito 2) */}
-      <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 min-h-0">
-        {groupedByConductor.length === 0 ? (
+      {/* 5. Vista Principal: Tarjetas Formato Oficial en "Envío de Rutas Externos" o Agrupado por Conductor en "Envío de Rutas" */}
+      <div className="flex-1 overflow-y-auto space-y-5 pr-1 min-h-0">
+        {onlyExternal ? (
+          externalTripCards.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-2xs">
+              <Truck size={36} className="mx-auto text-slate-300 mb-2" />
+              <p className="font-semibold text-slate-700">No hay viajes externos asignados para esta fecha y filtros.</p>
+              <p className="text-xs text-slate-400 mt-1">Verifica si existen rutas con camión o conductor externo en {selectedDate}.</p>
+            </div>
+          ) : (
+            externalTripCards.map((tripCard) => {
+              const condPhone = resolveStaffPhone(tripCard.conductorDisplay, tripCard.conductorRut);
+              const waMsg = buildExternalTripWhatsAppMessage(tripCard, selectedDate);
+              const isCardCopied = copiedId === `ext-wa-${tripCard.tripId}`;
+
+              return (
+                <div
+                  key={tripCard.tripId}
+                  className="bg-white rounded-xl border border-slate-300 shadow-sm overflow-hidden transition-all"
+                >
+                  {/* Barra de Edición Rápida y Acciones (No aparece al copiar/descargar la imagen) */}
+                  <div className="no-export bg-slate-100/90 border-b border-slate-200 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-[11px] font-extrabold uppercase tracking-wider text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded">
+                        <Edit3 size={11} />
+                        Edición Rápida:
+                      </span>
+
+                      {/* Editable: Camión */}
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <span className="font-bold text-slate-600">Camión:</span>
+                        <input
+                          type="text"
+                          value={tripCard.camionDisplay}
+                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'camion', e.target.value, tripCard.rows)}
+                          className="w-24 px-2 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600"
+                          title="Editar código de camión"
+                        />
+                      </label>
+
+                      {/* Editable: Conductor */}
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <span className="font-bold text-slate-600">Conductor:</span>
+                        <input
+                          type="text"
+                          value={tripCard.conductorDisplay}
+                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'conductor_name', e.target.value, tripCard.rows)}
+                          className="w-48 px-2 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 uppercase"
+                          title="Editar nombre del conductor"
+                        />
+                      </label>
+
+                      {/* Editable: Horario de Cita */}
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <span className="font-bold text-slate-600">Horario de cita:</span>
+                        <input
+                          type="text"
+                          value={tripCard.baseCita}
+                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'hora_cita', e.target.value, tripCard.rows)}
+                          placeholder="Ej: 6:00"
+                          className="w-20 px-2 py-1 text-xs font-bold font-mono text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 text-center"
+                          title="Editar horario de citación"
+                        />
+                      </label>
+
+                      {/* Editable: Empresa Externa */}
+                      <label className="flex items-center gap-1.5 text-xs">
+                        <span className="font-bold text-slate-600">Empresa:</span>
+                        <input
+                          type="text"
+                          value={tripCard.empresaDisplay}
+                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'empresa_externa', e.target.value, tripCard.rows)}
+                          className="w-44 px-2 py-1 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 uppercase"
+                          title="Editar nombre de empresa externa"
+                        />
+                      </label>
+                    </div>
+
+                    {/* Botones de exportación de Imagen y WhatsApp */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyExternalCardImage(tripCard)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-2xs transition-all active:scale-95"
+                        title="Copiar ficha como imagen PNG al portapapeles para pegar en WhatsApp o correo"
+                      >
+                        <ImageIcon size={13} />
+                        <span>Copiar Imagen</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadExternalCardImage(tripCard)}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition-all"
+                        title="Descargar ficha en formato imagen PNG"
+                      >
+                        <Download size={13} />
+                        <span>PNG</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopyText(waMsg, `ext-wa-${tripCard.tripId}`)}
+                        className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg border transition-all ${
+                          isCardCopied
+                            ? 'bg-green-100 border-green-300 text-green-700'
+                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
+                        }`}
+                        title="Copiar texto para WhatsApp"
+                      >
+                        {isCardCopied ? <Check size={13} className="text-green-600" /> : <Copy size={13} />}
+                        <span>{isCardCopied ? 'Copiado' : 'Texto'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenWhatsApp(condPhone, waMsg)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs transition-all active:scale-95"
+                        title="Enviar por WhatsApp"
+                      >
+                        <MessageSquare size={13} />
+                        <span>WhatsApp</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Ficha Oficial (Idéntica a la imagen adjunta, lista para captura PNG) */}
+                  <div
+                    ref={(el) => {
+                      if (el) cardRefs.current[tripCard.tripId] = el;
+                    }}
+                    className="p-6 bg-white text-[#1e293b]"
+                    style={{ fontFamily: "'Segoe UI', Calibri, Arial, sans-serif" }}
+                  >
+                    {/* Cabecera Línea 1: 1era vuelta C247 JUAN RAIGOZA */}
+                    <div className="text-[22px] font-extrabold text-[#1f2937] leading-tight tracking-tight">
+                      <span>{tripCard.vueltaLabel} </span>
+                      <span>{tripCard.camionDisplay} </span>
+                      <span>{tripCard.conductorDisplay}</span>
+                    </div>
+
+                    {/* Cabecera Línea 2: TRANSPORTES VALENCIA · Citación 6:00 */}
+                    <div className="text-[13.5px] text-[#334155] mt-1 leading-snug">
+                      <span className="font-bold">{tripCard.empresaDisplay}</span>
+                      <span> · Citación </span>
+                      <span className="font-bold">{tripCard.citacionDisplay}</span>
+                    </div>
+
+                    {/* Cabecera Línea 3: Bodega(s) de carga: CDC - AV. LO ESPEJO 01640, SAN BERNARDO y LRI - LAGO RIÑIHUE 02319, SAN BERNARDO */}
+                    <div className="text-[13px] text-[#334155] mt-0.5 mb-3.5 leading-snug">
+                      <span>{tripCard.bodegaInfo.prefix}: </span>
+                      {tripCard.bodegaInfo.items.map((bItem, bIdx) => (
+                        <React.Fragment key={bItem.code}>
+                          {bIdx > 0 && <span className="font-normal"> y </span>}
+                          <strong className="font-extrabold text-[#1e293b]">{bItem.text}</strong>
+                        </React.Fragment>
+                      ))}
+                    </div>
+
+                    {/* Tabla Oficial de Rutas y Destinos */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-[12.5px] leading-snug">
+                        <thead>
+                          <tr className="bg-[#d9eaf7] text-[#1e293b] border-t border-b border-[#b4c6e7]">
+                            <th className="py-1.5 px-2.5 text-left font-bold whitespace-nowrap">Ruta</th>
+                            <th className="py-1.5 px-2.5 text-left font-bold whitespace-nowrap">Cliente</th>
+                            <th className="py-1.5 px-2.5 text-right font-bold whitespace-nowrap">Secuencia</th>
+                            <th className="py-1.5 px-2.5 text-left font-bold whitespace-nowrap">Destino</th>
+                            <th className="py-1.5 px-2.5 text-left font-bold whitespace-nowrap">Direccion</th>
+                            <th className="py-1.5 px-2.5 text-left font-bold whitespace-nowrap">Comuna</th>
+                            <th className="py-1.5 px-2 text-right font-bold whitespace-nowrap">HoraIni</th>
+                            <th className="py-1.5 px-2 text-right font-bold whitespace-nowrap">HoraFin</th>
+                            <th className="py-1.5 px-2 text-right font-bold whitespace-nowrap">HoraIni2</th>
+                            <th className="py-1.5 px-2 text-right font-bold whitespace-nowrap">HoraFin2</th>
+                            <th className="py-1.5 px-2.5 text-right font-bold whitespace-nowrap">Suma de Peso</th>
+                            <th className="py-1.5 px-2.5 text-right font-bold whitespace-nowrap">Suma de cantCJ</th>
+                            <th className="py-1.5 px-2.5 text-right font-bold whitespace-nowrap">Suma de Volumen</th>
+                            <th className="no-export py-1.5 px-1.5 text-center font-bold w-8" title="Marcar/Desmarcar Ruta Crítica (Amarillo)">
+                              ⭐
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tripCard.routeBlocks.map((rb) => (
+                            <React.Fragment key={rb.ruta}>
+                              {rb.stops.map((st) => {
+                                const isCrit = st.isCritical;
+                                const rowStyle = isCrit
+                                  ? { backgroundColor: '#ffeb00', color: '#111827' }
+                                  : { backgroundColor: '#ffffff', color: '#1f2937' };
+
+                                return (
+                                  <tr
+                                    key={st.stopId}
+                                    style={rowStyle}
+                                    className="border-b border-[#e2e8f0] transition-colors"
+                                  >
+                                    {/* Ruta (solo en la primera fila de la ruta, con opción de marcar toda la ruta crítica al hacer clic) */}
+                                    <td
+                                      onClick={() => st.showRuta && handleToggleCriticalRoute(rb)}
+                                      className={`py-1.5 px-2.5 font-bold whitespace-nowrap ${st.showRuta ? 'cursor-pointer hover:underline' : ''}`}
+                                      title={st.showRuta ? 'Clic para marcar/desmarcar toda la ruta como crítica (amarillo)' : ''}
+                                    >
+                                      {st.showRuta ? rb.ruta : ''}
+                                    </td>
+
+                                    {/* Cliente (se muestra al inicio de cada bloque de cliente) */}
+                                    <td className="py-1.5 px-2.5 font-bold whitespace-nowrap">
+                                      {st.showCliente ? st.cliente : ''}
+                                    </td>
+
+                                    {/* Secuencia */}
+                                    <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap">
+                                      {st.secuencia}
+                                    </td>
+
+                                    {/* Destino */}
+                                    <td
+                                      onClick={() => handleToggleCriticalStop(st.stopId)}
+                                      className="py-1.5 px-2.5 cursor-pointer whitespace-nowrap"
+                                      title="Clic para marcar/desmarcar este destino como crítico (amarillo)"
+                                    >
+                                      {st.destino}
+                                    </td>
+
+                                    {/* Dirección */}
+                                    <td className="py-1.5 px-2.5 font-bold whitespace-nowrap">
+                                      {st.direccion}
+                                    </td>
+
+                                    {/* Comuna */}
+                                    <td className="py-1.5 px-2.5 whitespace-nowrap">
+                                      {st.comuna}
+                                    </td>
+
+                                    {/* HoraIni */}
+                                    <td className="py-1.5 px-2 text-right font-bold tabular-nums whitespace-nowrap">
+                                      {st.horaIni || ''}
+                                    </td>
+
+                                    {/* HoraFin */}
+                                    <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">
+                                      {st.horaFin || ''}
+                                    </td>
+
+                                    {/* HoraIni2 */}
+                                    <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">
+                                      {st.horaIni2 || ''}
+                                    </td>
+
+                                    {/* HoraFin2 */}
+                                    <td className="py-1.5 px-2 text-right tabular-nums whitespace-nowrap">
+                                      {st.horaFin2 || ''}
+                                    </td>
+
+                                    {/* Suma de Peso */}
+                                    <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap">
+                                      {formatPesoCl(st.peso)}
+                                    </td>
+
+                                    {/* Suma de cantCJ */}
+                                    <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap">
+                                      {formatCajasCl(st.cantCJ)}
+                                    </td>
+
+                                    {/* Suma de Volumen */}
+                                    <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap">
+                                      {formatVolumenCl(st.volumen)}
+                                    </td>
+
+                                    {/* Botón interactivo Marcar Crítico (No sale en captura PNG) */}
+                                    <td className="no-export py-1 px-1.5 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleToggleCriticalStop(st.stopId)}
+                                        className={`p-1 rounded transition-colors ${
+                                          isCrit
+                                            ? 'bg-amber-600 text-white shadow-2xs'
+                                            : 'text-slate-300 hover:text-amber-500 hover:bg-amber-50'
+                                        }`}
+                                        title={isCrit ? 'Quitar marca de ruta/destino crítico' : 'Marcar en amarillo como ruta/destino crítico'}
+                                      >
+                                        <Star size={12} fill={isCrit ? 'currentColor' : 'none'} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+
+                              {/* Subtotal de la Ruta: Total 5636 · Carls Jr + Petroleras + Streat Burguer · 5 destinos */}
+                              <tr className="bg-white border-t border-b border-[#cbd5e1] font-bold text-[#1e293b]">
+                                <td colSpan={10} className="py-1.5 px-2.5 text-left">
+                                  Total {rb.ruta} · {rb.clientesSummary} · {rb.stops.length} {rb.stops.length === 1 ? 'destino' : 'destinos'}
+                                </td>
+                                <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap">
+                                  {formatPesoCl(rb.totalPeso)}
+                                </td>
+                                <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap">
+                                  {formatCajasCl(rb.totalCJ)}
+                                </td>
+                                <td className="py-1.5 px-2.5 text-right tabular-nums whitespace-nowrap">
+                                  {formatVolumenCl(rb.totalVolumen)}
+                                </td>
+                                <td className="no-export"></td>
+                              </tr>
+                            </React.Fragment>
+                          ))}
+
+                          {/* Fila TOTAL GENERAL */}
+                          <tr className="bg-[#d9eaf7] border-t-2 border-b-2 border-[#8faadc] font-extrabold text-[#0f172a]">
+                            <td colSpan={10} className="py-2 px-2.5 text-left uppercase">
+                              TOTAL GENERAL · {tripCard.totalDestinos} {tripCard.totalDestinos === 1 ? 'destino' : 'destinos'}
+                            </td>
+                            <td className="py-2 px-2.5 text-right tabular-nums whitespace-nowrap">
+                              {formatPesoCl(tripCard.totalPeso)}
+                            </td>
+                            <td className="py-2 px-2.5 text-right tabular-nums whitespace-nowrap">
+                              {formatCajasCl(tripCard.totalCJ)}
+                            </td>
+                            <td className="py-2 px-2.5 text-right tabular-nums whitespace-nowrap">
+                              {formatVolumenCl(tripCard.totalVolumen)}
+                            </td>
+                            <td className="no-export"></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Leyenda y Cuadro de Observaciones para Destinos Prioritarios / Críticos */}
+                    {tripCard.criticalDestinations.length > 0 && (
+                      <div className="mt-3.5 space-y-2.5">
+                        {/* Leyenda: [Cuadro Amarillo] Destino prioritario (N) */}
+                        <div className="flex items-center gap-2 text-[12px] text-[#334155]">
+                          <span
+                            className="inline-block w-5 h-3 border border-[#ca8a04]"
+                            style={{ backgroundColor: '#ffeb00' }}
+                          />
+                          <span>Destino prioritario ({tripCard.criticalDestinations.length})</span>
+                        </div>
+
+                        {/* Cuadro amarillo de Observaciones */}
+                        <div
+                          className="max-w-2xl py-2.5 px-3.5 border-l-4 border-[#eab308] text-[12.5px] text-[#1e293b]"
+                          style={{ backgroundColor: '#fef9db' }}
+                        >
+                          <div className="font-bold mb-0.5">Observaciones:</div>
+                          <div>
+                            Destino prioritario: {tripCard.criticalDestinations.join(' / ')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )
+        ) : groupedByConductor.length === 0 ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400 shadow-2xs">
             <Truck size={36} className="mx-auto text-slate-300 mb-2" />
             <p className="font-semibold text-slate-700">No hay rutas o conductores registrados para esta fecha y filtros.</p>
@@ -1235,6 +2092,17 @@ export default function RouteDispatch({ onlyExternal = false }) {
                       </div>
                     </div>
 
+                    {/* Bodega de Carga Interpretada (CDC / LRI) */}
+                    {group.bodegaInfo && (
+                      <div className="pl-3.5 border-l border-slate-200 text-xs">
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">{group.bodegaInfo.prefix}</span>
+                        <div className="inline-flex items-center gap-1 bg-purple-50 border border-purple-200 text-purple-900 font-bold px-2.5 py-0.5 rounded-lg text-[11px] shadow-2xs">
+                          <MapPin size={12} className="text-purple-700 shrink-0" />
+                          <span>{group.bodegaInfo.fullText}</span>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Métricas del Conductor */}
                     <div className="pl-3.5 border-l border-slate-200 text-xs hidden sm:flex items-center gap-2">
                       <span className="bg-amber-50 text-amber-900 border border-amber-200 font-bold px-2 py-0.5 rounded text-[11px]">
@@ -1349,7 +2217,8 @@ export default function RouteDispatch({ onlyExternal = false }) {
                           <th className="py-2 px-3 text-center w-20">N° Vuelta</th>
                           <th className="py-2 px-3 text-center w-20 font-mono">N° Ruta</th>
                           <th className="py-2 px-3 w-32">Camión</th>
-                          <th className="py-2 px-3 min-w-[150px]">Cliente</th>
+                          <th className="py-2 px-3 min-w-[140px]">Cliente</th>
+                          <th className="py-2 px-3 min-w-[210px]">Bodega de Carga</th>
                           <th className="py-2 px-3 text-center w-20">Turno</th>
                           <th className="py-2 px-3 text-center w-28">
                             <span>Hora Cita</span>
@@ -1376,6 +2245,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
                           const isSingleCopied = copiedId === row.id;
                           const rowKey = row.id || `${row.ruta}-${rIdx}`;
                           const isParadasExpanded = !!expandedParadasRowId[rowKey];
+                          const routeBodegaInfo = resolveBodegasForRoutes([row]);
 
                           let rowBgClass = 'hover:bg-slate-50/80';
                           if (isPrioUrgente) {
@@ -1419,6 +2289,25 @@ export default function RouteDispatch({ onlyExternal = false }) {
                                       ⭐ {row.destino_prioritario}
                                     </span>
                                   )}
+                                </div>
+                              </td>
+
+                              {/* Bodega de Carga (CDC / LRI) */}
+                              <td className="py-2 px-3">
+                                <div className="flex flex-col gap-0.5">
+                                  {routeBodegaInfo.items.map(b => (
+                                    <span
+                                      key={b.code}
+                                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border w-fit ${
+                                        b.code === 'LRI'
+                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                          : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                                      }`}
+                                    >
+                                      <span>{b.code}:</span>
+                                      <span className="font-semibold">{b.address}</span>
+                                    </span>
+                                  ))}
                                 </div>
                               </td>
 
@@ -1488,7 +2377,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
                                 {(parseFloat(row.m3) || 0).toFixed(3)}
                               </td>
 
-                              {/* Paradas / Destinos con expandir/contraer paradas (en envíos externos se desglosan todos los destinos) */}
+                              {/* Paradas / Destinos con expandir/contraer paradas */}
                               <td className="py-2 px-3 text-[11px] text-slate-600 min-w-[250px] max-w-[420px]">
                                 {uniqueParadas && uniqueParadas.length > 0 ? (
                                   <div>

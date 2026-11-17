@@ -2,7 +2,14 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 import PRELOADED_EXCEL_ROUTES from '../data/preloadedExcelRoutes.json';
-import { findOperationForRoute, getOperacionName } from '../data/operacionesMaster';
+import { 
+  findOperationForRoute, 
+  getOperacionName, 
+  isFiveDigitRoute, 
+  isAramarkFixedRoute, 
+  resolveOperationByTransportistaAndOwner, 
+  PETROLERAS_TRANSPORTISTAS 
+} from '../data/operacionesMaster';
 import { useStaffStore } from './staffStore';
 
 // Cache invalidation version for cross-computer synchronization
@@ -680,9 +687,9 @@ export const fetchPlanningStateFromDb = async () => {
           changeHistoryListFromDb = item.assignments;
         } else if (item.fecha === '__transformed_routes__') {
           if (Array.isArray(item.assignments)) {
-            transformedRoutesFromDb = item.assignments;
+            transformedRoutesFromDb = item.assignments.filter(r => !isFiveDigitRoute(r?.ruta));
           } else if (item.assignments && Array.isArray(item.assignments.routes)) {
-            transformedRoutesFromDb = item.assignments.routes;
+            transformedRoutesFromDb = item.assignments.routes.filter(r => !isFiveDigitRoute(r?.ruta));
             transformedRoutesMeta = item.assignments.meta || null;
           }
         } else if (item.fecha.startsWith('__')) {
@@ -1084,7 +1091,7 @@ export const loadPersistedTransformedRoutes = () => {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map(r => {
+        return parsed.filter(r => !isFiveDigitRoute(r?.ruta)).map(r => {
           const cleanFecha = normalizeDate(r.fecha) || r.fecha;
           const paradas = healParadasWithPreloaded(r.ruta, r.paradas, cleanFecha);
           const distinctAmbientes = Array.from(new Set(paradas.map(p => p.ambiente))).sort();
@@ -1181,8 +1188,9 @@ export const usePlanningStore = create((set, get) => ({
       rawRows.forEach((row, idx) => {
         const rutaRaw = row.Ruta || row.ruta || row['N° Ruta'] || row.RutaId || '';
         const ruta = String(rutaRaw).trim();
-        // Requisito 1: Permitir todas las rutas (incluyendo más de 4 dígitos o que partan con 0)
         if (!ruta) return;
+        // Las rutas de 5 dígitos no se consideran en Ruteo ni en Briefing
+        if (isFiveDigitRoute(ruta)) return;
 
         const nombreRuta = String(row['Nombre Ruta'] || row.nombre_ruta || row.NombreRuta || row.Cliente || '').trim();
         const destino = String(row.Destino || row.destino || '').trim();
@@ -1198,8 +1206,11 @@ export const usePlanningStore = create((set, get) => ({
         const ambiente = String(row.Ambiente || row.ambiente || row.Amb || 'S').trim().toUpperCase() || 'S';
         const horaIni = row.HoraIni || row.hora_ini || '';
         const horaFin = row.HoraFin || row.hora_fin || '';
+        const horaIni2 = row.HoraIni2 || row.hora_ini2 || '';
+        const horaFin2 = row.HoraFin2 || row.hora_fin2 || '';
 
-        const transportista = String(row.Transportista || row.transportista || row.Transp || row.transport || '').trim();
+        const transportista = String(row.Transportista || row.transportista || row.Transp || row.transport || '').trim().toUpperCase();
+        const owner = String(row.Owner || row.owner || row.Propietario || '').trim().toUpperCase();
         const groupKey = String(ruta).trim();
 
         if (!groups.has(groupKey)) {
@@ -1208,6 +1219,8 @@ export const usePlanningStore = create((set, get) => ({
             nombreRuta: nombreRuta || `Ruta ${ruta}`,
             fecha: fecha || 'Sin Fecha',
             transportistasSet: new Set(),
+            ownersSet: new Set(),
+            opsFromParadas: new Set(),
             destinosSet: new Set(),
             sumaVolumen: 0,
             sumaPeso: 0,
@@ -1222,6 +1235,16 @@ export const usePlanningStore = create((set, get) => ({
         }
         if (destino) g.destinosSet.add(destino);
         if (transportista) g.transportistasSet.add(transportista);
+        if (owner) g.ownersSet.add(owner);
+
+        const rowOp = resolveOperationByTransportistaAndOwner({
+          transportista,
+          owner,
+          ruta,
+          fallbackName: nombreRuta
+        });
+        if (rowOp) g.opsFromParadas.add(rowOp);
+
         g.sumaVolumen += volumen;
         g.sumaPeso += peso;
         g.sumaCantCJ += cantCJ;
@@ -1229,25 +1252,27 @@ export const usePlanningStore = create((set, get) => ({
           if (fecha) g.fecha = fecha;
         }
 
-        // Consolidación de paradas por Secuencia + Ambiente (Requisitos 2 y 3):
-        // Si el número de Sec se repite con el mismo Ambiente, se consolida sumando m³, peso y cj.
-        // Si tienen diferente Ambiente (ej: C vs R vs S), se mantienen como filas distintas.
-        const paradaKey = `${secuencia}:::${ambiente}`;
+        // Consolidación de paradas por Secuencia + Ambiente + Transportista:
+        // Preserva el desglose exacto entre transportistas (ej: T300, T302, T312 en Petroleras o T313/T604 en Juan Valdez).
+        const paradaKey = `${secuencia}:::${ambiente}:::${transportista}`;
 
         if (g.paradasMap.has(paradaKey)) {
           const p = g.paradasMap.get(paradaKey);
           p.volumen = Number((p.volumen + volumen).toFixed(4));
-          p.peso = Number((p.peso + peso).toFixed(2));
+          p.peso = Number((p.peso + peso).toFixed(3));
           p.cantCJ = Math.round(p.cantCJ + cantCJ);
           if (!p.destino && destino) p.destino = destino;
           if (!p.direccion && direccion) p.direccion = direccion;
           if (!p.comuna && comuna) p.comuna = comuna;
           if (!p.horaIni && horaIni) p.horaIni = horaIni;
           if (!p.horaFin && horaFin) p.horaFin = horaFin;
+          if (!p.horaIni2 && horaIni2) p.horaIni2 = horaIni2;
+          if (!p.horaFin2 && horaFin2) p.horaFin2 = horaFin2;
           if (!p.transportista && transportista) p.transportista = transportista;
+          if (!p.owner && owner) p.owner = owner;
         } else {
           g.paradasMap.set(paradaKey, {
-            id: `${ruta}-s${secuencia}-${ambiente}-${g.paradasMap.size}`,
+            id: `${ruta}-s${secuencia}-${ambiente}-${transportista || 'T'}-${g.paradasMap.size}`,
             secuencia,
             ambiente,
             destino,
@@ -1255,10 +1280,13 @@ export const usePlanningStore = create((set, get) => ({
             comuna,
             horaIni,
             horaFin,
+            horaIni2,
+            horaFin2,
             cantCJ: Math.round(cantCJ),
-            peso: Number(peso.toFixed(2)),
+            peso: Number(peso.toFixed(3)),
             volumen: Number(volumen.toFixed(4)),
-            transportista
+            transportista,
+            owner
           });
         }
       });
@@ -1272,11 +1300,35 @@ export const usePlanningStore = create((set, get) => ({
         });
 
         const ambientesSet = new Set(sortedParadas.map(p => p.ambiente));
+        const transArray = Array.from(g.transportistasSet).filter(Boolean);
+        const ownersArray = Array.from(g.ownersSet).filter(Boolean);
 
         const masterOp = findOperationForRoute(g.ruta);
-        const resolvedOp = masterOp?.operacion || getOperacionName(g.ruta, g.nombreRuta);
         const resolvedDenom = masterOp?.denominacion || g.nombreRuta;
-        const resolvedTransp = masterOp?.transportista || Array.from(g.transportistasSet).filter(Boolean).join(', ') || 'Sin Transportista';
+
+        // Preservar todos los transportistas presentes en el archivo de asignación diaria (ej: T300, T302, T312)
+        const resolvedTransp = transArray.length > 0
+          ? transArray.join(', ')
+          : (masterOp?.transportista || 'Sin Transportista');
+
+        let resolvedOp = '';
+        if (isAramarkFixedRoute(g.ruta)) {
+          resolvedOp = 'Centralizado';
+        } else if (
+          ownersArray.includes('C31274') &&
+          transArray.every(t => t === 'T313' || t === 'T604')
+        ) {
+          resolvedOp = 'Juan Valdez';
+        } else if (
+          transArray.length > 0 &&
+          transArray.every(t => PETROLERAS_TRANSPORTISTAS.includes(t))
+        ) {
+          resolvedOp = 'PETROLERAS';
+        } else if (g.opsFromParadas.size > 0) {
+          resolvedOp = Array.from(g.opsFromParadas).join(' + ');
+        } else {
+          resolvedOp = masterOp?.operacion || getOperacionName(g.ruta, g.nombreRuta, resolvedTransp, ownersArray[0] || '');
+        }
 
         return {
           id: `trans-${g.ruta}-${index}`,
@@ -1287,10 +1339,12 @@ export const usePlanningStore = create((set, get) => ({
           denominacion: resolvedDenom,
           fecha: g.fecha,
           transportista: resolvedTransp,
+          codigo_transportista: resolvedTransp,
+          owner: ownersArray.join(', '),
           ambientes: Array.from(ambientesSet),
           recuentoDestino: g.destinosSet.size || (new Set(sortedParadas.map(p => p.destino)).size) || 1,
           sumaVolumen: Number(g.sumaVolumen.toFixed(4)),
-          sumaPeso: Number(g.sumaPeso.toFixed(2)),
+          sumaPeso: Number(g.sumaPeso.toFixed(3)),
           sumaCantCJ: Math.round(g.sumaCantCJ),
           paradas: sortedParadas,
           isStandard4Digit: /^[1-9]\d{3}$/.test(g.ruta),
@@ -2053,6 +2107,7 @@ export const usePlanningStore = create((set, get) => ({
     };
     if (truck.empresa_externa) {
       updates.transportista = truck.empresa_externa;
+      updates.empresa_externa = truck.empresa_externa;
     }
 
     get().batchUpdateRows(fecha, rowIds, updates);

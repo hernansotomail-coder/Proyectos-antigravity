@@ -230,19 +230,29 @@ export function generateBriefingHtmlTable({ rows = [], totals = {}, activeDate =
   tsvRows.push(headers.join('\t'));
 
   let rowsHtml = '';
-  rows.forEach((r, idx) => {
+  const flatRows = [];
+  (rows || []).forEach(r => {
+    flatRows.push({ ...r, isSubRow: false });
+    if (r.hasPetrolerasSubcategories && Array.isArray(r.subRows)) {
+      r.subRows.forEach(sub => flatRows.push({ ...sub, isSubRow: true }));
+    }
+  });
+
+  flatRows.forEach((r, idx) => {
+    const isSub = !!r.isSubRow;
     const isZebra = idx % 2 === 1;
-    const rowBg = isZebra ? '#F4F7FB' : '#FFFFFF';
+    const rowBg = isSub ? '#F8FAFC' : (isZebra ? '#F4F7FB' : '#FFFFFF');
     const border = '#CBD5E1';
 
-    const cellL = `border: 1px solid ${border}; padding: 5px 8px; font-family: Calibri, sans-serif; font-size: 10pt; text-align: left; background-color: ${rowBg};`;
-    const cellC = `border: 1px solid ${border}; padding: 5px 8px; font-family: Calibri, sans-serif; font-size: 10pt; text-align: center; background-color: ${rowBg};`;
-    const cellR = `border: 1px solid ${border}; padding: 5px 8px; font-family: Calibri, sans-serif; font-size: 10pt; text-align: right; background-color: ${rowBg};`;
+    const cellL = `border: 1px solid ${border}; padding: ${isSub ? '3px 8px 3px 22px' : '5px 8px'}; font-family: Calibri, sans-serif; font-size: ${isSub ? '9pt' : '10pt'}; text-align: left; background-color: ${rowBg};`;
+    const cellC = `border: 1px solid ${border}; padding: ${isSub ? '3px 8px' : '5px 8px'}; font-family: Calibri, sans-serif; font-size: ${isSub ? '9pt' : '10pt'}; text-align: center; background-color: ${rowBg};`;
+    const cellR = `border: 1px solid ${border}; padding: ${isSub ? '3px 8px' : '5px 8px'}; font-family: Calibri, sans-serif; font-size: ${isSub ? '9pt' : '10pt'}; text-align: right; background-color: ${rowBg};`;
+    const opLabel = isSub ? `↳ ${r.operacion}` : r.operacion;
 
     rowsHtml += `
     <tr style="background-color: ${rowBg};">
-      <td style="${cellL} font-weight: bold; text-transform: uppercase;">${escapeHtml(r.operacion)}</td>
-      <td style="${cellC} font-weight: bold; background-color: #EBF3FF;">${r.numRutas || 0}</td>
+      <td style="${cellL} font-weight: ${isSub ? '600' : 'bold'}; ${isSub ? 'color: #334155;' : 'text-transform: uppercase;'}">${escapeHtml(opLabel)}</td>
+      <td style="${cellC} font-weight: bold; background-color: ${isSub ? '#F1F5F9' : '#EBF3FF'};">${r.numRutas || 0}</td>
       <td style="${cellC}">${r.propia1v || 0}</td>
       <td style="${cellC}">${r.externa1v || 0}</td>
       <td style="${cellC}">${r.propia2v || 0}</td>
@@ -258,7 +268,7 @@ export function generateBriefingHtmlTable({ rows = [], totals = {}, activeDate =
     </tr>`;
 
     tsvRows.push([
-      r.operacion,
+      opLabel,
       r.numRutas || 0,
       r.propia1v || 0,
       r.externa1v || 0,
@@ -861,7 +871,14 @@ export function renderBriefingWithCanvas2D(briefingData) {
   ];
 
   const totalWidth = cols.reduce((a, c) => a + c.width, 0);
-  const rows = briefingData?.rows || [];
+  const rawRows = briefingData?.rows || [];
+  const rows = [];
+  rawRows.forEach(r => {
+    rows.push({ ...r, isSubRow: false });
+    if (r.hasPetrolerasSubcategories && Array.isArray(r.subRows)) {
+      r.subRows.forEach(sub => rows.push({ ...sub, isSubRow: true }));
+    }
+  });
   const totals = briefingData?.totals || {};
   const activeDate = briefingData?.activeDate || 'Despacho';
 
@@ -939,7 +956,7 @@ export function renderBriefingWithCanvas2D(briefingData) {
       ctx.strokeRect(cellX, currentY, col.width, rowHeight);
 
       let text = '';
-      if (col.key === 'operacion') text = r.operacion || '';
+      if (col.key === 'operacion') text = r.isSubRow ? `  ↳ ${r.operacion || ''}` : (r.operacion || '');
       else if (col.key === 'numRutas') text = String(r.numRutas || 0);
       else if (col.key === 'propia1v') text = String(r.propia1v || 0);
       else if (col.key === 'externa1v') text = String(r.externa1v || 0);

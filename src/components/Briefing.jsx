@@ -3,14 +3,25 @@ import {
   Calendar, Download, Search, Filter, Layers, Truck, 
   Package, Scale, Snowflake, Thermometer, Wind, 
   MapPin, AlertCircle, FileSpreadsheet, Building2, Copy,
-  Edit3, RotateCcw, X, Check
+  Edit3, RotateCcw, X, Check, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
 import { useStaffStore, isStaffExternal } from '../store/staffStore';
-import { findOperationForRoute, getOperacionName, ALL_OPERACIONES, canonicalizeOperation } from '../data/operacionesMaster';
+import { 
+  findOperationForRoute, 
+  getOperacionName, 
+  ALL_OPERACIONES, 
+  canonicalizeOperation,
+  isFiveDigitRoute,
+  isAramarkFixedRoute,
+  resolveOperationByTransportistaAndOwner,
+  PETROLERAS_TRANSPORTISTAS,
+  PETROLERAS_SUBCATEGORIES,
+  TRANSPORTISTA_MASTER_INFO
+} from '../data/operacionesMaster';
 import { Button } from './ui/Button';
 import { copyBriefingAsImage } from '../lib/matrixImageExporter';
 import PaseIngresoMatrix, { NEWREST_PASE_ROUTES, JUAN_VALDEZ_PASE_ROUTES } from './PaseIngresoMatrix';
@@ -59,62 +70,98 @@ export const getBriefingOperation = (route) => {
   const rawRuta = String(route.ruta || '').trim();
   const rawDenom = String(route.denominacion || route.nombreRuta || '').trim();
   const rawOp = String(route.operacion || '').trim();
+  const rawOwner = String(route.owner || '').trim().toUpperCase();
+  const rawTransp = String(route.codigo_transportista || route.transportista || '').trim().toUpperCase();
 
-  // Requisito 4: Aramark debe aparecer como Centralizado al igual que Centralizado megafrio
+  // 1. Aramark tiene ruta fija 8360 y 1962 -> se considera como Centralizado en Briefing
+  if (isAramarkFixedRoute(rawRuta) || rawTransp === 'T503') {
+    return 'Centralizado';
+  }
   const anyCentralizado = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
     return s.includes('ARAMARK') || s.includes('CENTRALIZADO') || s.includes('MEGAFRIO');
   });
   if (anyCentralizado) return 'Centralizado';
 
-  // Requisito: Unir Enex Unitario, Sbarro, Fast Food, Petroleras, Franquicia Copec y Copec en PETROLERAS
+  // 2. Juan Valdez: Owner C31274 (si es reparto es T313 y centralizado T604, ambos son Juan Valdez en Briefing)
+  const cleanRutaStr = rawRuta.replace(/^0+/, '');
+  const baseRuta = cleanRutaStr.split(/[-_]/)[0];
+  if (
+    rawOwner === 'C31274' ||
+    rawTransp === 'T313' ||
+    JUAN_VALDEZ_PASE_ROUTES.has(rawRuta) ||
+    (cleanRutaStr && JUAN_VALDEZ_PASE_ROUTES.has(cleanRutaStr)) ||
+    /^(32|63)\d{2}$/.test(baseRuta)
+  ) {
+    return 'Juan Valdez';
+  }
+  const anyJuanValdez = [rawClient, rawDenom, rawOp].some(val => {
+    const s = String(val || '').trim().toUpperCase();
+    return s.includes('JUAN VALDEZ') || s.includes('CAFEXPRESS');
+  });
+  if (anyJuanValdez) return 'Juan Valdez';
+
+  // 3. Sbarro Copec (T311)
+  if (rawTransp === 'T311') return 'Sbarro';
+  const anySbarro = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+    const s = String(val || '').trim().toUpperCase();
+    return s.includes('SBARRO');
+  });
+  if (anySbarro) return 'Sbarro';
+
+  // 4. Petroleras: considera T300, T302 y T312
+  const transpCodes = rawTransp.match(/T\d{3}/g) || [];
+  if (transpCodes.length > 0 && transpCodes.every(c => PETROLERAS_TRANSPORTISTAS.includes(c))) {
+    return 'PETROLERAS';
+  }
   const anyPetroleras = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
     return s.startsWith('RUTA FAST FOOD') || s.startsWith('FAST FOOD') || s.includes('FAST FOOD') ||
-           s.includes('PETROLER') || s.includes('ENEX') || s.includes('SBARRO') ||
+           s.includes('PETROLER') || s.includes('ENEX') ||
            s.includes('FRANQUICIA COPEC') || s.includes('COPEC');
   });
   if (anyPetroleras) return 'PETROLERAS';
 
-  // Requisito 1: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
+  // 5. Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
+  if (rawTransp === 'T305') return 'Carls Jr';
   const anyCarls = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
-    return s.startsWith('ESPECIALES CARLS') || s.startsWith('ESPECIAL CARLS') || s.includes('ESPECIALES CARLS');
+    return s.startsWith('ESPECIALES CARLS') || s.startsWith('ESPECIAL CARLS') || s.includes('ESPECIALES CARLS') || s.includes('CARLS');
   });
   if (anyCarls) return 'Carls Jr';
 
-  // Requisito 1: Las rutas que parten con "SBW " dentro de "Subway"
+  // 6. Las rutas que parten con "SBW " dentro de "Subway"
+  if (rawTransp === 'T310') return 'Subway';
   const anySbw = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
-    return s.startsWith('SBW') || s.includes('SBW REDESPACHO') || s.startsWith('SUBWAY');
+    return s.startsWith('SBW') || s.includes('SBW REDESPACHO') || s.startsWith('SUBWAY') || s.includes('SUBWAY');
   });
   if (anySbw) return 'Subway';
 
-  // Requisito: Las rutas que parten con 1500 a 1549 son consideradas con el cliente "El Golfo"
+  // 7. Las rutas que parten con 1500 a 1549 o T400 son consideradas con el cliente "El Golfo"
   const rutaNum = parseInt(rawRuta.replace(/\D/g, ''), 10);
-  if (!isNaN(rutaNum) && rutaNum >= 1500 && rutaNum <= 1549) {
+  if (rawTransp === 'T400' || (!isNaN(rutaNum) && rutaNum >= 1500 && rutaNum <= 1549)) {
     return 'El Golfo';
   }
 
-  // Si es servicio SPID explícito (ej: desde Servicios Extras o ruta directa)
+  // 8. Si es servicio SPID explícito (ej: desde Servicios Extras o ruta directa)
   if (rawClient.toUpperCase().includes('SPID') || rawRuta.toUpperCase().includes('SPID')) {
     return 'SPID';
   }
 
-  // Rutas explícitas de Newrest para Pase de Ingreso y Briefing
-  const cleanRutaStr = rawRuta.replace(/^0+/, '');
-  if (NEWREST_PASE_ROUTES.has(rawRuta) || (cleanRutaStr && NEWREST_PASE_ROUTES.has(cleanRutaStr))) {
+  // 9. Rutas explícitas de Newrest para Pase de Ingreso y Briefing
+  if (NEWREST_PASE_ROUTES.has(rawRuta) || (cleanRutaStr && NEWREST_PASE_ROUTES.has(cleanRutaStr)) || rawTransp === 'T502') {
     return 'Newrest ByI';
   }
 
-  // Rutas explícitas de Juan Valdez para Pase de Ingreso y Briefing
-  if (JUAN_VALDEZ_PASE_ROUTES.has(rawRuta) || (cleanRutaStr && JUAN_VALDEZ_PASE_ROUTES.has(cleanRutaStr))) {
-    return 'Juan Valdez';
+  // 10. Si tiene transportista único en catálogo maestro
+  if (transpCodes.length === 1 && TRANSPORTISTA_MASTER_INFO[transpCodes[0]]) {
+    return TRANSPORTISTA_MASTER_INFO[transpCodes[0]].operacion;
   }
 
   let op = '';
-  // Si la ruta ya tiene operacion oficial asignada
-  if (route.operacion && route.operacion !== 'Sin Operación') {
+  // Si la ruta ya tiene operacion oficial asignada (y no es genérica MULTIRUTA)
+  if (route.operacion && route.operacion !== 'Sin Operación' && !/MULTIRUTA/i.test(route.operacion)) {
     op = cleanBriefingOperationName(route.operacion);
   }
 
@@ -128,19 +175,89 @@ export const getBriefingOperation = (route) => {
 
   if (!op) {
     const candidate = route.denominacion || route.nombreRuta || rawClient || '';
-    const cleanedCandidate = cleanBriefingOperationName(candidate);
-    op = getOperacionName(rawRuta, cleanedCandidate || candidate || 'Otros');
-    op = cleanBriefingOperationName(op);
+    if (!/MULTIRUTA/i.test(candidate)) {
+      const cleanedCandidate = cleanBriefingOperationName(candidate);
+      op = getOperacionName(rawRuta, cleanedCandidate || candidate || 'Otros', rawTransp, rawOwner);
+      op = cleanBriefingOperationName(op);
+    }
   }
 
   return op || 'Otros';
 };
 
+// Clasifica una parada individual para el Briefing (y detecta sub-categoría T300, T302 o T312 en Petroleras)
+export const classifyParadaForBriefing = (parada, parentRoute = {}) => {
+  const rawRuta = String(parentRoute?.ruta || '').trim();
+  const cleanRutaStr = rawRuta.replace(/^0+/, '');
+  const baseRuta = cleanRutaStr.split(/[-_]/)[0];
+  const pTransp = String(parada?.transportista || '').trim().toUpperCase();
+  const pOwner = String(parada?.owner || parentRoute?.owner || '').trim().toUpperCase();
+
+  // 1. Aramark rutas fijas 8360 y 1962 o T503 -> Centralizado
+  if (isAramarkFixedRoute(rawRuta) || pTransp === 'T503') {
+    return { operacion: 'Centralizado', subCatCode: null };
+  }
+
+  // 2. Juan Valdez: Owner C31274 (reparto T313 o centralizado T604) o T313 directo
+  if (pOwner === 'C31274' && (pTransp === 'T313' || pTransp === 'T604' || !pTransp)) {
+    return { operacion: 'Juan Valdez', subCatCode: null };
+  }
+  if (pTransp === 'T313') {
+    return { operacion: 'Juan Valdez', subCatCode: null };
+  }
+  if (pTransp === 'T604') {
+    const combinedText = [
+      parentRoute?.cliente,
+      parentRoute?.operacion,
+      parentRoute?.nombreRuta,
+      parentRoute?.denominacion,
+      parada?.destino
+    ].filter(Boolean).join(' ').toUpperCase();
+
+    if (
+      pOwner === 'C31274' ||
+      /^(32|63)\d{2}$/.test(baseRuta) ||
+      JUAN_VALDEZ_PASE_ROUTES.has(rawRuta) ||
+      (cleanRutaStr && JUAN_VALDEZ_PASE_ROUTES.has(cleanRutaStr)) ||
+      combinedText.includes('JUAN VALDEZ') ||
+      combinedText.includes('CAFEXPRESS')
+    ) {
+      return { operacion: 'Juan Valdez', subCatCode: null };
+    }
+    return { operacion: 'Centralizado', subCatCode: null };
+  }
+
+  // 3. Petroleras desglosado en T300, T302 y T312
+  if (PETROLERAS_TRANSPORTISTAS.includes(pTransp)) {
+    return { operacion: 'PETROLERAS', subCatCode: pTransp };
+  }
+
+  // 4. Sbarro Copec (T311)
+  if (pTransp === 'T311') {
+    return { operacion: 'Sbarro', subCatCode: null };
+  }
+
+  // 5. Resto de transportistas del catálogo maestro (T301, T305, T306, T307, T310, T400, T404, T405, T408, T411, T500, T501, T502, T505)
+  if (TRANSPORTISTA_MASTER_INFO[pTransp]) {
+    return { operacion: TRANSPORTISTA_MASTER_INFO[pTransp].operacion, subCatCode: null };
+  }
+
+  // 6. Fallback a nivel de ruta si la parada no trae Txxx
+  const routeOp = getBriefingOperation(parentRoute);
+  if (routeOp === 'PETROLERAS') {
+    const rCodes = String(parentRoute?.codigo_transportista || parentRoute?.transportista || '').toUpperCase().match(/T\d{3}/g) || [];
+    const matchedSub = rCodes.find(c => PETROLERAS_TRANSPORTISTAS.includes(c)) || 'T300';
+    return { operacion: 'PETROLERAS', subCatCode: matchedSub };
+  }
+  return { operacion: routeOp, subCatCode: null };
+};
+
 export const normalizeClientForBriefing = (rawName) => {
   if (!rawName) return 'OTROS';
   const upper = String(rawName).toUpperCase().trim();
-  if (upper.includes('ARAMARK') || upper.includes('CENTRALIZADO') || upper.includes('MEGAFRIO')) return 'Centralizado';
-  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD') || upper.includes('PETROLER') || upper.includes('ENEX') || upper.includes('SBARRO') || upper.includes('FRANQUICIA COPEC') || upper.includes('COPEC')) return 'PETROLERAS';
+  if (upper === '8360' || upper === '1962' || upper.includes('ARAMARK') || upper.includes('CENTRALIZADO') || upper.includes('MEGAFRIO')) return 'Centralizado';
+  if (upper.includes('SBARRO')) return 'Sbarro';
+  if (upper.startsWith('RUTA FAST FOOD') || upper.startsWith('FAST FOOD') || upper.includes('FAST FOOD') || upper.includes('PETROLER') || upper.includes('ENEX') || upper.includes('FRANQUICIA COPEC') || upper.includes('COPEC')) return 'PETROLERAS';
   if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
   if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
   if (upper.includes('SPID')) return 'SPID';
@@ -682,8 +799,11 @@ export default function Briefing() {
     setActivePaseClient(null);
   };
 
+  // Estado para expandir/contraer sub-categorías de Petroleras (T300, T302, T312) — expandido por defecto
+  const [isPetrolerasSubExpanded, setIsPetrolerasSubExpanded] = useState(true);
+
   // Filas del día seleccionado (Disponibilización / Ruteo)
-  // Requisito 2: Excluir todo lo que dice "Traspaso" a excepción de lo que dice "Aramark"
+  // Excluir todo lo que dice "Traspaso" (salvo Aramark/Centralizado) y excluir rutas de 5 dígitos
   const currentAssignedRows = useMemo(() => {
     let rows = [];
     const normDate = normalizeDate(activeDate);
@@ -710,42 +830,31 @@ export default function Briefing() {
         rows = matchedTrans.length > 0 ? matchedTrans : (transformedRoutes || []);
       }
     }
-    return rows.filter(r => !isTraspasoExcluded(r));
+    return rows.filter(r => !isTraspasoExcluded(r) && !isFiveDigitRoute(r?.ruta));
   }, [savedRuteoByDate, transmittedAssignments, transformedRoutes, activeDate]);
 
-  // Construcción de la Matriz de Briefing agrupada por Operación (Cliente)
+  // Construcción de la Matriz de Briefing agrupada por Operación (Cliente) y Sub-categorías de Petroleras (T300, T302, T312)
   const briefingData = useMemo(() => {
-    // 1. Agrupar rutas por Cliente normalizado
-    const clientsMap = new Map();
-
-    currentAssignedRows.forEach((r, idx) => {
-      const clientName = getBriefingOperation(r);
-      if (!clientsMap.has(clientName)) {
-        clientsMap.set(clientName, {
-          operacion: clientName,
-          routes: []
-        });
-      }
-      clientsMap.get(clientName).routes.push(r);
+    const createBucket = (operacion, extra = {}) => ({
+      operacion,
+      routesMap: new Map(),
+      totalCajas: 0,
+      totalKilos: 0,
+      totalCongeladoM3: 0,
+      totalRefrigeradoM3: 0,
+      totalSecoM3: 0,
+      totalVolumenM3: 0,
+      destinosSet: new Set(),
+      ...extra
     });
 
-    // 2. Procesar métricas por cliente (Requisito 4: Balance exacto de # Rutas)
-    const rows = Array.from(clientsMap.values()).map(cData => {
-      const { operacion, routes } = cData;
-
+    const computeRowFromBucket = (bucket) => {
+      const routes = Array.from(bucket.routesMap.values());
       const trucks1vPropia = new Set();
       const trucks1vExterna = new Set();
       const trucks2vPropia = new Set();
       const trucks2vExterna = new Set();
       let sinCoberturaCount = 0;
-
-      let totalCajas = 0;
-      let totalKilos = 0;
-      let totalCongeladoM3 = 0;
-      let totalRefrigeradoM3 = 0;
-      let totalSecoM3 = 0;
-      let totalVolumenM3 = 0;
-      const destinosSet = new Set();
 
       routes.forEach(r => {
         const camion = (r.camion || '').trim();
@@ -756,21 +865,14 @@ export default function Briefing() {
         const hasConductor = Boolean(conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-');
         const hasAux = Boolean(aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
 
-        // Cobertura: ruta cubierta si tiene camión asignado, conductor asignado o auxiliar asignado
         const isCovered = hasCamion || hasConductor || hasAux;
-
         if (!isCovered) {
           sinCoberturaCount++;
         } else {
-          // Vuelta
           const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
           const matchVuelta = rawVuelta.match(/\d+/);
           const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
-
-          // Tipo de Flota (Propia vs Externa / Terceros)
           const isExt = isAssignmentExternal(r, fleetList, staffList);
-
-          // Clave identificadora para el conjunto (evita sobreconteo del mismo vehículo o dotación en la misma vuelta)
           const identifier = hasCamion ? camion : (hasConductor ? conductor : (hasAux ? aux : `ruta-${r.ruta}`));
 
           if (vueltaNum === 1) {
@@ -781,71 +883,154 @@ export default function Briefing() {
             else trucks2vPropia.add(identifier);
           }
         }
-
-        // Cajas, Kilos, Ambientes (Congelado, Refrigerado, Seco), Volumen y Destinos
-        const paradas = r.paradas || [];
-        if (paradas.length > 0) {
-          paradas.forEach(p => {
-            if (p.destino) destinosSet.add(String(p.destino).trim());
-
-            const cj = parseFloat(String(p.cantCJ || p.cajas || 0).replace(',', '.')) || 0;
-            const kg = parseFloat(String(p.peso || p.kilos || 0).replace(',', '.')) || 0;
-            const vol = parseFloat(String(p.volumen || p.m3 || 0).replace(',', '.')) || 0;
-
-            totalCajas += cj;
-            totalKilos += kg;
-            totalVolumenM3 += vol;
-
-            const amb = String(p.ambiente || 'S').trim().toUpperCase();
-            if (amb === 'C') totalCongeladoM3 += vol;
-            else if (amb === 'R') totalRefrigeradoM3 += vol;
-            else totalSecoM3 += vol;
-          });
-        } else {
-          // Si no tiene desglose de paradas, tomar totales de la fila
-          const cj = parseFloat(String(r.cantCJ || r.cajas || 0).replace(',', '.')) || 0;
-          const kg = parseFloat(String(r.peso || r.kilos || 0).replace(',', '.')) || 0;
-          const vol = parseFloat(String(r.volumen || r.m3 || 0).replace(',', '.')) || 0;
-
-          totalCajas += cj;
-          totalKilos += kg;
-          totalVolumenM3 += vol;
-
-          // Si tiene destino asignado
-          if (r.destino) destinosSet.add(String(r.destino).trim());
-          if (r.recuentoDestino) {
-            for (let i = 0; i < r.recuentoDestino; i++) {
-              destinosSet.add(`dest-${r.ruta}-${i}`);
-            }
-          }
-
-          const amb = String(r.ambiente || 'S').trim().toUpperCase();
-          if (amb === 'C') totalCongeladoM3 += vol;
-          else if (amb === 'R') totalRefrigeradoM3 += vol;
-          else totalSecoM3 += vol;
-        }
       });
 
-      // # Rutas suma exactamente las vueltas y coberturas del cliente (Requisito 4):
-      // Real Key 1era V + Real Terceros 1era V + 2da V (Key) + 2da V (Terceros) + Sin Cobertura
       const numRutasFinal = trucks1vPropia.size + trucks1vExterna.size + trucks2vPropia.size + trucks2vExterna.size + sinCoberturaCount;
 
       return {
-        operacion,
+        operacion: bucket.operacion,
+        subCode: bucket.subCode || null,
+        isSubRow: !!bucket.isSubRow,
+        parentOp: bucket.parentOp || null,
         numRutas: numRutasFinal,
         propia1v: trucks1vPropia.size,
         externa1v: trucks1vExterna.size,
         propia2v: trucks2vPropia.size,
         externa2v: trucks2vExterna.size,
         sinCobertura: sinCoberturaCount,
-        cajas: Math.round(totalCajas),
-        kilos: Number(totalKilos.toFixed(2)),
-        congeladoM3: Number(totalCongeladoM3.toFixed(2)),
-        refrigeradoM3: Number(totalRefrigeradoM3.toFixed(2)),
-        secoM3: Number(totalSecoM3.toFixed(2)),
-        volumenM3: Number(totalVolumenM3.toFixed(2)),
-        numDestinos: destinosSet.size || routes.length
+        cajas: Math.round(bucket.totalCajas),
+        kilos: Number(bucket.totalKilos.toFixed(2)),
+        congeladoM3: Number(bucket.totalCongeladoM3.toFixed(2)),
+        refrigeradoM3: Number(bucket.totalRefrigeradoM3.toFixed(2)),
+        secoM3: Number(bucket.totalSecoM3.toFixed(2)),
+        volumenM3: Number(bucket.totalVolumenM3.toFixed(2)),
+        numDestinos: bucket.destinosSet.size || (routes.length > 0 && !bucket.isSubRow ? routes.length : 0)
       };
+    };
+
+    const clientsMap = new Map();
+    const petrolerasSubBuckets = new Map();
+    PETROLERAS_SUBCATEGORIES.forEach(sub => {
+      petrolerasSubBuckets.set(sub.code, createBucket(sub.label, {
+        subCode: sub.code,
+        isSubRow: true,
+        parentOp: 'PETROLERAS'
+      }));
+    });
+
+    const addCargoToBucket = (bucket, { cj, kg, vol, amb, destino }) => {
+      bucket.totalCajas += cj;
+      bucket.totalKilos += kg;
+      bucket.totalVolumenM3 += vol;
+      if (amb === 'C') bucket.totalCongeladoM3 += vol;
+      else if (amb === 'R') bucket.totalRefrigeradoM3 += vol;
+      else bucket.totalSecoM3 += vol;
+      if (destino) bucket.destinosSet.add(String(destino).trim());
+    };
+
+    currentAssignedRows.forEach((r, idx) => {
+      const rKey = r.id || `${r.ruta}-${r.n_vuelta || 1}-${idx}`;
+      const paradas = r.paradas || [];
+
+      if (paradas.length > 0) {
+        paradas.forEach(p => {
+          const { operacion: rawOp, subCatCode } = classifyParadaForBriefing(p, r);
+          const clientName = rawOp || 'Otros';
+
+          if (!clientsMap.has(clientName)) {
+            clientsMap.set(clientName, createBucket(clientName));
+          }
+          const mainBucket = clientsMap.get(clientName);
+          mainBucket.routesMap.set(rKey, r);
+
+          const cj = parseFloat(String(p.cantCJ || p.cajas || 0).replace(',', '.')) || 0;
+          const kg = parseFloat(String(p.peso || p.kilos || 0).replace(',', '.')) || 0;
+          const vol = parseFloat(String(p.volumen || p.m3 || 0).replace(',', '.')) || 0;
+          const amb = String(p.ambiente || 'S').trim().toUpperCase();
+
+          addCargoToBucket(mainBucket, { cj, kg, vol, amb, destino: p.destino });
+
+          if (clientName === 'PETROLERAS') {
+            const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
+            const subBucket = petrolerasSubBuckets.get(effSub);
+            if (subBucket) {
+              subBucket.routesMap.set(rKey, r);
+              addCargoToBucket(subBucket, { cj, kg, vol, amb, destino: p.destino });
+            }
+          }
+        });
+      } else {
+        const { operacion: rawOp, subCatCode } = classifyParadaForBriefing(null, r);
+        const clientName = rawOp || 'Otros';
+
+        if (!clientsMap.has(clientName)) {
+          clientsMap.set(clientName, createBucket(clientName));
+        }
+        const mainBucket = clientsMap.get(clientName);
+        mainBucket.routesMap.set(rKey, r);
+
+        const cj = parseFloat(String(r.cantCJ || r.cajas || 0).replace(',', '.')) || 0;
+        const kg = parseFloat(String(r.peso || r.kilos || 0).replace(',', '.')) || 0;
+        const vol = parseFloat(String(r.volumen || r.m3 || 0).replace(',', '.')) || 0;
+        const amb = String(r.ambiente || 'S').trim().toUpperCase();
+
+        addCargoToBucket(mainBucket, { cj, kg, vol, amb, destino: r.destino });
+        if (r.recuentoDestino) {
+          for (let i = 0; i < r.recuentoDestino; i++) {
+            mainBucket.destinosSet.add(`dest-${r.ruta}-${i}`);
+          }
+        }
+
+        if (clientName === 'PETROLERAS') {
+          const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
+          const subBucket = petrolerasSubBuckets.get(effSub);
+          if (subBucket) {
+            subBucket.routesMap.set(rKey, r);
+            addCargoToBucket(subBucket, { cj, kg, vol, amb, destino: r.destino });
+            if (r.recuentoDestino) {
+              for (let i = 0; i < r.recuentoDestino; i++) {
+                subBucket.destinosSet.add(`dest-${r.ruta}-${i}`);
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Construir filas principales y sub-categorías de Petroleras (T300, T302, T312)
+    const rows = Array.from(clientsMap.values()).map(bucket => {
+      const baseRow = computeRowFromBucket(bucket);
+
+      if (baseRow.operacion === 'PETROLERAS') {
+        const subRows = PETROLERAS_SUBCATEGORIES.map(sub => {
+          const sb = petrolerasSubBuckets.get(sub.code);
+          return computeRowFromBucket(sb);
+        });
+
+        // Sumar T300, T302 y T312 en PETROLERAS pero mantener desglosado en subRows para el Briefing
+        const sumCajas = subRows.reduce((acc, s) => acc + s.cajas, 0);
+        const sumKilos = Number(subRows.reduce((acc, s) => acc + s.kilos, 0).toFixed(2));
+        const sumCong = Number(subRows.reduce((acc, s) => acc + s.congeladoM3, 0).toFixed(2));
+        const sumRefr = Number(subRows.reduce((acc, s) => acc + s.refrigeradoM3, 0).toFixed(2));
+        const sumSeco = Number(subRows.reduce((acc, s) => acc + s.secoM3, 0).toFixed(2));
+        const sumVol = Number(subRows.reduce((acc, s) => acc + s.volumenM3, 0).toFixed(2));
+        const sumDestinos = subRows.reduce((acc, s) => acc + s.numDestinos, 0);
+
+        return {
+          ...baseRow,
+          cajas: sumCajas,
+          kilos: sumKilos,
+          congeladoM3: sumCong,
+          refrigeradoM3: sumRefr,
+          secoM3: sumSeco,
+          volumenM3: sumVol,
+          numDestinos: sumDestinos || baseRow.numDestinos,
+          hasPetrolerasSubcategories: true,
+          subRows
+        };
+      }
+
+      return baseRow;
     });
 
     // Requisito 3: SPID siempre debe aparecer en el Briefing
@@ -1078,24 +1263,48 @@ export default function Briefing() {
     };
   }, [displayedRows, selectedOperations, currentAssignedRows, fleetList, staffList]);
 
-  // Exportar a Excel exactamente con las columnas solicitadas
+  // Exportar a Excel exactamente con las columnas solicitadas (incluyendo desglose de sub-categorías en Petroleras)
   const handleExportExcel = () => {
-    const exportData = briefingData.rows.map(r => ({
-      'Operación': r.operacion,
-      '# Rutas': r.numRutas || 0,
-      'Real Key 1era V': r.propia1v || 0,
-      'Real Terceros 1era V': r.externa1v || 0,
-      '2da V (Cubiertas Key)': r.propia2v || 0,
-      '2da V (Terceros)': r.externa2v || 0,
-      'Sin cobertura': r.sinCobertura || 0,
-      'Cajas': r.cajas || 0,
-      'Kilos': `${r.kilos.toFixed(2)} Kg`,
-      'Congelado m3': r.congeladoM3 || 0,
-      'Refrigerado m3': r.refrigeradoM3 || 0,
-      'Seco m3': r.secoM3 || 0,
-      'Volumen': `${r.volumenM3.toFixed(2)} m3`,
-      'N° Destinos': r.numDestinos || 0
-    }));
+    const exportData = [];
+    briefingData.rows.forEach(r => {
+      exportData.push({
+        'Operación': r.operacion,
+        '# Rutas': r.numRutas || 0,
+        'Real Key 1era V': r.propia1v || 0,
+        'Real Terceros 1era V': r.externa1v || 0,
+        '2da V (Cubiertas Key)': r.propia2v || 0,
+        '2da V (Terceros)': r.externa2v || 0,
+        'Sin cobertura': r.sinCobertura || 0,
+        'Cajas': r.cajas || 0,
+        'Kilos': `${r.kilos.toFixed(2)} Kg`,
+        'Congelado m3': r.congeladoM3 || 0,
+        'Refrigerado m3': r.refrigeradoM3 || 0,
+        'Seco m3': r.secoM3 || 0,
+        'Volumen': `${r.volumenM3.toFixed(2)} m3`,
+        'N° Destinos': r.numDestinos || 0
+      });
+
+      if (r.hasPetrolerasSubcategories && Array.isArray(r.subRows)) {
+        r.subRows.forEach(sub => {
+          exportData.push({
+            'Operación': `   ↳ ${sub.operacion}`,
+            '# Rutas': sub.numRutas || 0,
+            'Real Key 1era V': sub.propia1v || 0,
+            'Real Terceros 1era V': sub.externa1v || 0,
+            '2da V (Cubiertas Key)': sub.propia2v || 0,
+            '2da V (Terceros)': sub.externa2v || 0,
+            'Sin cobertura': sub.sinCobertura || 0,
+            'Cajas': sub.cajas || 0,
+            'Kilos': `${sub.kilos.toFixed(2)} Kg`,
+            'Congelado m3': sub.congeladoM3 || 0,
+            'Refrigerado m3': sub.refrigeradoM3 || 0,
+            'Seco m3': sub.secoM3 || 0,
+            'Volumen': `${sub.volumenM3.toFixed(2)} m3`,
+            'N° Destinos': sub.numDestinos || 0
+          });
+        });
+      }
+    });
 
     // Fila Total General
     exportData.push({
@@ -1416,134 +1625,207 @@ export default function Briefing() {
                   const rowBg = isZebra ? 'bg-[#f4f7fb]/70' : 'bg-white';
                   const isJvOrNewrest = r.operacion.toLowerCase().includes('juan') || r.operacion.toLowerCase().includes('newrest');
                   const isSpid = r.isSpid || r.operacion.toUpperCase() === 'SPID';
-                  const isClickable = isJvOrNewrest || isSpid;
+                  const isPetroleras = r.hasPetrolerasSubcategories || r.operacion.toUpperCase() === 'PETROLERAS';
+                  const isClickable = isJvOrNewrest || isSpid || isPetroleras;
                   return (
-                    <tr 
-                      key={r.operacion} 
-                      onClick={() => {
-                        if (r.operacion.toLowerCase().includes('juan') || r.operacion.toLowerCase().includes('valdez')) {
-                          setActivePaseClient(prev => prev === 'Juan Valdez' ? null : 'Juan Valdez');
-                        } else if (r.operacion.toLowerCase().includes('newrest')) {
-                          setActivePaseClient(prev => prev === 'Newrest' ? null : 'Newrest');
-                        } else if (isSpid) {
-                          setIsSpidModalOpen(true);
-                        }
-                      }}
-                      className={`${rowBg} hover:bg-blue-50/60 transition-colors ${isClickable ? 'cursor-pointer' : ''}`}
-                    >
-                      {/* Operación */}
-                      <td className="px-3.5 py-2.5 font-black uppercase text-slate-900 border-r border-slate-200/80 tracking-wide">
-                        <div className="flex items-center justify-between gap-1.5">
-                          <div className="flex items-center gap-1.5">
-                            <span>{r.operacion}</span>
-                            {r.isManualOverride && (
-                              <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
-                                Manual
+                    <React.Fragment key={r.operacion}>
+                      <tr 
+                        onClick={() => {
+                          if (r.operacion.toLowerCase().includes('juan') || r.operacion.toLowerCase().includes('valdez')) {
+                            setActivePaseClient(prev => prev === 'Juan Valdez' ? null : 'Juan Valdez');
+                          } else if (r.operacion.toLowerCase().includes('newrest')) {
+                            setActivePaseClient(prev => prev === 'Newrest' ? null : 'Newrest');
+                          } else if (isSpid) {
+                            setIsSpidModalOpen(true);
+                          } else if (isPetroleras) {
+                            setIsPetrolerasSubExpanded(prev => !prev);
+                          }
+                        }}
+                        className={`${rowBg} hover:bg-blue-50/60 transition-colors ${isClickable ? 'cursor-pointer' : ''}`}
+                      >
+                        {/* Operación */}
+                        <td className="px-3.5 py-2.5 font-black uppercase text-slate-900 border-r border-slate-200/80 tracking-wide">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <div className="flex items-center gap-1.5">
+                              {isPetroleras && (
+                                <span className="text-blue-600 flex items-center" title="Clic para mostrar/ocultar sub-categorías T300, T302 y T312">
+                                  {isPetrolerasSubExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                </span>
+                              )}
+                              <span>{r.operacion}</span>
+                              {isPetroleras && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-blue-100 text-blue-800 border border-blue-200 normal-case">
+                                  T300 + T302 + T312
+                                </span>
+                              )}
+                              {r.isManualOverride && (
+                                <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                                  Manual
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              {isJvOrNewrest && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const client = r.operacion.toLowerCase().includes('juan') ? 'Juan Valdez' : 'Newrest';
+                                    setActivePaseClient(prev => prev === client ? null : client);
+                                  }}
+                                  className={`text-[9px] font-black px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
+                                    (activePaseClient === 'Juan Valdez' && r.operacion.toLowerCase().includes('juan')) || (activePaseClient === 'Newrest' && r.operacion.toLowerCase().includes('newrest'))
+                                      ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
+                                      : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                                  }`}
+                                  title={`Abrir Pase de Ingreso para ${r.operacion}`}
+                                >
+                                  🎫 Pase
+                                </button>
+                              )}
+                              {isSpid && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsSpidModalOpen(true);
+                                  }}
+                                  className="text-[9px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-200 flex items-center gap-1 shadow-2xs"
+                                  title="Editar métricas operacionales de SPID"
+                                >
+                                  <Edit3 size={10} />
+                                  <span>Editar</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* # Rutas */}
+                        <td className="px-3 py-2.5 text-center font-black font-mono border-r border-slate-200/80 text-slate-900 bg-blue-50/30">
+                          {r.numRutas || ''}
+                        </td>
+
+                        {/* Real Key 1era V */}
+                        <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-blue-900">
+                          {formatInt(r.propia1v)}
+                        </td>
+
+                        {/* Real Terceros 1era V */}
+                        <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-amber-900">
+                          {formatInt(r.externa1v)}
+                        </td>
+
+                        {/* 2da V (Cubiertas Key) */}
+                        <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-indigo-900">
+                          {formatInt(r.propia2v)}
+                        </td>
+
+                        {/* 2da V (Terceros) */}
+                        <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-amber-950">
+                          {formatInt(r.externa2v)}
+                        </td>
+
+                        {/* Sin cobertura */}
+                        <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-red-600">
+                          {formatInt(r.sinCobertura)}
+                        </td>
+
+                        {/* Cajas */}
+                        <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80">
+                          {formatInt(r.cajas)}
+                        </td>
+
+                        {/* Kilos */}
+                        <td className="px-3.5 py-2.5 text-right font-mono font-medium border-r border-slate-200/80">
+                          {r.kilos > 0 ? `${formatDecimalAlways(r.kilos)} Kg` : '0,00 Kg'}
+                        </td>
+
+                        {/* Congelado m3 */}
+                        <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-blue-700">
+                          {formatDecimal(r.congeladoM3)}
+                        </td>
+
+                        {/* Refrigerado m3 */}
+                        <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-cyan-700">
+                          {formatDecimal(r.refrigeradoM3)}
+                        </td>
+
+                        {/* Seco m3 */}
+                        <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-amber-700">
+                          {formatDecimal(r.secoM3)}
+                        </td>
+
+                        {/* Volumen */}
+                        <td className="px-3.5 py-2.5 text-right font-mono font-bold text-slate-900 border-r border-slate-200/80">
+                          {formatDecimalAlways(r.volumenM3)} m3
+                        </td>
+
+                        {/* N° Destinos */}
+                        <td className="px-3 py-2.5 text-center font-mono font-semibold text-slate-700">
+                          {r.numDestinos}
+                        </td>
+                      </tr>
+
+                      {/* Desglose por cada sub-categoría de Petroleras (T300, T302 y T312) en el Briefing */}
+                      {isPetroleras && isPetrolerasSubExpanded && Array.isArray(r.subRows) && r.subRows.map((sub) => (
+                        <tr
+                          key={`sub-${sub.subCode || sub.operacion}`}
+                          className="bg-amber-50/40 hover:bg-amber-50/80 text-slate-700 text-[11px] transition-colors border-l-4 border-l-blue-500"
+                        >
+                          <td className="pl-7 pr-3.5 py-1.5 font-bold text-slate-700 border-r border-slate-200/80">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-blue-600 font-black">↳</span>
+                              <span className="bg-blue-100 text-blue-900 font-mono font-black px-1.5 py-0.2 rounded text-[10px]">
+                                {sub.subCode}
                               </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            {isJvOrNewrest && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const client = r.operacion.toLowerCase().includes('juan') ? 'Juan Valdez' : 'Newrest';
-                                  setActivePaseClient(prev => prev === client ? null : client);
-                                }}
-                                className={`text-[9px] font-black px-1.5 py-0.5 rounded-md border transition-all cursor-pointer ${
-                                  (activePaseClient === 'Juan Valdez' && r.operacion.toLowerCase().includes('juan')) || (activePaseClient === 'Newrest' && r.operacion.toLowerCase().includes('newrest'))
-                                    ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
-                                    : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200'
-                                }`}
-                                title={`Abrir Pase de Ingreso para ${r.operacion}`}
-                              >
-                                🎫 Pase
-                              </button>
-                            )}
-                            {isSpid && (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setIsSpidModalOpen(true);
-                                }}
-                                className="text-[9px] font-bold px-2 py-0.5 rounded-md border transition-all cursor-pointer bg-blue-50 hover:bg-blue-100 text-blue-800 border-blue-200 flex items-center gap-1 shadow-2xs"
-                                title="Editar métricas operacionales de SPID"
-                              >
-                                <Edit3 size={10} />
-                                <span>Editar</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-
-                      {/* # Rutas */}
-                      <td className="px-3 py-2.5 text-center font-black font-mono border-r border-slate-200/80 text-slate-900 bg-blue-50/30">
-                        {r.numRutas || ''}
-                      </td>
-
-                      {/* Real Key 1era V */}
-                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-blue-900">
-                        {formatInt(r.propia1v)}
-                      </td>
-
-                      {/* Real Terceros 1era V */}
-                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-amber-900">
-                        {formatInt(r.externa1v)}
-                      </td>
-
-                      {/* 2da V (Cubiertas Key) */}
-                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-indigo-900">
-                        {formatInt(r.propia2v)}
-                      </td>
-
-                      {/* 2da V (Terceros) */}
-                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-amber-950">
-                        {formatInt(r.externa2v)}
-                      </td>
-
-                      {/* Sin cobertura */}
-                      <td className="px-3 py-2.5 text-center font-bold font-mono border-r border-slate-200/80 text-red-600">
-                        {formatInt(r.sinCobertura)}
-                      </td>
-
-                      {/* Cajas */}
-                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80">
-                        {formatInt(r.cajas)}
-                      </td>
-
-                      {/* Kilos */}
-                      <td className="px-3.5 py-2.5 text-right font-mono font-medium border-r border-slate-200/80">
-                        {r.kilos > 0 ? `${formatDecimalAlways(r.kilos)} Kg` : '0,00 Kg'}
-                      </td>
-
-                      {/* Congelado m3 */}
-                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-blue-700">
-                        {formatDecimal(r.congeladoM3)}
-                      </td>
-
-                      {/* Refrigerado m3 */}
-                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-cyan-700">
-                        {formatDecimal(r.refrigeradoM3)}
-                      </td>
-
-                      {/* Seco m3 */}
-                      <td className="px-3 py-2.5 text-right font-mono font-medium border-r border-slate-200/80 text-amber-700">
-                        {formatDecimal(r.secoM3)}
-                      </td>
-
-                      {/* Volumen */}
-                      <td className="px-3.5 py-2.5 text-right font-mono font-bold text-slate-900 border-r border-slate-200/80">
-                        {formatDecimalAlways(r.volumenM3)} m3
-                      </td>
-
-                      {/* N° Destinos */}
-                      <td className="px-3 py-2.5 text-center font-mono font-semibold text-slate-700">
-                        {r.numDestinos}
-                      </td>
-                    </tr>
+                              <span className="font-semibold text-slate-700">
+                                {sub.operacion.replace(/^T\d{3}\s*-\s*/i, '')}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-1.5 text-center font-bold font-mono border-r border-slate-200/80 text-slate-600 bg-slate-50/60">
+                            {sub.numRutas || ''}
+                          </td>
+                          <td className="px-3 py-1.5 text-center font-mono border-r border-slate-200/80 text-blue-800">
+                            {formatInt(sub.propia1v)}
+                          </td>
+                          <td className="px-3 py-1.5 text-center font-mono border-r border-slate-200/80 text-amber-800">
+                            {formatInt(sub.externa1v)}
+                          </td>
+                          <td className="px-3 py-1.5 text-center font-mono border-r border-slate-200/80 text-indigo-800">
+                            {formatInt(sub.propia2v)}
+                          </td>
+                          <td className="px-3 py-1.5 text-center font-mono border-r border-slate-200/80 text-amber-900">
+                            {formatInt(sub.externa2v)}
+                          </td>
+                          <td className="px-3 py-1.5 text-center font-mono border-r border-slate-200/80 text-red-600">
+                            {formatInt(sub.sinCobertura)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono border-r border-slate-200/80 text-slate-700">
+                            {formatInt(sub.cajas)}
+                          </td>
+                          <td className="px-3.5 py-1.5 text-right font-mono border-r border-slate-200/80 text-slate-700">
+                            {sub.kilos > 0 ? `${formatDecimalAlways(sub.kilos)} Kg` : '0,00 Kg'}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono border-r border-slate-200/80 text-blue-700">
+                            {formatDecimal(sub.congeladoM3)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono border-r border-slate-200/80 text-cyan-700">
+                            {formatDecimal(sub.refrigeradoM3)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono border-r border-slate-200/80 text-amber-700">
+                            {formatDecimal(sub.secoM3)}
+                          </td>
+                          <td className="px-3.5 py-1.5 text-right font-mono font-bold text-slate-800 border-r border-slate-200/80">
+                            {formatDecimalAlways(sub.volumenM3)} m3
+                          </td>
+                          <td className="px-3 py-1.5 text-center font-mono font-semibold text-slate-600">
+                            {sub.numDestinos}
+                          </td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
                   );
                 })
               )}

@@ -8299,8 +8299,408 @@ export const ROUTE_OPERATIONS_MAP = {
     "denominacion": "2°VUELTA RUTEO UM LA SERENA 03",
     "operacion": "UM La Serena",
     "transportista": "T20008"
+  },
+  "1962": {
+    "ruta": "1962",
+    "denominacion": "ARAMARK RUTA FIJA 1962",
+    "operacion": "Centralizado",
+    "transportista": "T503"
+  },
+  "8360": {
+    "ruta": "8360",
+    "denominacion": "ARAMARK RUTA ENVÍOS 01",
+    "operacion": "Centralizado",
+    "transportista": "T503"
   }
 };
+
+// Ubicaciones físicas oficiales de bodegas de carga
+export const BODEGA_LOCATIONS = {
+  CDC: 'AV. LO ESPEJO 01640, SAN BERNARDO',
+  LRI: 'LAGO RIÑIHUE 02319, SAN BERNARDO'
+};
+
+// Desglose oficial de transportista por cliente y bodega
+export const TRANSPORTISTA_MASTER_INFO = {
+  T300: {
+    codigo: 'T300',
+    clienteTabla: 'FLOTA AIRE - PETROLERAS (ENEX-COPEC-ESMAX-ARAMCO)',
+    clienteCorto: 'Petroleras',
+    operacion: 'PETROLERAS',
+    subCategoria: 'T300 - Flota Aire - Petroleras (Enex-Copec-Esmax-Aramco)',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T301: {
+    codigo: 'T301',
+    clienteTabla: 'FLOTA AIRE - NOCTURNO',
+    clienteCorto: 'Nocturna',
+    operacion: 'Nocturna',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T302: {
+    codigo: 'T302',
+    clienteTabla: 'FRANQUICIAS COPEC - EXCLUSIVO',
+    clienteCorto: 'Petroleras',
+    operacion: 'PETROLERAS',
+    subCategoria: 'T302 - Franquicias Copec - Exclusivo',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T305: {
+    codigo: 'T305',
+    clienteTabla: 'CARLS JR',
+    clienteCorto: 'Carls Jr',
+    operacion: 'Carls Jr',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T306: {
+    codigo: 'T306',
+    clienteTabla: 'OXXO',
+    clienteCorto: 'Oxxo',
+    operacion: 'Oxxo',
+    bodega: 'LRI',
+    ubicacion: BODEGA_LOCATIONS.LRI
+  },
+  T307: {
+    codigo: 'T307',
+    clienteTabla: 'STREAT BURGUER',
+    clienteCorto: 'Streat Burguer',
+    operacion: 'Streat Burguer',
+    bodega: 'LRI',
+    ubicacion: BODEGA_LOCATIONS.LRI
+  },
+  T310: {
+    codigo: 'T310',
+    clienteTabla: 'SUBWAY',
+    clienteCorto: 'Subway',
+    operacion: 'Subway',
+    bodega: 'LRI',
+    ubicacion: BODEGA_LOCATIONS.LRI
+  },
+  T311: {
+    codigo: 'T311',
+    clienteTabla: 'SBARRO COPEC',
+    clienteCorto: 'Sbarro',
+    operacion: 'Sbarro',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T312: {
+    codigo: 'T312',
+    clienteTabla: 'ENEX UNITARIO',
+    clienteCorto: 'Petroleras',
+    operacion: 'PETROLERAS',
+    subCategoria: 'T312 - Enex Unitario',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T313: {
+    codigo: 'T313',
+    clienteTabla: 'JUAN VALDEZ',
+    clienteCorto: 'Juan Valdez',
+    operacion: 'Juan Valdez',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T400: {
+    codigo: 'T400',
+    clienteTabla: 'EL GOLFO',
+    clienteCorto: 'El Golfo',
+    operacion: 'El Golfo',
+    bodega: 'LRI',
+    ubicacion: BODEGA_LOCATIONS.LRI
+  },
+  T404: {
+    codigo: 'T404',
+    clienteTabla: 'KEYFOODS REPARTO',
+    clienteCorto: 'Keyfoods',
+    operacion: 'Keyfoods',
+    bodega: 'LRI',
+    ubicacion: BODEGA_LOCATIONS.LRI
+  },
+  T405: {
+    codigo: 'T405',
+    clienteTabla: 'CANTABRIA',
+    clienteCorto: 'Cantabria',
+    operacion: 'Cantabria',
+    bodega: 'LRI',
+    ubicacion: BODEGA_LOCATIONS.LRI
+  },
+  T408: {
+    codigo: 'T408',
+    clienteTabla: 'PANSTARS',
+    clienteCorto: 'Panstars',
+    operacion: 'Panstars',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T411: {
+    codigo: 'T411',
+    clienteTabla: 'PEDIDOS YA',
+    clienteCorto: 'Pedidos Ya',
+    operacion: 'Pedidos Ya',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T500: {
+    codigo: 'T500',
+    clienteTabla: 'CENTROS REMOTOS (NEWREST) - (FLOTA NAZAR)',
+    clienteCorto: 'Newrest Centros Remotos',
+    operacion: 'Newrest Centros Remotos',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T501: {
+    codigo: 'T501',
+    clienteTabla: 'SODEXO CENTROS MINEROS',
+    clienteCorto: 'Sodexo',
+    operacion: 'SODEXO',
+    bodega: 'LRI',
+    ubicacion: BODEGA_LOCATIONS.LRI
+  },
+  T502: {
+    codigo: 'T502',
+    clienteTabla: 'NEWREST BYI',
+    clienteCorto: 'Newrest ByI',
+    operacion: 'Newrest ByI',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T503: {
+    codigo: 'T503',
+    clienteTabla: 'ARAMARK',
+    clienteCorto: 'Centralizado',
+    operacion: 'Centralizado',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T505: {
+    codigo: 'T505',
+    clienteTabla: 'OPERACIÓN NAZAR/KEY',
+    clienteCorto: 'Operación Nazar/Key',
+    operacion: 'Operación Nazar/Key',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  },
+  T604: {
+    codigo: 'T604',
+    clienteTabla: 'CENTRALIZADOS ENVIOS',
+    clienteCorto: 'Centralizado',
+    operacion: 'Centralizado',
+    bodega: 'CDC',
+    ubicacion: BODEGA_LOCATIONS.CDC
+  }
+};
+
+export const PETROLERAS_TRANSPORTISTAS = ['T300', 'T302', 'T312'];
+
+export const PETROLERAS_SUBCATEGORIES = [
+  { code: 'T300', label: 'T300 - Flota Aire - Petroleras' },
+  { code: 'T302', label: 'T302 - Franquicias Copec - Exclusivo' },
+  { code: 'T312', label: 'T312 - Enex Unitario' }
+];
+
+export const ARAMARK_FIXED_ROUTES = new Set(['8360', '1962']);
+
+// Verifica si una ruta corresponde a una ruta numérica de 5 dígitos (no debe considerarse en Ruteo ni en Briefing)
+export function isFiveDigitRoute(ruta) {
+  if (!ruta) return false;
+  const clean = String(ruta).trim();
+  return /^\d{5}(?:[-_][A-Za-z0-9]+)?$/.test(clean);
+}
+
+// Verifica si una ruta corresponde a Aramark fijo (8360 o 1962)
+export function isAramarkFixedRoute(ruta) {
+  if (!ruta) return false;
+  const clean = String(ruta).trim().replace(/^0+/, '');
+  const base = clean.split(/[-_]/)[0];
+  return ARAMARK_FIXED_ROUTES.has(clean) || ARAMARK_FIXED_ROUTES.has(base);
+}
+
+// Resuelve la Operación oficial a partir de código de transportista, owner y ruta
+export function resolveOperationByTransportistaAndOwner({ transportista = '', owner = '', ruta = '', fallbackName = '' }) {
+  const cleanTransp = String(transportista || '').trim().toUpperCase();
+  const cleanOwner = String(owner || '').trim().toUpperCase();
+  const cleanRuta = String(ruta || '').trim();
+  const baseRuta = cleanRuta.replace(/^0+/, '').split(/[-_]/)[0];
+  const upperFallback = String(fallbackName || '').trim().toUpperCase();
+
+  // 1. Aramark rutas fijas 8360 y 1962 o transportista T503 -> Centralizado
+  if (isAramarkFixedRoute(cleanRuta) || cleanTransp === 'T503' || upperFallback.includes('ARAMARK')) {
+    return 'Centralizado';
+  }
+
+  // 2. Juan Valdez: Owner C31274 con T313 (reparto) o T604 (centralizado), o transportista T313
+  if (cleanOwner === 'C31274' && (cleanTransp === 'T313' || cleanTransp === 'T604' || !cleanTransp)) {
+    return 'Juan Valdez';
+  }
+  if (cleanTransp === 'T313') {
+    return 'Juan Valdez';
+  }
+  if (cleanTransp === 'T604') {
+    if (
+      cleanOwner === 'C31274' ||
+      /^(32|63)\d{2}$/.test(baseRuta) ||
+      upperFallback.includes('JUAN VALDEZ') ||
+      upperFallback.includes('CAFEXPRESS')
+    ) {
+      return 'Juan Valdez';
+    }
+    return 'Centralizado';
+  }
+
+  // 3. Petroleras: T300, T302, T312
+  if (PETROLERAS_TRANSPORTISTAS.includes(cleanTransp)) {
+    return 'PETROLERAS';
+  }
+
+  // 4. Sbarro Copec: T311
+  if (cleanTransp === 'T311') {
+    return 'Sbarro';
+  }
+
+  // 5. Resto de transportistas de la tabla maestra
+  if (TRANSPORTISTA_MASTER_INFO[cleanTransp]) {
+    return TRANSPORTISTA_MASTER_INFO[cleanTransp].operacion;
+  }
+
+  return '';
+}
+
+// Resuelve el nombre corto de Cliente para una parada (usado en Envío de Rutas Externos / Tablas)
+export function resolveClienteForStop(parada, parentRoute = {}) {
+  const pTransp = String(parada?.transportista || '').trim().toUpperCase();
+  const pOwner = String(parada?.owner || parentRoute?.owner || '').trim().toUpperCase();
+  const ruta = String(parentRoute?.ruta || '').trim();
+  const fallback = String(parada?.cliente || parentRoute?.cliente || parentRoute?.nombreRuta || '').trim();
+
+  if (isAramarkFixedRoute(ruta) || pTransp === 'T503' || fallback.toUpperCase().includes('ARAMARK')) {
+    return 'Centralizado';
+  }
+  if (pOwner === 'C31274' || pTransp === 'T313') {
+    return 'Juan Valdez';
+  }
+  if (pTransp === 'T604') {
+    if (/^(32|63)\d{2}/.test(ruta.replace(/^0+/, '')) || fallback.toUpperCase().includes('JUAN VALDEZ')) {
+      return 'Juan Valdez';
+    }
+    return 'Centralizado';
+  }
+  if (PETROLERAS_TRANSPORTISTAS.includes(pTransp)) {
+    return 'Petroleras';
+  }
+  if (TRANSPORTISTA_MASTER_INFO[pTransp]) {
+    return TRANSPORTISTA_MASTER_INFO[pTransp].clienteCorto;
+  }
+
+  // Fallback si la parada no tiene Txxx directo pero la ruta sí
+  const routeTranspMatches = String(parentRoute?.codigo_transportista || parentRoute?.transportista || '').toUpperCase().match(/T\d{3}/g);
+  if (routeTranspMatches && routeTranspMatches.length === 1) {
+    const code = routeTranspMatches[0];
+    if (PETROLERAS_TRANSPORTISTAS.includes(code)) return 'Petroleras';
+    if (TRANSPORTISTA_MASTER_INFO[code]) return TRANSPORTISTA_MASTER_INFO[code].clienteCorto;
+  }
+
+  // Fallback por destino si es claramente identificable
+  const destUpper = String(parada?.destino || '').toUpperCase();
+  if (destUpper.includes('SBARRO')) return 'Sbarro';
+  if (destUpper.includes('CARLS JR') || destUpper.includes('CARL JR')) return 'Carls Jr';
+  if (destUpper.includes('STREAT BURGER') || destUpper.includes('STREAT BURGUER')) return 'Streat Burguer';
+  if (destUpper.includes('JUAN VALDEZ')) return 'Juan Valdez';
+  if (destUpper.includes('SUBWAY')) return 'Subway';
+  if (destUpper.includes('OXXO')) return 'Oxxo';
+  if (/SHELL|PRONTO|EXPRESS|ASTOP|COPEC|ENEX|UPA|UPITA/.test(destUpper)) return 'Petroleras';
+
+  const canon = canonicalizeOperation(fallback);
+  if (canon && !/MULTIRUTA/i.test(canon)) {
+    if (canon === 'PETROLERAS') return 'Petroleras';
+    return canon;
+  }
+  return 'Petroleras';
+}
+
+// Determina las bodegas de carga (CDC / LRI) y sus ubicaciones físicas para un conjunto de rutas
+export function resolveBodegasForRoutes(routes = []) {
+  const bodegasSet = new Set();
+  const routeArray = Array.isArray(routes) ? routes : [routes];
+
+  routeArray.forEach(r => {
+    if (!r) return;
+    let foundOnRoute = false;
+
+    // 1. Revisar transportistas de cada parada
+    if (Array.isArray(r.paradas) && r.paradas.length > 0) {
+      r.paradas.forEach(p => {
+        const codes = String(p?.transportista || '').toUpperCase().match(/T\d{3}/g) || [];
+        codes.forEach(code => {
+          if (TRANSPORTISTA_MASTER_INFO[code]?.bodega) {
+            bodegasSet.add(TRANSPORTISTA_MASTER_INFO[code].bodega);
+            foundOnRoute = true;
+          }
+        });
+      });
+    }
+
+    // 2. Revisar transportista a nivel de ruta
+    const routeCodes = String(r.codigo_transportista || r.transportista || '').toUpperCase().match(/T\d{3}/g) || [];
+    routeCodes.forEach(code => {
+      if (TRANSPORTISTA_MASTER_INFO[code]?.bodega) {
+        bodegasSet.add(TRANSPORTISTA_MASTER_INFO[code].bodega);
+        foundOnRoute = true;
+      }
+    });
+
+    // 3. Revisar catálogo maestro por número de ruta
+    if (!foundOnRoute && r.ruta) {
+      const master = findOperationForRoute(r.ruta);
+      if (master?.transportista && TRANSPORTISTA_MASTER_INFO[master.transportista]?.bodega) {
+        bodegasSet.add(TRANSPORTISTA_MASTER_INFO[master.transportista].bodega);
+        foundOnRoute = true;
+      }
+    }
+
+    // 4. Fallback por nombre de cliente/operación
+    if (!foundOnRoute) {
+      const text = [r.cliente, r.operacion, r.nombreRuta, r.denominacion].filter(Boolean).join(' ').toUpperCase();
+      if (/OXXO|STREAT|SUBWAY|SBW|GOLFO|CONGELADO|KEYFOOD|CANTABRIA|SODEXO/.test(text)) {
+        bodegasSet.add('LRI');
+      } else if (text) {
+        bodegasSet.add('CDC');
+      }
+    }
+  });
+
+  if (bodegasSet.size === 0) {
+    bodegasSet.add('CDC');
+  }
+
+  // Ordenar siempre CDC primero y luego LRI (como en la imagen adjunta)
+  const ordered = [];
+  if (bodegasSet.has('CDC')) ordered.push('CDC');
+  if (bodegasSet.has('LRI')) ordered.push('LRI');
+
+  const items = ordered.map(code => ({
+    code,
+    address: BODEGA_LOCATIONS[code],
+    fullText: `${code} - ${BODEGA_LOCATIONS[code]}`
+  }));
+
+  const isPlural = items.length > 1;
+  const label = isPlural ? 'Bodegas de carga:' : 'Bodega de carga:';
+  const text = items.map(i => i.fullText).join(' y ');
+
+  return {
+    codes: ordered,
+    items,
+    isPlural,
+    label,
+    text,
+    fullLine: `${label} ${text}`
+  };
+}
 
 export const ALL_OPERACIONES = [
   "Cantabria",
@@ -8316,8 +8716,9 @@ export const ALL_OPERACIONES = [
   "Nutrisco",
   "Oxxo",
   "Panstars",
+  "Pedidos Ya",
   "PETROLERAS",
-  "Petrolera - Oxxo - Carls",
+  "Sbarro",
   "SODEXO",
   "SPID",
   "Sea Garden",
@@ -8335,8 +8736,15 @@ export function canonicalizeOperation(name) {
   const trimmed = name.trim();
   const upper = trimmed.toUpperCase();
 
-  // Requisito 4: Aramark debe aparecer como Centralizado al igual que Centralizado Megafrio
+  // Si es un código de transportista directo (T300, T302, T312, etc.)
+  if (TRANSPORTISTA_MASTER_INFO[upper]) {
+    return TRANSPORTISTA_MASTER_INFO[upper].operacion;
+  }
+
+  // Aramark (incluyendo 8360 y 1962) debe aparecer como Centralizado al igual que Centralizado Megafrio
   if (
+    upper === '8360' ||
+    upper === '1962' ||
     upper.includes('ARAMARK') || 
     upper.includes('CENTRALIZADO') || 
     upper.includes('MEGAFRIO')
@@ -8344,23 +8752,28 @@ export function canonicalizeOperation(name) {
     return 'Centralizado';
   }
 
-  // Requisito: Unir Enex Unitario, Sbarro, Fast Food, Petroleras, Franquicia Copec y Copec en PETROLERAS
+  // Sbarro Copec (T311) es Sbarro (separado de Petroleras T300, T302, T312)
+  if (upper.includes('SBARRO')) {
+    return 'Sbarro';
+  }
+
+  // Petroleras: considera T300 (Flota Aire - Petroleras), T302 (Franquicias Copec - Exclusivo) y T312 (Enex Unitario)
   if (
     upper.startsWith('RUTA FAST FOOD') || 
     upper.startsWith('FAST FOOD') || 
     upper.includes('FAST FOOD') ||
     upper.includes('PETROLER') ||
     upper.includes('ENEX') ||
-    upper.includes('SBARRO') ||
     upper.includes('FRANQUICIA COPEC') ||
+    upper.includes('FRANQUICIAS COPEC') ||
     upper.includes('COPEC')
   ) {
     return 'PETROLERAS';
   }
 
-  // Requisito: Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
+  // Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
   if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
-  // Requisito: Las rutas que parten con "SBW " dentro de "Subway"
+  // Las rutas que parten con "SBW " dentro de "Subway"
   if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
 
   // 1. El Golfo (incluye rutas de congelados)
@@ -8383,7 +8796,7 @@ export function canonicalizeOperation(name) {
   // 5. Subway (soporta Subway, SBW, SBW Redespacho)
   if (upper.includes('SUBWAY') || upper.includes('SBW')) return 'Subway';
   // 6. Juan Valdez
-  if (upper.includes('VALDEZ')) return 'Juan Valdez';
+  if (upper.includes('VALDEZ') || upper.includes('CAFEXPRESS')) return 'Juan Valdez';
   // 7. Cantabria
   if (upper.includes('CANTABRIA')) return 'Cantabria';
   // 8. Keyfoods
@@ -8395,6 +8808,8 @@ export function canonicalizeOperation(name) {
   if (upper.includes('SPID')) return 'SPID';
   // 11. Panstars
   if (upper.includes('PANSTAR')) return 'Panstars';
+  // 11b. Pedidos Ya
+  if (upper.includes('PEDIDOS YA')) return 'Pedidos Ya';
   // 12. Carga Consolidada
   if (upper.includes('CONSOLIDADA')) return 'Carga Consolidada';
   // 13. SODEXO
@@ -8402,7 +8817,7 @@ export function canonicalizeOperation(name) {
   // 14. Nutrisco
   if (upper.includes('NUTRISCO')) return 'Nutrisco';
   // 15. Nocturna
-  if (upper.includes('NOCTURNA')) return 'Nocturna';
+  if (upper.includes('NOCTURN')) return 'Nocturna';
   // 16. Sea Garden
   if (upper.includes('SEA GARDEN')) return 'Sea Garden';
   // 17. UM Unidades Móviles
@@ -8431,11 +8846,22 @@ export function isOperationMatching(opA, opB) {
 // Helper para buscar los datos de operación de una ruta
 export function findOperationForRoute(routeCode) {
   if (!routeCode) return null;
-  const clean = String(routeCode).trim().replace(/^\D+/, '');
+  const rawStr = String(routeCode).trim();
+  const clean = rawStr.replace(/^\D+/, '');
   const match = clean.match(/^\d+/);
   const key = match ? match[0] : clean;
+
+  // Aramark rutas fijas 8360 y 1962 -> Centralizado
+  if (key === '8360' || key === '1962') {
+    return {
+      ruta: key,
+      denominacion: key === '8360' ? 'ARAMARK RUTA ENVÍOS 01' : 'ARAMARK RUTA FIJA 1962',
+      operacion: 'Centralizado',
+      transportista: 'T503'
+    };
+  }
   
-  // Requisito 1: Las rutas que parten con 1500 a 1549 son consideradas con el cliente "El Golfo"
+  // Las rutas que parten con 1500 a 1549 son consideradas con el cliente "El Golfo"
   const num = parseInt(key, 10);
   if (!isNaN(num) && num >= 1500 && num <= 1549) {
     return {
@@ -8446,16 +8872,35 @@ export function findOperationForRoute(routeCode) {
     };
   }
 
-  return ROUTE_OPERATIONS_MAP[key] || ROUTE_OPERATIONS_MAP[clean] || null;
+  const entry = ROUTE_OPERATIONS_MAP[key] || ROUTE_OPERATIONS_MAP[clean] || null;
+  if (entry && entry.transportista === 'T311') {
+    return {
+      ...entry,
+      operacion: 'Sbarro'
+    };
+  }
+  return entry;
 }
 
 // Helper para obtener el nombre oficial de la Operación (o fallback a cliente existente)
-export function getOperacionName(routeCode, fallbackClient = '') {
+export function getOperacionName(routeCode, fallbackClient = '', transportista = '', owner = '') {
+  if (isAramarkFixedRoute(routeCode)) {
+    return 'Centralizado';
+  }
+  const byTransp = resolveOperationByTransportistaAndOwner({
+    transportista,
+    owner,
+    ruta: routeCode,
+    fallbackName: fallbackClient
+  });
+  if (byTransp) {
+    return canonicalizeOperation(byTransp);
+  }
   const found = findOperationForRoute(routeCode);
   if (found && found.operacion && found.operacion !== 'Sin Operación') {
     return canonicalizeOperation(found.operacion);
   }
-  if (fallbackClient && String(fallbackClient).trim()) {
+  if (fallbackClient && String(fallbackClient).trim() && !/MULTIRUTA/i.test(String(fallbackClient))) {
     return canonicalizeOperation(String(fallbackClient).trim());
   }
   return 'Otros';
@@ -8468,7 +8913,7 @@ export function splitOperationNames(raw) {
   const result = [];
   parts.forEach(p => {
     const trimmed = p.trim();
-    if (!trimmed) return;
+    if (!trimmed || /MULTIRUTA/i.test(trimmed)) return;
     const canon = canonicalizeOperation(trimmed);
     if (canon && !result.includes(canon)) {
       result.push(canon);
@@ -8477,19 +8922,70 @@ export function splitOperationNames(raw) {
   return result;
 }
 
-// Helper para obtener TODAS las operaciones asociadas a una ruta (soporta rutas con más de una operación)
+// Helper para obtener TODAS las operaciones asociadas a una ruta (soporta rutas con más de una operación y MULTIRUTAS)
 export function getAllOperationsForRoute(r) {
   if (!r) return [];
   const ops = new Set();
 
-  // Requisito: Rutas 1500 a 1549 siempre "El Golfo"
   const rawRuta = String(r.ruta || '').trim();
+
+  // 0. Aramark rutas fijas 8360 y 1962 -> Centralizado
+  if (isAramarkFixedRoute(rawRuta)) {
+    ops.add('Centralizado');
+    return Array.from(ops);
+  }
+
+  // 1. Rutas 1500 a 1549 siempre "El Golfo"
   const num = parseInt(rawRuta.replace(/\D/g, ''), 10);
   if (!isNaN(num) && num >= 1500 && num <= 1549) {
     ops.add('El Golfo');
+    return Array.from(ops);
   }
 
-  // Requisito 4: Todo lo que dice "ARAMARK", "CENTRALIZADO", "MEGAFRIO" considerarlo como "Centralizado"
+  // 2. Si tiene paradas con transportista (ej: MULTIRUTA 56XX o rutas con desglose por parada), extraer las operaciones de sus paradas
+  if (Array.isArray(r.paradas) && r.paradas.length > 0) {
+    r.paradas.forEach(p => {
+      const pTransp = String(p.transportista || '').trim().toUpperCase();
+      const pOwner = String(p.owner || r.owner || '').trim().toUpperCase();
+      if (pTransp || pOwner) {
+        const resolved = resolveOperationByTransportistaAndOwner({
+          transportista: pTransp,
+          owner: pOwner,
+          ruta: rawRuta,
+          fallbackName: p.cliente || r.cliente || r.nombreRuta || ''
+        });
+        if (resolved) ops.add(canonicalizeOperation(resolved));
+      }
+      if (p.operacion && !/MULTIRUTA/i.test(p.operacion)) {
+        splitOperationNames(p.operacion).forEach(o => ops.add(o));
+      }
+      if (p.cliente && !/MULTIRUTA/i.test(p.cliente)) {
+        splitOperationNames(p.cliente).forEach(o => ops.add(o));
+      }
+    });
+  }
+
+  if (ops.size > 0) {
+    return Array.from(ops);
+  }
+
+  // 3. Revisar transportistas directos en la ruta (ej: "T300, T302, T312")
+  const transpCodes = String(r.codigo_transportista || r.transportista || '').toUpperCase().match(/T\d{3}/g) || [];
+  transpCodes.forEach(code => {
+    const resolved = resolveOperationByTransportistaAndOwner({
+      transportista: code,
+      owner: r.owner || '',
+      ruta: rawRuta,
+      fallbackName: r.cliente || r.nombreRuta || ''
+    });
+    if (resolved) ops.add(canonicalizeOperation(resolved));
+  });
+
+  if (ops.size > 0) {
+    return Array.from(ops);
+  }
+
+  // 4. Todo lo que dice "ARAMARK", "CENTRALIZADO", "MEGAFRIO" considerarlo como "Centralizado"
   const combinedStr = [r.ruta, r.cliente, r.denominacion, r.nombreRuta, r.operacion].filter(Boolean).join(' ').toUpperCase();
   if (
     combinedStr.includes('ARAMARK') ||
@@ -8499,15 +8995,20 @@ export function getAllOperationsForRoute(r) {
     ops.add('Centralizado');
   }
 
-  // Requisito: Todo lo que empiece con "RUTA FAST FOOD", PETROLER, ENEX, SBARRO, FRANQUICIA COPEC o COPEC deben ser de PETROLERAS
+  // 5. Sbarro
+  if (combinedStr.includes('SBARRO')) {
+    ops.add('Sbarro');
+  }
+
+  // 6. Petroleras
   if (
     !combinedStr.includes('CENTRALIZADO') &&
+    !combinedStr.includes('SBARRO') &&
     (
       combinedStr.includes('RUTA FAST FOOD') || 
       combinedStr.includes('FAST FOOD') ||
       combinedStr.includes('PETROLER') ||
       combinedStr.includes('ENEX') ||
-      combinedStr.includes('SBARRO') ||
       combinedStr.includes('FRANQUICIA COPEC') ||
       combinedStr.includes('COPEC')
     )
@@ -8515,40 +9016,25 @@ export function getAllOperationsForRoute(r) {
     ops.add('PETROLERAS');
   }
 
-  // 1. Catálogo maestro por número de ruta (Prioridad máxima para evitar mezclas con otros clientes)
+  // 7. Catálogo maestro por número de ruta
   const found = findOperationForRoute(r.ruta);
   if (found && found.operacion && found.operacion !== 'Sin Operación') {
     splitOperationNames(found.operacion).forEach(o => ops.add(o));
   }
 
-  // 2. Si no está en el catálogo maestro, resolver por campos del registro
+  // 8. Resolver por campos del registro si no es MULTIRUTA genérica
   if (ops.size === 0) {
-    if (r.operacion && typeof r.operacion === 'string') {
-      splitOperationNames(r.operacion).forEach(o => ops.add(o));
-    }
-    if (r.cliente && typeof r.cliente === 'string') {
-      splitOperationNames(r.cliente).forEach(o => ops.add(o));
-    }
-    if (r.denominacion && typeof r.denominacion === 'string') {
-      splitOperationNames(r.denominacion).forEach(o => ops.add(o));
-    }
-    if (r.nombreRuta && typeof r.nombreRuta === 'string') {
-      splitOperationNames(r.nombreRuta).forEach(o => ops.add(o));
-    }
-  }
-
-  // 4. Paradas de la ruta (solo campos de operacion y cliente explícitos, nunca destinos/direcciones)
-  if (Array.isArray(r.paradas)) {
-    r.paradas.forEach(p => {
-      if (p.operacion) splitOperationNames(p.operacion).forEach(o => ops.add(o));
-      if (p.cliente) splitOperationNames(p.cliente).forEach(o => ops.add(o));
+    [r.operacion, r.cliente, r.denominacion, r.nombreRuta].forEach(field => {
+      if (field && typeof field === 'string' && !/MULTIRUTA/i.test(field)) {
+        splitOperationNames(field).forEach(o => ops.add(o));
+      }
     });
   }
 
-  // 5. Fallback si no se encontró
+  // 9. Fallback si no se encontró
   if (ops.size === 0) {
-    const fallback = getOperacionName(r.ruta, r.operacion || r.cliente);
-    if (fallback) ops.add(canonicalizeOperation(fallback));
+    const fallback = getOperacionName(r.ruta, r.operacion || r.cliente, r.transportista, r.owner);
+    if (fallback && !/MULTIRUTA/i.test(fallback)) ops.add(canonicalizeOperation(fallback));
   }
 
   return Array.from(ops);

@@ -15,7 +15,7 @@ import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
-import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute, canonicalizeOperation, isOperationMatching, splitOperationNames } from '../data/operacionesMaster';
+import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute, canonicalizeOperation, isOperationMatching, splitOperationNames, isFiveDigitRoute } from '../data/operacionesMaster';
 import { getBriefingOperation } from './Briefing';
 
 // ==========================================
@@ -535,11 +535,11 @@ export default function RuteoView() {
       rawRoutes = [];
     }
 
-    // Deduplicación estricta por número de ruta y vuelta
+    // Deduplicación estricta por número de ruta y vuelta (excluyendo rutas de 5 dígitos)
     const dedupedMap = new Map();
     rawRoutes.forEach(r => {
       const rutaKey = String(r.ruta || '').trim();
-      if (!rutaKey) return;
+      if (!rutaKey || isFiveDigitRoute(rutaKey)) return;
       const vKey = String(r.n_vuelta || '1').trim().replace(/vuelta\s*/i, '') || '1';
       const uniqueKey = `${rutaKey}:::${vKey}`;
 
@@ -1074,19 +1074,23 @@ export default function RuteoView() {
     const trips = Array.from(tripMap.values()).map(trip => {
       const rutasStr = trip.rutas.map(r => r.ruta).join('+');
       
-      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro, soportando multi-operación y combinaciones de viajes)
+      // Operación (Operaciones deduplicadas y normalizadas con catálogo maestro y transportistas de paradas, soportando multi-operación y combinaciones de viajes)
       const opsSet = new Set();
       trip.rutas.forEach(r => {
-        // Consultar primero el catálogo maestro por número de ruta para evitar contaminaciones indebidas
-        const masterOp = getOperacionName(r.ruta);
-        const op = masterOp && masterOp !== 'Sin Operación'
-          ? masterOp
-          : (getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente));
-        if (op) {
-          splitOperationNames(op).forEach(o => {
+        const routeOps = getAllOperationsForRoute(r);
+        if (routeOps && routeOps.length > 0) {
+          routeOps.forEach(o => {
             const canon = canonicalizeOperation(o);
-            if (canon) opsSet.add(canon);
+            if (canon && canon !== 'Otros') opsSet.add(canon);
           });
+        } else {
+          const op = getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente, r.transportista, r.owner);
+          if (op) {
+            splitOperationNames(op).forEach(o => {
+              const canon = canonicalizeOperation(o);
+              if (canon && canon !== 'Otros') opsSet.add(canon);
+            });
+          }
         }
       });
       const operacionStr = Array.from(opsSet).join(' + ') || 'FAST FOOD';
@@ -1095,11 +1099,10 @@ export default function RuteoView() {
       const zonaItems = trip.rutas.map(r => {
         const farthest = findFarthestComunaForRoute(r);
         const m3Fmt = (parseFloat(r.m3) || 0).toFixed(4);
-        const masterOp = getOperacionName(r.ruta);
-        const rawOp = masterOp && masterOp !== 'Sin Operación'
-          ? masterOp
-          : (getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente));
-        const opName = canonicalizeOperation(rawOp);
+        const routeOps = getAllOperationsForRoute(r).map(o => canonicalizeOperation(o)).filter(o => o && o !== 'Otros');
+        const opName = routeOps.length > 0
+          ? routeOps.join(' + ')
+          : canonicalizeOperation(getBriefingOperation(r) || getOperacionName(r.ruta, r.operacion || r.cliente, r.transportista, r.owner));
         return {
           ruta: r.ruta,
           cliente: opName,
