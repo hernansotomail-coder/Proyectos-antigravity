@@ -367,18 +367,20 @@ export const extractShortTruckCode = (rawCamion) => {
   return str;
 };
 
-// Limpia el nombre de la empresa externa eliminando prefijos "Externo_", "T.E.", "T.E", "TE."
+// Extrae el nombre de la empresa externa desde la columna "Estado" de Gestión Flota
+// omitiendo lo que está antes del "_" (ej: "Externo_Afca" -> "Afca", "Externo_Valencia" -> "Valencia")
+// y eliminando prefijos "T.E." si provienen de dotación.
 export const cleanExternalCompanyName = (raw) => {
   if (!raw) return '';
   let str = String(raw).trim();
-  // Quitar prefijo Externo_ o Externo -
-  str = str.replace(/^externo[\s_\-:]*/i, '').trim();
-  // Quitar prefijo T.E., T.E, TE. al inicio o tras espacios
+  if (str.includes('_')) {
+    str = str.slice(str.indexOf('_') + 1).trim();
+  } else {
+    str = str.replace(/^externo[\s\-:]*/i, '').trim();
+  }
   str = str.replace(/(?:^|\b)T\.?\s*E\.?[\s._\-:]*/gi, '').trim();
   str = str.replace(/^T\.?E\.?\s*/i, '').trim();
-  // Normalizar errores tipográficos comunes ("trasportes", "tranportes")
-  str = str.replace(/\btra[sn]portes\b/gi, 'TRANSPORTES');
-  return str.toUpperCase().replace(/\s+/g, ' ').trim();
+  return str.replace(/\s+/g, ' ').trim();
 };
 
 export const resolveEmpresaExternaDisplay = (rows = [], fleetList = [], staffList = [], customOverride = '') => {
@@ -386,16 +388,22 @@ export const resolveEmpresaExternaDisplay = (rows = [], fleetList = [], staffLis
     return cleanExternalCompanyName(customOverride);
   }
   let raw = '';
+  // 1. Priorizar columna "Estado" (status) de Gestión de Flota omitiendo lo que está antes de "_"
   if (rows.length > 0) {
     const cam = rows[0].camion;
     if (cam && fleetList && fleetList.length > 0) {
       const v = matchVehicleByCode(cam, '', fleetList);
       if (v) {
-        raw = (v.empresa_externa || v.status || '').trim();
-        if (isOperationalFleetStatus(raw)) raw = '';
+        const st = String(v.status || '').trim();
+        if (st && !isOperationalFleetStatus(st)) {
+          raw = st;
+        } else if (v.empresa_externa && !isOperationalFleetStatus(v.empresa_externa)) {
+          raw = String(v.empresa_externa).trim();
+        }
       }
     }
   }
+  // 2. Fallback a empresa_externa de la fila
   if (!raw) {
     for (const r of rows) {
       if (r.empresa_externa && r.empresa_externa.trim()) {
@@ -404,6 +412,7 @@ export const resolveEmpresaExternaDisplay = (rows = [], fleetList = [], staffLis
       }
     }
   }
+  // 3. Fallback a empresa_externa del conductor en Dotación
   if (!raw && rows.length > 0) {
     const cond = (rows[0].conductor_name || '').trim().toLowerCase();
     const rut = (rows[0].conductor_rut || '').trim();
@@ -413,7 +422,7 @@ export const resolveEmpresaExternaDisplay = (rows = [], fleetList = [], staffLis
     }
   }
   const cleaned = cleanExternalCompanyName(raw);
-  return cleaned || 'TRANSPORTE EXTERNO';
+  return cleaned || 'Externa';
 };
 
 // Componente Lista Desplegable con Búsqueda Rápida (Combobox para Camión, Conductor y Empresa Externa)
@@ -424,7 +433,7 @@ function SearchableExternalDropdown({
   options = [],
   placeholder = 'Seleccionar o escribir...',
   widthClass = 'w-44',
-  uppercase = true
+  uppercase = false
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [filterText, setFilterText] = useState('');
@@ -679,7 +688,8 @@ export default function RouteDispatch({ onlyExternal = false }) {
       const key = code.toUpperCase();
       if (seen.has(key)) return;
       seen.add(key);
-      const company = cleanExternalCompanyName(f.empresa_externa || f.status || '');
+      const rawStatus = f.status && !isOperationalFleetStatus(f.status) ? f.status : (f.empresa_externa || '');
+      const company = cleanExternalCompanyName(rawStatus);
       list.push({
         value: code,
         label: internal && plate ? `${internal} (${plate})` : code,
@@ -712,34 +722,24 @@ export default function RouteDispatch({ onlyExternal = false }) {
   }, [staffList]);
 
   const externalCompanyOptions = useMemo(() => {
-    const seen = new Set();
+    const seenLower = new Set();
     const list = [];
-    // Empresas provenientes de Gestión Flota -> Flota Externa (sin T.E.)
+    // Empresas provenientes de Gestión Flota -> Flota Externa (columna Estado omitiendo lo anterior a "_")
     (fleetList || []).filter(f => isVehicleExternal(f)).forEach(f => {
-      const raw = f.empresa_externa || f.status || '';
-      if (!raw || isOperationalFleetStatus(raw)) return;
-      const cleaned = cleanExternalCompanyName(raw);
-      if (!cleaned || seen.has(cleaned)) return;
-      seen.add(cleaned);
-      list.push({
-        value: cleaned,
-        label: cleaned
-      });
-    });
-    // Complementar con empresas externas de dotación si existieran (también limpiando T.E.)
-    (staffList || []).filter(s => isStaffExternal(s)).forEach(s => {
-      const raw = s.empresa_externa || '';
-      if (!raw) return;
-      const cleaned = cleanExternalCompanyName(raw);
-      if (!cleaned || seen.has(cleaned)) return;
-      seen.add(cleaned);
+      const rawStatus = f.status && !isOperationalFleetStatus(f.status) ? f.status : (f.empresa_externa || '');
+      if (!rawStatus || isOperationalFleetStatus(rawStatus)) return;
+      const cleaned = cleanExternalCompanyName(rawStatus);
+      if (!cleaned) return;
+      const lowerKey = cleaned.toLowerCase();
+      if (seenLower.has(lowerKey)) return;
+      seenLower.add(lowerKey);
       list.push({
         value: cleaned,
         label: cleaned
       });
     });
     return list.sort((a, b) => a.label.localeCompare(b.label));
-  }, [fleetList, staffList]);
+  }, [fleetList]);
 
   // Fechas disponibles (ordenadas cronológicamente de más reciente a más antigua)
   const availableDates = useMemo(() => {
@@ -803,6 +803,11 @@ export default function RouteDispatch({ onlyExternal = false }) {
 
   // Estado del modal de "Mensajes por Conductor / Dupla"
   const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+
+  // Estado del pop-up "Envío de rutas" en Envío de Rutas Externos (filtro por Empresa y botón Copiar Imagen por fila)
+  const [isExternalSendPopupOpen, setIsExternalSendPopupOpen] = useState(false);
+  const [selectedPopupEmpresa, setSelectedPopupEmpresa] = useState('Todas');
+  const [copiedImageTripId, setCopiedImageTripId] = useState(null);
 
   // Estado del Mantenedor de Números de Celular (Dotación)
   const [isStaffPhoneModalOpen, setIsStaffPhoneModalOpen] = useState(false);
@@ -1250,6 +1255,33 @@ export default function RouteDispatch({ onlyExternal = false }) {
     });
   }, [onlyExternal, filteredRows, externalEditsMap, criticalOverridesMap, selectedDate, anticipacionMinutos, fleetList, staffList, findTiendaCritica, tiendasCriticasList]);
 
+  // Lista de empresas únicas para el selector del Pop-up "Envío de rutas" (Externos)
+  const popupEmpresasList = useMemo(() => {
+    const mapLower = new Map();
+    externalTripCards.forEach(tc => {
+      const emp = (tc.empresaDisplay || '').trim();
+      if (emp && !mapLower.has(emp.toLowerCase())) {
+        mapLower.set(emp.toLowerCase(), emp);
+      }
+    });
+    externalCompanyOptions.forEach(opt => {
+      const emp = (opt.value || '').trim();
+      if (emp && !mapLower.has(emp.toLowerCase())) {
+        mapLower.set(emp.toLowerCase(), emp);
+      }
+    });
+    return Array.from(mapLower.values()).sort((a, b) => a.localeCompare(b));
+  }, [externalTripCards, externalCompanyOptions]);
+
+  // Filas filtradas por empresa dentro del Pop-up "Envío de rutas"
+  const popupFilteredTripCards = useMemo(() => {
+    if (!selectedPopupEmpresa || selectedPopupEmpresa === 'Todas') {
+      return externalTripCards;
+    }
+    const targetLower = selectedPopupEmpresa.trim().toLowerCase();
+    return externalTripCards.filter(tc => (tc.empresaDisplay || '').trim().toLowerCase() === targetLower);
+  }, [externalTripCards, selectedPopupEmpresa]);
+
   // Capturar tarjeta de Ruta Externa como imagen PNG al portapapeles o descarga
   const renderExternalCardCanvas = async (tripId) => {
     const el = cardRefs.current[tripId];
@@ -1275,7 +1307,9 @@ export default function RouteDispatch({ onlyExternal = false }) {
       const pngBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
       if (pngBlob && navigator.clipboard && window.ClipboardItem) {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
-        toast.success(`¡Imagen de ${tripCard.camionDisplay} (${tripCard.conductorDisplay}) copiada al portapapeles! Lista para pegar (Ctrl+V) en WhatsApp o Correo.`, { id: toastId });
+        setCopiedImageTripId(tripCard.tripId);
+        setTimeout(() => setCopiedImageTripId(null), 2500);
+        toast.success(`¡Imagen de ${tripCard.camionDisplay} (${tripCard.conductorDisplay}) copiada al portapapeles! Lista para pegar (Ctrl+V).`, { id: toastId });
       } else if (pngBlob) {
         const url = URL.createObjectURL(pngBlob);
         const link = document.createElement('a');
@@ -1613,106 +1647,122 @@ export default function RouteDispatch({ onlyExternal = false }) {
             </select>
           </div>
 
-          {/* Botón: Mantenedor de Números de Celular enlazado con Dotación */}
-          <Button
-            variant="outline"
-            onClick={() => setIsStaffPhoneModalOpen(true)}
-            className="flex items-center gap-1.5 text-xs font-bold border-indigo-200 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-100 transition-all shadow-xs"
-            title="Abrir el mantenedor de números de celular enlazado con la Dotación"
-          >
-            <Smartphone size={14} className="text-indigo-600" />
-            <span>Mantenedor de Celulares</span>
-            <span className="bg-indigo-200 text-indigo-900 text-[10px] font-extrabold px-1.5 py-0.2 rounded-full">
-              {staffWithPhoneCount}/{totalStaffCount}
-            </span>
-          </Button>
-
-          {/* Botón: Ver por Conductor / Dupla */}
-          <Button
-            variant="outline"
-            onClick={() => setIsGroupModalOpen(true)}
-            className="flex items-center gap-1.5 text-xs font-bold border-slate-200 text-slate-700 hover:bg-slate-100"
-            title="Ver rutas agrupadas por Conductor y enviar en un solo mensaje"
-          >
-            <Users size={14} className="text-indigo-600" />
-            Por Conductor ({groupedByConductor.length})
-          </Button>
-
-          {/* Botón: Enviar / Copiar Resumen General */}
-          <Button
-            variant="outline"
-            onClick={handleCopyDailySummary}
-            className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
-            title="Copiar todas las rutas del día en formato resumen para WhatsApp"
-          >
-            <Copy size={14} />
-            Copiar Resumen General
-          </Button>
-
-          <Button
-            onClick={handleSendDailySummaryWhatsApp}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
-            title="Abrir WhatsApp con el resumen completo del día"
-          >
-            <MessageSquare size={14} />
-            Enviar WhatsApp General
-          </Button>
-        </div>
-      </div>
-
-      {/* Selector de Anticipación de Citación (Requisito 6: 15, 30, 40 min, 1 hora) */}
-      <div className="bg-white rounded-xl border border-slate-200 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-2xs shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl shrink-0">
-            <Clock size={16} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black text-slate-800">Citar con Anticipación (Todas las Rutas):</span>
-              {anticipacionMinutos > 0 ? (
-                <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                  <span>⏰ Citando {anticipacionMinutos === 60 ? '1 hora' : `${anticipacionMinutos} min`} antes de la Hora Cita base</span>
-                </span>
-              ) : (
-                <span className="bg-slate-100 text-slate-600 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-                  Sin anticipación (Horario de cita oficial)
-                </span>
-              )}
-            </div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Calcula y ajusta automáticamente la hora de presentación en el mensaje de WhatsApp y en la tabla para todas las rutas.
-            </p>
-          </div>
-        </div>
-
-        {/* Botones selectores de rango */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {[
-            { label: 'Hora Exacta (0m)', val: 0 },
-            { label: '15 min antes', val: 15 },
-            { label: '30 min antes', val: 30 },
-            { label: '40 min antes', val: 40 },
-            { label: '1 hora antes', val: 60 },
-          ].map(opt => {
-            const isSelected = anticipacionMinutos === opt.val;
-            return (
-              <button
-                key={opt.val}
-                type="button"
-                onClick={() => handleSetAnticipacion(opt.val)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                  isSelected
-                    ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
-                }`}
-                title={opt.val === 0 ? 'Citar a la hora exacta estipulada en Ruteo' : `Citar ${opt.label} respecto a la hora de cita de Ruteo`}
+          {onlyExternal ? (
+            /* Botón: Envío de rutas (Pop-up por Empresa con Copiar Imagen por fila) */
+            <Button
+              onClick={() => setIsExternalSendPopupOpen(true)}
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm cursor-pointer"
+              title="Abrir vista rápida de Envío de rutas por Empresa para copiar imágenes"
+            >
+              <Send size={14} />
+              <span>Envío de rutas ({externalTripCards.length})</span>
+            </Button>
+          ) : (
+            <>
+              {/* Botón: Mantenedor de Números de Celular enlazado con Dotación */}
+              <Button
+                variant="outline"
+                onClick={() => setIsStaffPhoneModalOpen(true)}
+                className="flex items-center gap-1.5 text-xs font-bold border-indigo-200 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-100 transition-all shadow-xs"
+                title="Abrir el mantenedor de números de celular enlazado con la Dotación"
               >
-                {opt.label}
-              </button>
-            );
-          })}
+                <Smartphone size={14} className="text-indigo-600" />
+                <span>Mantenedor de Celulares</span>
+                <span className="bg-indigo-200 text-indigo-900 text-[10px] font-extrabold px-1.5 py-0.2 rounded-full">
+                  {staffWithPhoneCount}/{totalStaffCount}
+                </span>
+              </Button>
+
+              {/* Botón: Ver por Conductor / Dupla */}
+              <Button
+                variant="outline"
+                onClick={() => setIsGroupModalOpen(true)}
+                className="flex items-center gap-1.5 text-xs font-bold border-slate-200 text-slate-700 hover:bg-slate-100"
+                title="Ver rutas agrupadas por Conductor y enviar en un solo mensaje"
+              >
+                <Users size={14} className="text-indigo-600" />
+                Por Conductor ({groupedByConductor.length})
+              </Button>
+
+              {/* Botón: Enviar / Copiar Resumen General */}
+              <Button
+                variant="outline"
+                onClick={handleCopyDailySummary}
+                className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                title="Copiar todas las rutas del día en formato resumen para WhatsApp"
+              >
+                <Copy size={14} />
+                Copiar Resumen General
+              </Button>
+
+              <Button
+                onClick={handleSendDailySummaryWhatsApp}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
+                title="Abrir WhatsApp con el resumen completo del día"
+              >
+                <MessageSquare size={14} />
+                Enviar WhatsApp General
+              </Button>
+            </>
+          )}
         </div>
       </div>
+
+      {/* Selector de Anticipación de Citación (solo en Envío de Rutas propio) */}
+      {!onlyExternal && (
+        <div className="bg-white rounded-xl border border-slate-200 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-2xs shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl shrink-0">
+              <Clock size={16} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-slate-800">Citar con Anticipación (Todas las Rutas):</span>
+                {anticipacionMinutos > 0 ? (
+                  <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                    <span>⏰ Citando {anticipacionMinutos === 60 ? '1 hora' : `${anticipacionMinutos} min`} antes de la Hora Cita base</span>
+                  </span>
+                ) : (
+                  <span className="bg-slate-100 text-slate-600 text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                    Sin anticipación (Horario de cita oficial)
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Calcula y ajusta automáticamente la hora de presentación en el mensaje de WhatsApp y en la tabla para todas las rutas.
+              </p>
+            </div>
+          </div>
+
+          {/* Botones selectores de rango */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {[
+              { label: 'Hora Exacta (0m)', val: 0 },
+              { label: '15 min antes', val: 15 },
+              { label: '30 min antes', val: 30 },
+              { label: '40 min antes', val: 40 },
+              { label: '1 hora antes', val: 60 },
+            ].map(opt => {
+              const isSelected = anticipacionMinutos === opt.val;
+              return (
+                <button
+                  key={opt.val}
+                  type="button"
+                  onClick={() => handleSetAnticipacion(opt.val)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                    isSelected
+                      ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
+                  }`}
+                  title={opt.val === 0 ? 'Citar a la hora exacta estipulada en Ruteo' : `Citar ${opt.label} respecto a la hora de cita de Ruteo`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 2. Banner de Estado del Guardado */}
       {currentHistoryEntry ? (
@@ -1738,48 +1788,50 @@ export default function RouteDispatch({ onlyExternal = false }) {
         </div>
       )}
 
-      {/* 3. Tarjetas de Métricas Rápidas */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
-        <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Total Rutas</span>
-            <p className="text-lg font-black text-slate-800">{totalRutas}</p>
+      {/* 3. Tarjetas de Métricas Rápidas (solo en Envío de Rutas propio) */}
+      {!onlyExternal && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
+          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-400">Total Rutas</span>
+              <p className="text-lg font-black text-slate-800">{totalRutas}</p>
+            </div>
+            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+              <Truck size={18} />
+            </div>
           </div>
-          <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-            <Truck size={18} />
-          </div>
-        </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Conductores / Duplas</span>
-            <p className="text-lg font-black text-indigo-700">{totalConductores}</p>
+          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-400">Conductores / Duplas</span>
+              <p className="text-lg font-black text-indigo-700">{totalConductores}</p>
+            </div>
+            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
+              <Users size={18} />
+            </div>
           </div>
-          <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-            <Users size={18} />
-          </div>
-        </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Total Locales</span>
-            <p className="text-lg font-black text-amber-700">{totalLocales}</p>
+          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-400">Total Locales</span>
+              <p className="text-lg font-black text-amber-700">{totalLocales}</p>
+            </div>
+            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+              <Layers size={18} />
+            </div>
           </div>
-          <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
-            <Layers size={18} />
-          </div>
-        </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Volumen Total</span>
-            <p className="text-lg font-black text-emerald-700">{totalM3} m³</p>
-          </div>
-          <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
-            <Sparkles size={18} />
+          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
+            <div>
+              <span className="text-[10px] uppercase font-bold text-slate-400">Volumen Total</span>
+              <p className="text-lg font-black text-emerald-700">{totalM3} m³</p>
+            </div>
+            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+              <Sparkles size={18} />
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* 4. Barra de Filtros y Acciones en Lote */}
       <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
@@ -1789,53 +1841,57 @@ export default function RouteDispatch({ onlyExternal = false }) {
             <Search className="absolute left-2.5 top-2 text-slate-400" size={14} />
             <input
               type="text"
-              placeholder="Buscar por Conductor, Auxiliar, Ruta o Cliente..."
+              placeholder={onlyExternal ? "Buscar por Conductor, Camión, Empresa, Ruta o Cliente..." : "Buscar por Conductor, Auxiliar, Ruta o Cliente..."}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-slate-50 focus:bg-white"
             />
           </div>
 
-          {/* Filtro por Vuelta */}
-          <div className="flex items-center gap-1 text-xs">
-            <span className="text-slate-400 font-bold text-[11px]">Vuelta:</span>
-            <select
-              value={vueltaFilter}
-              onChange={(e) => setVueltaFilter(e.target.value)}
-              className="text-xs font-semibold border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 outline-none"
-            >
-              <option value="Todas">Todas</option>
-              <option value="1">Vuelta 1</option>
-              <option value="2">Vuelta 2</option>
-              <option value="3">Vuelta 3</option>
-            </select>
-          </div>
+          {!onlyExternal && (
+            <>
+              {/* Filtro por Vuelta */}
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-slate-400 font-bold text-[11px]">Vuelta:</span>
+                <select
+                  value={vueltaFilter}
+                  onChange={(e) => setVueltaFilter(e.target.value)}
+                  className="text-xs font-semibold border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 outline-none"
+                >
+                  <option value="Todas">Todas</option>
+                  <option value="1">Vuelta 1</option>
+                  <option value="2">Vuelta 2</option>
+                  <option value="3">Vuelta 3</option>
+                </select>
+              </div>
 
-          {/* Botones globales Expandir Todo / Contraer Todo (Requisito 1) */}
-          <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
-            <button
-              type="button"
-              onClick={handleCollapseAll}
-              className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 transition-colors"
-              title="Contraer todas las tablas de detalle de rutas"
-            >
-              <ChevronRight size={13} />
-              Contraer todo
-            </button>
-            <button
-              type="button"
-              onClick={handleExpandAll}
-              className="flex items-center gap-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg border border-indigo-200 transition-colors"
-              title="Expandir todas las tablas de detalle de rutas"
-            >
-              <ChevronDown size={13} />
-              Expandir todo
-            </button>
-          </div>
+              {/* Botones globales Expandir Todo / Contraer Todo (Requisito 1) */}
+              <div className="flex items-center gap-1 border-l border-slate-200 pl-2">
+                <button
+                  type="button"
+                  onClick={handleCollapseAll}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg border border-slate-200 transition-colors"
+                  title="Contraer todas las tablas de detalle de rutas"
+                >
+                  <ChevronRight size={13} />
+                  Contraer todo
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExpandAll}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg border border-indigo-200 transition-colors"
+                  title="Expandir todas las tablas de detalle de rutas"
+                >
+                  <ChevronDown size={13} />
+                  Expandir todo
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Acciones en lote de selección */}
-        {selectedRowIds.length > 0 && (
+        {!onlyExternal && selectedRowIds.length > 0 && (
           <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 px-3 py-1 rounded-lg">
             <span className="text-xs font-bold text-blue-800">
               {selectedRowIds.length} seleccionada(s)
@@ -1869,10 +1925,6 @@ export default function RouteDispatch({ onlyExternal = false }) {
             </div>
           ) : (
             externalTripCards.map((tripCard) => {
-              const condPhone = resolveStaffPhone(tripCard.conductorDisplay, tripCard.conductorRut);
-              const waMsg = buildExternalTripWhatsAppMessage(tripCard, selectedDate);
-              const isCardCopied = copiedId === `ext-wa-${tripCard.tripId}`;
-
               return (
                 <div
                   key={tripCard.tripId}
@@ -1910,6 +1962,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
                           options={externalTruckOptions}
                           placeholder="Buscar camión ext..."
                           widthClass="w-36"
+                          uppercase={true}
                           onChange={(val) => handleUpdateExternalTripEdit(tripCard.tripId, 'camion', val, tripCard.rows)}
                           onSelectOption={(opt) => {
                             if (opt.empresa) {
@@ -1927,6 +1980,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
                           options={externalConductorOptions}
                           placeholder="Buscar conductor ext..."
                           widthClass="w-52"
+                          uppercase={true}
                           onChange={(val) => handleUpdateExternalTripEdit(tripCard.tripId, 'conductor_name', val, tripCard.rows)}
                         />
                       </div>
@@ -1944,7 +1998,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
                         />
                       </label>
 
-                      {/* Editable: Empresa Externa (Lista desplegable desde Gestión Flota -> Flota Externa sin T.E.) */}
+                      {/* Editable: Empresa Externa (Lista desplegable desde Gestión Flota -> Flota Externa omitiendo lo anterior a "_") */}
                       <div className="flex items-center gap-1.5 text-xs">
                         <span className="font-bold text-slate-600">Empresa:</span>
                         <SearchableExternalDropdown
@@ -1952,55 +2006,36 @@ export default function RouteDispatch({ onlyExternal = false }) {
                           options={externalCompanyOptions}
                           placeholder="Seleccionar empresa..."
                           widthClass="w-44"
+                          uppercase={false}
                           onChange={(val) => handleUpdateExternalTripEdit(tripCard.tripId, 'empresa_externa', cleanExternalCompanyName(val), tripCard.rows)}
                         />
                       </div>
                     </div>
 
-                    {/* Botones de exportación de Imagen y WhatsApp */}
+                    {/* Botones de exportación de Imagen */}
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <button
                         type="button"
                         onClick={() => handleCopyExternalCardImage(tripCard)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-2xs transition-all active:scale-95"
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg shadow-2xs transition-all active:scale-95 cursor-pointer ${
+                          copiedImageTripId === tripCard.tripId
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
                         title="Copiar ficha como imagen PNG al portapapeles para pegar en WhatsApp o correo"
                       >
-                        <ImageIcon size={13} />
-                        <span>Copiar Imagen</span>
+                        {copiedImageTripId === tripCard.tripId ? <Check size={13} /> : <ImageIcon size={13} />}
+                        <span>{copiedImageTripId === tripCard.tripId ? '¡Imagen Copiada!' : 'Copiar Imagen'}</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleDownloadExternalCardImage(tripCard)}
-                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition-all"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition-all cursor-pointer"
                         title="Descargar ficha en formato imagen PNG"
                       >
                         <Download size={13} />
                         <span>PNG</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleCopyText(waMsg, `ext-wa-${tripCard.tripId}`)}
-                        className={`flex items-center gap-1 px-2.5 py-1.5 text-xs font-bold rounded-lg border transition-all ${
-                          isCardCopied
-                            ? 'bg-green-100 border-green-300 text-green-700'
-                            : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                        }`}
-                        title="Copiar texto para WhatsApp"
-                      >
-                        {isCardCopied ? <Check size={13} className="text-green-600" /> : <Copy size={13} />}
-                        <span>{isCardCopied ? 'Copiado' : 'Texto'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenWhatsApp(condPhone, waMsg)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs transition-all active:scale-95"
-                        title="Enviar por WhatsApp"
-                      >
-                        <MessageSquare size={13} />
-                        <span>WhatsApp</span>
                       </button>
                     </div>
                   </div>
@@ -3253,6 +3288,142 @@ export default function RouteDispatch({ onlyExternal = false }) {
                   Cerrar
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: POP-UP "ENVÍO DE RUTAS" PARA EXTERNOS (Filtro por Empresa + Copiar Imagen por fila) */}
+      {isExternalSendPopupOpen && (
+        <div className="fixed inset-0 z-[9999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-4xl w-full p-5 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95">
+            {/* Cabecera del Pop-up */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 bg-blue-100 text-blue-700 rounded-xl">
+                  <Send size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-800">Envío de rutas ({selectedDate})</h3>
+                  <p className="text-xs text-slate-500">
+                    Selecciona la empresa externa y presiona <strong>Copiar imagen</strong> en cada fila para copiar la ficha completa al portapapeles.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsExternalSendPopupOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Selector de Empresa */}
+            <div className="py-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <label className="text-xs font-bold text-slate-700">Empresa:</label>
+                <select
+                  value={selectedPopupEmpresa}
+                  onChange={(e) => setSelectedPopupEmpresa(e.target.value)}
+                  className="text-xs font-bold border border-slate-300 rounded-lg px-3 py-1.5 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer min-w-[220px]"
+                >
+                  <option value="Todas">Todas las empresas ({externalTripCards.length})</option>
+                  {popupEmpresasList.map(emp => {
+                    const count = externalTripCards.filter(tc => (tc.empresaDisplay || '').trim().toLowerCase() === emp.toLowerCase()).length;
+                    return (
+                      <option key={emp} value={emp}>
+                        {emp} ({count})
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <span className="text-xs font-semibold text-slate-500">
+                Mostrando <strong>{popupFilteredTripCards.length}</strong> {popupFilteredTripCards.length === 1 ? 'viaje' : 'viajes'}
+              </span>
+            </div>
+
+            {/* Tabla resumida: Conductor, Vuelta, Camión, Ruta y Botón Copiar Imagen */}
+            <div className="flex-1 overflow-y-auto my-2 border border-slate-200 rounded-xl">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 uppercase text-[11px] font-bold">
+                  <tr>
+                    <th className="py-2.5 px-3">Empresa</th>
+                    <th className="py-2.5 px-3">Conductor</th>
+                    <th className="py-2.5 px-3 text-center">Vuelta</th>
+                    <th className="py-2.5 px-3 text-center">Camión</th>
+                    <th className="py-2.5 px-3">Ruta</th>
+                    <th className="py-2.5 px-3 text-center w-40">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {popupFilteredTripCards.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-slate-400">
+                        No hay viajes registrados para la empresa seleccionada.
+                      </td>
+                    </tr>
+                  ) : (
+                    popupFilteredTripCards.map((tc) => {
+                      const isImgCopied = copiedImageTripId === tc.tripId;
+                      const rutasText = tc.routeBlocks.map(rb => rb.ruta).join(', ');
+                      return (
+                        <tr key={tc.tripId} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-2.5 px-3 font-semibold text-purple-800">
+                            <span className="bg-purple-50 border border-purple-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                              {tc.empresaDisplay}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            {tc.conductorDisplay}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className="bg-slate-100 border border-slate-200 text-slate-800 font-bold px-2 py-0.5 rounded-full text-[11px]">
+                              {tc.vueltaLabel}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-mono font-extrabold text-blue-900">
+                            <span className="bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded">
+                              {tc.camionDisplay}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                            {rutasText}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleCopyExternalCardImage(tc)}
+                              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold shadow-2xs transition-all active:scale-95 cursor-pointer ${
+                                isImgCopied
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+                              }`}
+                              title="Copiar la imagen completa de esta ruta al portapapeles"
+                            >
+                              {isImgCopied ? <Check size={13} /> : <ImageIcon size={13} />}
+                              <span>{isImgCopied ? '¡Imagen copiada!' : 'Copiar imagen'}</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer del Pop-up */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end shrink-0">
+              <Button
+                variant="outline"
+                onClick={() => setIsExternalSendPopupOpen(false)}
+                className="text-xs font-bold cursor-pointer"
+              >
+                Cerrar
+              </Button>
             </div>
           </div>
         </div>

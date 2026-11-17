@@ -1002,12 +1002,128 @@ export default function Briefing() {
       const baseRow = computeRowFromBucket(bucket);
 
       if (baseRow.operacion === 'PETROLERAS') {
-        const subRows = PETROLERAS_SUBCATEGORIES.map(sub => {
-          const sb = petrolerasSubBuckets.get(sub.code);
-          return computeRowFromBucket(sb);
+        // Distribuir cada camión/ruta único de PETROLERAS entre T300, T302 y T312 sin duplicar,
+        // asignando los camiones compartidos a la sub-categoría que tenga menos rutas,
+        // de modo que la suma de T300 + T302 + T312 coincida exactamente con PETROLERAS en todas las columnas.
+        const petUnitsMap = new Map();
+        Array.from(bucket.routesMap.entries()).forEach(([rKey, r]) => {
+          const camion = (r.camion || '').trim();
+          const conductor = (r.conductor_name || '').trim();
+          const aux = (r.aux1_name || '').trim();
+
+          const hasCamion = Boolean(camion && !camion.toLowerCase().includes('sin cami') && camion !== '-');
+          const hasConductor = Boolean(conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-');
+          const hasAux = Boolean(aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
+          const isCovered = hasCamion || hasConductor || hasAux;
+
+          let colKey = 'sinCobertura';
+          let unitKey = `sinCobertura:::${rKey}`;
+
+          if (isCovered) {
+            const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
+            const matchVuelta = rawVuelta.match(/\d+/);
+            const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
+            const isExt = isAssignmentExternal(r, fleetList, staffList);
+            const identifier = hasCamion ? camion : (hasConductor ? conductor : (hasAux ? aux : `ruta-${r.ruta}`));
+            if (vueltaNum === 1) {
+              colKey = isExt ? 'externa1v' : 'propia1v';
+            } else {
+              colKey = isExt ? 'externa2v' : 'propia2v';
+            }
+            unitKey = `${colKey}:::${identifier}`;
+          }
+
+          if (!petUnitsMap.has(unitKey)) {
+            petUnitsMap.set(unitKey, {
+              unitKey,
+              colKey,
+              subCodesSet: new Set()
+            });
+          }
+          const unitEntry = petUnitsMap.get(unitKey);
+
+          const paradas = r.paradas || [];
+          if (paradas.length > 0) {
+            paradas.forEach(p => {
+              const { operacion: pOp, subCatCode } = classifyParadaForBriefing(p, r);
+              if (pOp === 'PETROLERAS') {
+                const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
+                unitEntry.subCodesSet.add(effSub);
+              }
+            });
+          } else {
+            const { operacion: pOp, subCatCode } = classifyParadaForBriefing(null, r);
+            if (pOp === 'PETROLERAS') {
+              const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
+              unitEntry.subCodesSet.add(effSub);
+            }
+          }
+
+          if (unitEntry.subCodesSet.size === 0) {
+            unitEntry.subCodesSet.add('T300');
+          }
         });
 
-        // Sumar T300, T302 y T312 en PETROLERAS pero mantener desglosado en subRows para el Briefing
+        const subFleetCounts = {};
+        PETROLERAS_SUBCATEGORIES.forEach(sub => {
+          subFleetCounts[sub.code] = {
+            numRutas: 0,
+            propia1v: 0,
+            externa1v: 0,
+            propia2v: 0,
+            externa2v: 0,
+            sinCobertura: 0
+          };
+        });
+
+        // Paso 1: Asignar unidades exclusivas de una sola sub-categoría (T300, T302 o T312)
+        const sharedUnits = [];
+        petUnitsMap.forEach(unit => {
+          if (unit.subCodesSet.size === 1) {
+            const onlyCode = Array.from(unit.subCodesSet)[0];
+            subFleetCounts[onlyCode][unit.colKey]++;
+            subFleetCounts[onlyCode].numRutas++;
+          } else {
+            sharedUnits.push(unit);
+          }
+        });
+
+        // Paso 2: Asignar unidades compartidas a la sub-categoría candidata que tenga menos rutas
+        sharedUnits.sort((a, b) => a.subCodesSet.size - b.subCodesSet.size);
+        sharedUnits.forEach(unit => {
+          const candidates = Array.from(unit.subCodesSet);
+          candidates.sort((codeA, codeB) => {
+            const diff = subFleetCounts[codeA].numRutas - subFleetCounts[codeB].numRutas;
+            if (diff !== 0) return diff;
+            return PETROLERAS_TRANSPORTISTAS.indexOf(codeA) - PETROLERAS_TRANSPORTISTAS.indexOf(codeB);
+          });
+          const chosenCode = candidates[0] || 'T300';
+          subFleetCounts[chosenCode][unit.colKey]++;
+          subFleetCounts[chosenCode].numRutas++;
+        });
+
+        const subRows = PETROLERAS_SUBCATEGORIES.map(sub => {
+          const sb = petrolerasSubBuckets.get(sub.code);
+          const rawSubRow = computeRowFromBucket(sb);
+          const fCounts = subFleetCounts[sub.code];
+          return {
+            ...rawSubRow,
+            numRutas: fCounts.numRutas,
+            propia1v: fCounts.propia1v,
+            externa1v: fCounts.externa1v,
+            propia2v: fCounts.propia2v,
+            externa2v: fCounts.externa2v,
+            sinCobertura: fCounts.sinCobertura
+          };
+        });
+
+        // Sumar T300, T302 y T312 en PETROLERAS para que coincidan 100% todas las columnas del Briefing
+        const sumNumRutas = subRows.reduce((acc, s) => acc + s.numRutas, 0);
+        const sumPropia1v = subRows.reduce((acc, s) => acc + s.propia1v, 0);
+        const sumExterna1v = subRows.reduce((acc, s) => acc + s.externa1v, 0);
+        const sumPropia2v = subRows.reduce((acc, s) => acc + s.propia2v, 0);
+        const sumExterna2v = subRows.reduce((acc, s) => acc + s.externa2v, 0);
+        const sumSinCobertura = subRows.reduce((acc, s) => acc + s.sinCobertura, 0);
         const sumCajas = subRows.reduce((acc, s) => acc + s.cajas, 0);
         const sumKilos = Number(subRows.reduce((acc, s) => acc + s.kilos, 0).toFixed(2));
         const sumCong = Number(subRows.reduce((acc, s) => acc + s.congeladoM3, 0).toFixed(2));
@@ -1018,6 +1134,12 @@ export default function Briefing() {
 
         return {
           ...baseRow,
+          numRutas: sumNumRutas,
+          propia1v: sumPropia1v,
+          externa1v: sumExterna1v,
+          propia2v: sumPropia2v,
+          externa2v: sumExterna2v,
+          sinCobertura: sumSinCobertura,
           cajas: sumCajas,
           kilos: sumKilos,
           congeladoM3: sumCong,

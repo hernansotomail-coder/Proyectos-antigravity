@@ -280,38 +280,31 @@ const DEFAULT_SAMPLE_ASSIGNMENTS = {
 
 export const ensureRowTransportista = (row) => {
   if (!row) return 'T300';
+  // 1. Extraer códigos Txxx reales desde las paradas de la ruta (preserva multi-transportista ej: T300, T307)
+  if (row.paradas && Array.isArray(row.paradas) && row.paradas.length > 0) {
+    const pCodes = [];
+    row.paradas.forEach(p => {
+      const m = String(p?.transportista || '').toUpperCase().match(/T\d{3}/g) || [];
+      m.forEach(code => {
+        if (!pCodes.includes(code)) pCodes.push(code);
+      });
+    });
+    if (pCodes.length > 0) {
+      return pCodes.join(', ');
+    }
+  }
+  // 2. Si codigo_transportista o transportista contiene códigos Txxx, preservarlos
+  const directCodes = String(row.codigo_transportista || row.transportista || '').toUpperCase().match(/T\d{3}/g) || [];
+  if (directCodes.length > 0) {
+    return Array.from(new Set(directCodes)).join(', ');
+  }
+  // 3. Buscar en catálogo maestro por número de ruta
+  const master = findOperationForRoute(row.ruta);
+  if (master && master.transportista) {
+    return master.transportista;
+  }
   if (row.transportista && String(row.transportista).trim() !== '' && String(row.transportista).trim() !== 'Sin Transportista') {
     return String(row.transportista).trim();
-  }
-  if (row.paradas && Array.isArray(row.paradas) && row.paradas.length > 0) {
-    const pTrans = row.paradas.find(p => p.transportista && String(p.transportista).trim() !== '');
-    if (pTrans) return String(pTrans.transportista).trim();
-  }
-  const ROUTE_TRANSP_MAP = {
-    '1401': 'T311',
-    '1611': 'T405',
-    '1612': 'T405',
-    '1613': 'T405',
-    '1614': 'T405',
-    '1615': 'T405',
-    '1616': 'T405',
-    '1702': 'T404',
-    '1703': 'T404',
-    '1704': 'T404',
-    '1831': 'T310',
-    '1832': 'T310',
-    '1833': 'T310',
-    '1834': 'T310',
-    '1835': 'T310',
-    '3304': 'T300'
-  };
-  const rKey = String(row.ruta || '').trim();
-  if (ROUTE_TRANSP_MAP[rKey]) {
-    return ROUTE_TRANSP_MAP[rKey];
-  }
-  if (row.camion) {
-    const match = String(row.camion).match(/C(\d+)/i);
-    if (match) return `T${match[1]}`;
   }
   return 'T300';
 };
@@ -1609,7 +1602,9 @@ export const usePlanningStore = create((set, get) => ({
           cliente: opName || old.cliente,
           operacion: opName || old.operacion,
           denominacion: denomName || old.denominacion,
-          transportista: route.transportista || old.transportista || ensureRowTransportista(route),
+          codigo_transportista: route.codigo_transportista || route.transportista || old.codigo_transportista || ensureRowTransportista(route),
+          transportista: route.codigo_transportista || route.transportista || ensureRowTransportista(route),
+          owner: route.owner || old.owner || '',
           paradas: (route.paradas && route.paradas.length > 0) ? route.paradas : (old.paradas || [])
         };
         totalUpdated++;
@@ -1631,7 +1626,9 @@ export const usePlanningStore = create((set, get) => ({
           tipo_servicio: 'Distribución',
           ruta: route.ruta,
           cliente: route.nombreRuta,
-          transportista: route.transportista || ensureRowTransportista(route),
+          codigo_transportista: route.codigo_transportista || route.transportista || ensureRowTransportista(route),
+          transportista: route.codigo_transportista || route.transportista || ensureRowTransportista(route),
+          owner: route.owner || '',
           referencia: route.isAperturada ? `Aperturada desde Ruta ${route.parentRuta || ''}` : '',
           locales: route.recuentoDestino,
           m3: route.sumaVolumen,
@@ -2106,7 +2103,6 @@ export const usePlanningStore = create((set, get) => ({
       tipo_equipo: truck.type || 'Camión'
     };
     if (truck.empresa_externa) {
-      updates.transportista = truck.empresa_externa;
       updates.empresa_externa = truck.empresa_externa;
     }
 

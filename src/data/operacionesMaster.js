@@ -8685,19 +8685,23 @@ export function resolveBodegasForRoutes(routes = []) {
   const items = ordered.map(code => ({
     code,
     address: BODEGA_LOCATIONS[code],
+    text: `${code} - ${BODEGA_LOCATIONS[code]}`,
     fullText: `${code} - ${BODEGA_LOCATIONS[code]}`
   }));
 
   const isPlural = items.length > 1;
-  const label = isPlural ? 'Bodegas de carga:' : 'Bodega de carga:';
+  const prefix = isPlural ? 'Bodegas de carga' : 'Bodega de carga';
+  const label = `${prefix}:`;
   const text = items.map(i => i.fullText).join(' y ');
 
   return {
     codes: ordered,
     items,
     isPlural,
+    prefix,
     label,
     text,
+    fullText: text,
     fullLine: `${label} ${text}`
   };
 }
