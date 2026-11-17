@@ -8,8 +8,8 @@ import {
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { usePlanningStore, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
-import { useStaffStore } from '../store/staffStore';
-import { useFleetStore } from '../store/fleetStore';
+import { useStaffStore, isStaffExternal } from '../store/staffStore';
+import { useFleetStore, isVehicleExternal, isVehicleBaja, isOperationalFleetStatus } from '../store/fleetStore';
 import { useTiendasCriticasStore, normalizeDestino } from '../store/tiendasCriticasStore';
 import { findFarthestComunaForRoute, getComunaDistance } from './RuteoView';
 import { matchVehicleByCode } from '../lib/vehicleMatcher';
@@ -352,7 +352,7 @@ export const buildDailySummaryWhatsAppMessage = (rows, fecha, anticipacionMinuto
 // Helpers para "Envío de Rutas Externos" (Formato Imagen Oficial)
 export const formatVueltaOrdinal = (vueltaNum) => {
   const n = parseInt(String(vueltaNum || '1').replace(/\D/g, ''), 10) || 1;
-  if (n === 1) return '1era vuelta';
+  if (n === 1) return '1ra vuelta';
   if (n === 2) return '2da vuelta';
   if (n === 3) return '3ra vuelta';
   if (n === 4) return '4ta vuelta';
@@ -367,22 +367,41 @@ export const extractShortTruckCode = (rawCamion) => {
   return str;
 };
 
+// Limpia el nombre de la empresa externa eliminando prefijos "Externo_", "T.E.", "T.E", "TE."
+export const cleanExternalCompanyName = (raw) => {
+  if (!raw) return '';
+  let str = String(raw).trim();
+  // Quitar prefijo Externo_ o Externo -
+  str = str.replace(/^externo[\s_\-:]*/i, '').trim();
+  // Quitar prefijo T.E., T.E, TE. al inicio o tras espacios
+  str = str.replace(/(?:^|\b)T\.?\s*E\.?[\s._\-:]*/gi, '').trim();
+  str = str.replace(/^T\.?E\.?\s*/i, '').trim();
+  // Normalizar errores tipográficos comunes ("trasportes", "tranportes")
+  str = str.replace(/\btra[sn]portes\b/gi, 'TRANSPORTES');
+  return str.toUpperCase().replace(/\s+/g, ' ').trim();
+};
+
 export const resolveEmpresaExternaDisplay = (rows = [], fleetList = [], staffList = [], customOverride = '') => {
-  if (customOverride && customOverride.trim()) {
-    return customOverride.trim().toUpperCase();
+  if (customOverride !== undefined && customOverride !== null && String(customOverride).trim() !== '') {
+    return cleanExternalCompanyName(customOverride);
   }
   let raw = '';
-  for (const r of rows) {
-    if (r.empresa_externa && r.empresa_externa.trim()) {
-      raw = r.empresa_externa.trim();
-      break;
-    }
-  }
-  if (!raw && rows.length > 0) {
+  if (rows.length > 0) {
     const cam = rows[0].camion;
     if (cam && fleetList && fleetList.length > 0) {
       const v = matchVehicleByCode(cam, '', fleetList);
-      if (v && v.empresa_externa) raw = v.empresa_externa.trim();
+      if (v) {
+        raw = (v.empresa_externa || v.status || '').trim();
+        if (isOperationalFleetStatus(raw)) raw = '';
+      }
+    }
+  }
+  if (!raw) {
+    for (const r of rows) {
+      if (r.empresa_externa && r.empresa_externa.trim()) {
+        raw = r.empresa_externa.trim();
+        break;
+      }
     }
   }
   if (!raw && rows.length > 0) {
@@ -393,12 +412,120 @@ export const resolveEmpresaExternaDisplay = (rows = [], fleetList = [], staffLis
       if (st && st.empresa_externa) raw = st.empresa_externa.trim();
     }
   }
-  if (!raw) return 'TRANSPORTE EXTERNO';
-  const upper = raw.toUpperCase().trim();
-  if (upper === 'VALENCIA') return 'TRANSPORTES VALENCIA';
-  if (upper === 'CATALÁN' || upper === 'CATALAN') return 'TRANSPORTES CATALÁN';
-  return upper;
+  const cleaned = cleanExternalCompanyName(raw);
+  return cleaned || 'TRANSPORTE EXTERNO';
 };
+
+// Componente Lista Desplegable con Búsqueda Rápida (Combobox para Camión, Conductor y Empresa Externa)
+function SearchableExternalDropdown({
+  value,
+  onChange,
+  onSelectOption,
+  options = [],
+  placeholder = 'Seleccionar o escribir...',
+  widthClass = 'w-44',
+  uppercase = true
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [filterText, setFilterText] = useState('');
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const handleOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+        setFilterText('');
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const filteredOptions = useMemo(() => {
+    const q = (filterText || '').trim().toLowerCase();
+    if (!q) return options;
+    return options.filter(opt =>
+      (opt.label || '').toLowerCase().includes(q) ||
+      (opt.value || '').toLowerCase().includes(q) ||
+      (opt.subLabel || '').toLowerCase().includes(q)
+    );
+  }, [options, filterText]);
+
+  return (
+    <div ref={containerRef} className={`relative ${widthClass}`}>
+      <div className="relative flex items-center">
+        <input
+          type="text"
+          value={value || ''}
+          placeholder={placeholder}
+          onFocus={() => {
+            setIsOpen(true);
+            setFilterText('');
+          }}
+          onChange={(e) => {
+            const val = uppercase ? e.target.value.toUpperCase() : e.target.value;
+            setFilterText(e.target.value);
+            setIsOpen(true);
+            onChange(val);
+          }}
+          className={`w-full pl-2 pr-6 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-500 ${
+            uppercase ? 'uppercase' : ''
+          }`}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => {
+            setIsOpen(prev => !prev);
+            setFilterText('');
+          }}
+          className="absolute right-1 text-slate-400 hover:text-slate-700 p-0.5"
+          title="Desplegar lista"
+        >
+          <ChevronDown size={13} className={`transition-transform ${isOpen ? 'rotate-180 text-blue-600' : ''}`} />
+        </button>
+      </div>
+
+      {isOpen && (
+        <div className="absolute left-0 top-full mt-1 min-w-full w-max max-w-xs max-h-56 overflow-y-auto bg-white border border-slate-300 rounded-lg shadow-xl z-50 py-1">
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-2 text-[11px] text-slate-400 italic">
+              Sin coincidencias en la lista (se usará el texto escrito)
+            </div>
+          ) : (
+            filteredOptions.map((opt, idx) => {
+              const isSelected = String(value || '').toUpperCase() === String(opt.value || '').toUpperCase();
+              return (
+                <button
+                  key={`${opt.value}-${idx}`}
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    if (onSelectOption) onSelectOption(opt);
+                    setIsOpen(false);
+                    setFilterText('');
+                  }}
+                  className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between gap-2 transition-colors ${
+                    isSelected
+                      ? 'bg-blue-50 text-blue-900 font-extrabold'
+                      : 'text-slate-700 hover:bg-slate-100 font-semibold'
+                  }`}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {opt.subLabel && (
+                    <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-1.5 py-0.2 rounded shrink-0">
+                      {opt.subLabel}
+                    </span>
+                  )}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Consolida paradas de una ruta por (Secuencia + Destino) sumando Peso, Cajas y Volumen (multi-ambiente C/R/S)
 export const consolidateRouteStopsForExternal = (routeRow) => {
@@ -512,11 +639,14 @@ export const buildExternalTripWhatsAppMessage = (tripCard, fecha) => {
   if (tripCard.criticalDestinations.length > 0) {
     msg += `⚠️ *Observaciones - Destino prioritario:* ${tripCard.criticalDestinations.join(' / ')}\n`;
   }
+  if (tripCard.manualObservaciones && tripCard.manualObservaciones.trim()) {
+    msg += `📝 *Observaciones adicionales:* ${tripCard.manualObservaciones.trim()}\n`;
+  }
   return msg.trim();
 };
 
 export default function RouteDispatch({ onlyExternal = false }) {
-  const { fleetList } = useFleetStore();
+  const { fleetList, fetchFleet } = useFleetStore();
   const {
     savedHistoryList,
     savedRuteoByDate,
@@ -531,9 +661,85 @@ export default function RouteDispatch({ onlyExternal = false }) {
   const cardRefs = useRef({});
 
   useEffect(() => {
-    fetchStaff();
+    fetchFleet?.();
+    fetchStaff?.();
     initPlanningFromDb?.();
-  }, [fetchStaff, initPlanningFromDb]);
+  }, [fetchFleet, fetchStaff, initPlanningFromDb]);
+
+  // Listas desplegables para Envío de Rutas Externos (Gestión de Flota Externa y Gestión de Dotación Externa)
+  const externalTruckOptions = useMemo(() => {
+    const extVehicles = (fleetList || []).filter(f => isVehicleExternal(f) && !isVehicleBaja(f));
+    const seen = new Set();
+    const list = [];
+    extVehicles.forEach(f => {
+      const internal = String(f.internal_number || '').trim();
+      const plate = String(f.plate || '').trim().toUpperCase();
+      const code = internal || plate;
+      if (!code) return;
+      const key = code.toUpperCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      const company = cleanExternalCompanyName(f.empresa_externa || f.status || '');
+      list.push({
+        value: code,
+        label: internal && plate ? `${internal} (${plate})` : code,
+        subLabel: company,
+        empresa: company,
+        plate
+      });
+    });
+    return list.sort((a, b) => a.value.localeCompare(b.value, undefined, { numeric: true }));
+  }, [fleetList]);
+
+  const externalConductorOptions = useMemo(() => {
+    const extStaff = (staffList || []).filter(s => isStaffExternal(s) && String(s.status || 'Activo').toLowerCase() !== 'inactivo');
+    const seen = new Set();
+    const list = [];
+    extStaff.forEach(s => {
+      const name = String(s.name || '').trim().toUpperCase();
+      if (!name || seen.has(name)) return;
+      seen.add(name);
+      const company = cleanExternalCompanyName(s.empresa_externa || '');
+      list.push({
+        value: name,
+        label: name,
+        subLabel: company,
+        empresa: company,
+        rut: s.rut || ''
+      });
+    });
+    return list.sort((a, b) => a.label.localeCompare(b.label));
+  }, [staffList]);
+
+  const externalCompanyOptions = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    // Empresas provenientes de Gestión Flota -> Flota Externa (sin T.E.)
+    (fleetList || []).filter(f => isVehicleExternal(f)).forEach(f => {
+      const raw = f.empresa_externa || f.status || '';
+      if (!raw || isOperationalFleetStatus(raw)) return;
+      const cleaned = cleanExternalCompanyName(raw);
+      if (!cleaned || seen.has(cleaned)) return;
+      seen.add(cleaned);
+      list.push({
+        value: cleaned,
+        label: cleaned
+      });
+    });
+    // Complementar con empresas externas de dotación si existieran (también limpiando T.E.)
+    (staffList || []).filter(s => isStaffExternal(s)).forEach(s => {
+      const raw = s.empresa_externa || '';
+      if (!raw) return;
+      const cleaned = cleanExternalCompanyName(raw);
+      if (!cleaned || seen.has(cleaned)) return;
+      seen.add(cleaned);
+      list.push({
+        value: cleaned,
+        label: cleaned
+      });
+    });
+    return list.sort((a, b) => a.label.localeCompare(b.label));
+  }, [fleetList, staffList]);
 
   // Fechas disponibles (ordenadas cronológicamente de más reciente a más antigua)
   const availableDates = useMemo(() => {
@@ -755,7 +961,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
     if (field === 'hora_cita' && updateRuteoTripField) {
       updateRuteoTripField(selectedDate, tripId, 'hora_cita', value);
     }
-    if ((field === 'camion' || field === 'conductor_name') && updateAssignmentField) {
+    if ((field === 'camion' || field === 'conductor_name' || field === 'n_vuelta' || field === 'empresa_externa') && updateAssignmentField) {
       tripRows.forEach(r => {
         if (r.id) {
           updateAssignmentField(selectedDate, r.id, field, value);
@@ -807,15 +1013,42 @@ export default function RouteDispatch({ onlyExternal = false }) {
     });
   };
 
-  // Obtener las filas de datos con información que fue guardada al presionar "Guardar Disponibilización", enriquecida con metadatos de Ruteo
+  // Obtener las filas de datos sincronizando en vivo N° de vuelta, Camión y Conductor desde Disponibilización
   const rawRows = useMemo(() => {
     let rows = [];
+    const liveDispRows = transmittedAssignments[selectedDate] || [];
+
     if (currentHistoryEntry && currentHistoryEntry.rows && currentHistoryEntry.rows.length > 0) {
       rows = currentHistoryEntry.rows;
     } else if (savedRuteoByDate && savedRuteoByDate[selectedDate] && savedRuteoByDate[selectedDate].length > 0) {
       rows = savedRuteoByDate[selectedDate];
     } else {
-      rows = transmittedAssignments[selectedDate] || [];
+      rows = liveDispRows;
+    }
+
+    // Sincronizar campos vivos de Disponibilización (especialmente n_vuelta, camion, conductor_name, empresa_externa)
+    if (liveDispRows.length > 0 && rows !== liveDispRows) {
+      const liveById = new Map();
+      const liveByRuta = new Map();
+      liveDispRows.forEach(lr => {
+        if (lr.id) liveById.set(String(lr.id), lr);
+        if (lr.ruta) liveByRuta.set(String(lr.ruta).trim(), lr);
+      });
+
+      rows = rows.map(r => {
+        const liveMatch = (r.id && liveById.get(String(r.id))) || (r.ruta && liveByRuta.get(String(r.ruta).trim()));
+        if (!liveMatch) return r;
+        return {
+          ...r,
+          n_vuelta: liveMatch.n_vuelta !== undefined && liveMatch.n_vuelta !== '' ? liveMatch.n_vuelta : r.n_vuelta,
+          camion: liveMatch.camion !== undefined && liveMatch.camion !== '' ? liveMatch.camion : r.camion,
+          conductor_name: liveMatch.conductor_name !== undefined && liveMatch.conductor_name !== '' ? liveMatch.conductor_name : r.conductor_name,
+          conductor_rut: liveMatch.conductor_rut || r.conductor_rut,
+          aux1_name: liveMatch.aux1_name !== undefined && liveMatch.aux1_name !== '' ? liveMatch.aux1_name : r.aux1_name,
+          empresa_externa: liveMatch.empresa_externa || r.empresa_externa,
+          paradas: Array.isArray(liveMatch.paradas) && liveMatch.paradas.length > 0 ? liveMatch.paradas : r.paradas
+        };
+      });
     }
 
     // Excluir rutas de 5 dígitos en Ruteo / Envío / Briefing
@@ -823,7 +1056,11 @@ export default function RouteDispatch({ onlyExternal = false }) {
 
     const dateOverrides = ruteoOverrides?.[selectedDate] || {};
     return rows.map(r => {
-      const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const rawVueltaStr = r.n_vuelta !== undefined && r.n_vuelta !== null && String(r.n_vuelta).trim() !== ''
+        ? String(r.n_vuelta).trim()
+        : '1';
+      const vMatch = rawVueltaStr.match(/\d+/);
+      const vueltaKey = vMatch ? vMatch[0] : '1';
       const hasAssignment = !!(r.camion && r.conductor_name);
       const tripKey = hasAssignment
         ? `${r.camion.trim()}:::${r.conductor_name.trim()}:::${vueltaKey}`
@@ -831,6 +1068,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
       const ov = dateOverrides[tripKey] || {};
       return {
         ...r,
+        n_vuelta: vueltaKey,
         tripKey,
         turno: ov.turno !== undefined ? ov.turno : (r.turno || ''),
         hora_cita: ov.hora_cita !== undefined ? ov.hora_cita : (r.hora_cita || ''),
@@ -875,7 +1113,9 @@ export default function RouteDispatch({ onlyExternal = false }) {
     const dateCritOverrides = criticalOverridesMap[selectedDate] || {};
 
     filteredRows.forEach(r => {
-      const vueltaKey = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const rawVuelta = r.n_vuelta ? String(r.n_vuelta).trim() : '1';
+      const vMatch = rawVuelta.match(/\d+/);
+      const vueltaKey = vMatch ? vMatch[0] : '1';
       const hasAssignment = !!(r.camion && r.conductor_name);
       const tKey = hasAssignment
         ? `${r.camion.trim()}:::${r.conductor_name.trim()}:::${vueltaKey}`
@@ -883,7 +1123,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
       if (!tripsMap.has(tKey)) {
         tripsMap.set(tKey, {
           tripId: tKey,
-          vueltaNum: parseInt(vueltaKey.replace(/\D/g, ''), 10) || 1,
+          vueltaNum: parseInt(vueltaKey, 10) || 1,
           baseCamion: r.camion || '',
           baseConductor: r.conductor_name || '',
           conductorRut: r.conductor_rut || '',
@@ -902,6 +1142,9 @@ export default function RouteDispatch({ onlyExternal = false }) {
         String(a.ruta || '').localeCompare(String(b.ruta || ''), undefined, { numeric: true })
       );
 
+      const effectiveVueltaNum = edits.n_vuelta !== undefined
+        ? (parseInt(String(edits.n_vuelta).replace(/\D/g, ''), 10) || trip.vueltaNum)
+        : trip.vueltaNum;
       const rawCamionVal = edits.camion !== undefined ? edits.camion : trip.baseCamion;
       const camionDisplay = extractShortTruckCode(rawCamionVal) || 'S/C';
       const conductorDisplay = (edits.conductor_name !== undefined ? edits.conductor_name : (trip.baseConductor || 'SIN CONDUCTOR')).trim().toUpperCase();
@@ -978,14 +1221,12 @@ export default function RouteDispatch({ onlyExternal = false }) {
       });
 
       const criticalDestinations = Array.from(criticalDestinationsSet);
-      const defaultObs = criticalDestinations.length > 0
-        ? `Destino prioritario: ${criticalDestinations.join(' / ')}`
-        : '';
-      const observacionesText = edits.observaciones !== undefined ? edits.observaciones : defaultObs;
+      const manualObservaciones = edits.manualObservaciones !== undefined ? edits.manualObservaciones : '';
 
       return {
         ...trip,
-        vueltaLabel: formatVueltaOrdinal(trip.vueltaNum),
+        vueltaNum: effectiveVueltaNum,
+        vueltaLabel: formatVueltaOrdinal(effectiveVueltaNum),
         rawCamionVal,
         camionDisplay,
         conductorDisplay,
@@ -999,7 +1240,7 @@ export default function RouteDispatch({ onlyExternal = false }) {
         totalCJ,
         totalVolumen,
         criticalDestinations,
-        observacionesText
+        manualObservaciones
       };
     });
 
@@ -1645,29 +1886,50 @@ export default function RouteDispatch({ onlyExternal = false }) {
                         Edición Rápida:
                       </span>
 
-                      {/* Editable: Camión */}
-                      <label className="flex items-center gap-1.5 text-xs">
-                        <span className="font-bold text-slate-600">Camión:</span>
-                        <input
-                          type="text"
-                          value={tripCard.camionDisplay}
-                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'camion', e.target.value, tripCard.rows)}
-                          className="w-24 px-2 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600"
-                          title="Editar código de camión"
-                        />
-                      </label>
+                      {/* Editable: N° Vuelta (Enlazado con Disponibilización: 1 -> 1ra vuelta, 2 -> 2da vuelta...) */}
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="font-bold text-slate-600">Vuelta:</span>
+                        <select
+                          value={String(tripCard.vueltaNum || 1)}
+                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'n_vuelta', e.target.value, tripCard.rows)}
+                          className="px-2 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 cursor-pointer"
+                          title="N° de vuelta (sincronizado con Disponibilización)"
+                        >
+                          <option value="1">1ra vuelta (V.1)</option>
+                          <option value="2">2da vuelta (V.2)</option>
+                          <option value="3">3ra vuelta (V.3)</option>
+                          <option value="4">4ta vuelta (V.4)</option>
+                        </select>
+                      </div>
 
-                      {/* Editable: Conductor */}
-                      <label className="flex items-center gap-1.5 text-xs">
-                        <span className="font-bold text-slate-600">Conductor:</span>
-                        <input
-                          type="text"
-                          value={tripCard.conductorDisplay}
-                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'conductor_name', e.target.value, tripCard.rows)}
-                          className="w-48 px-2 py-1 text-xs font-bold text-slate-900 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 uppercase"
-                          title="Editar nombre del conductor"
+                      {/* Editable: Camión (Lista desplegable con búsqueda rápida desde Gestión de Flota -> Flota Externa) */}
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="font-bold text-slate-600">Camión:</span>
+                        <SearchableExternalDropdown
+                          value={tripCard.camionDisplay}
+                          options={externalTruckOptions}
+                          placeholder="Buscar camión ext..."
+                          widthClass="w-36"
+                          onChange={(val) => handleUpdateExternalTripEdit(tripCard.tripId, 'camion', val, tripCard.rows)}
+                          onSelectOption={(opt) => {
+                            if (opt.empresa) {
+                              handleUpdateExternalTripEdit(tripCard.tripId, 'empresa_externa', opt.empresa, tripCard.rows);
+                            }
+                          }}
                         />
-                      </label>
+                      </div>
+
+                      {/* Editable: Conductor (Lista desplegable con búsqueda rápida desde Gestión de Dotación -> Externo) */}
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="font-bold text-slate-600">Conductor:</span>
+                        <SearchableExternalDropdown
+                          value={tripCard.conductorDisplay}
+                          options={externalConductorOptions}
+                          placeholder="Buscar conductor ext..."
+                          widthClass="w-52"
+                          onChange={(val) => handleUpdateExternalTripEdit(tripCard.tripId, 'conductor_name', val, tripCard.rows)}
+                        />
+                      </div>
 
                       {/* Editable: Horario de Cita */}
                       <label className="flex items-center gap-1.5 text-xs">
@@ -1682,17 +1944,17 @@ export default function RouteDispatch({ onlyExternal = false }) {
                         />
                       </label>
 
-                      {/* Editable: Empresa Externa */}
-                      <label className="flex items-center gap-1.5 text-xs">
+                      {/* Editable: Empresa Externa (Lista desplegable desde Gestión Flota -> Flota Externa sin T.E.) */}
+                      <div className="flex items-center gap-1.5 text-xs">
                         <span className="font-bold text-slate-600">Empresa:</span>
-                        <input
-                          type="text"
+                        <SearchableExternalDropdown
                           value={tripCard.empresaDisplay}
-                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'empresa_externa', e.target.value, tripCard.rows)}
-                          className="w-44 px-2 py-1 text-xs font-semibold text-slate-800 bg-white border border-slate-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-600 uppercase"
-                          title="Editar nombre de empresa externa"
+                          options={externalCompanyOptions}
+                          placeholder="Seleccionar empresa..."
+                          widthClass="w-44"
+                          onChange={(val) => handleUpdateExternalTripEdit(tripCard.tripId, 'empresa_externa', cleanExternalCompanyName(val), tripCard.rows)}
                         />
-                      </label>
+                      </div>
                     </div>
 
                     {/* Botones de exportación de Imagen y WhatsApp */}
@@ -1945,10 +2207,9 @@ export default function RouteDispatch({ onlyExternal = false }) {
                       </table>
                     </div>
 
-                    {/* Leyenda y Cuadro de Observaciones para Destinos Prioritarios / Críticos */}
-                    {tripCard.criticalDestinations.length > 0 && (
-                      <div className="mt-3.5 space-y-2.5">
-                        {/* Leyenda: [Cuadro Amarillo] Destino prioritario (N) */}
+                    {/* Leyenda y Cuadro de Observaciones (con cuadro de texto editable para agregar información manual) */}
+                    <div className="mt-3.5 space-y-2.5">
+                      {tripCard.criticalDestinations.length > 0 && (
                         <div className="flex items-center gap-2 text-[12px] text-[#334155]">
                           <span
                             className="inline-block w-5 h-3 border border-[#ca8a04]"
@@ -1956,19 +2217,35 @@ export default function RouteDispatch({ onlyExternal = false }) {
                           />
                           <span>Destino prioritario ({tripCard.criticalDestinations.length})</span>
                         </div>
+                      )}
 
-                        {/* Cuadro amarillo de Observaciones */}
-                        <div
-                          className="max-w-2xl py-2.5 px-3.5 border-l-4 border-[#eab308] text-[12.5px] text-[#1e293b]"
-                          style={{ backgroundColor: '#fef9db' }}
-                        >
-                          <div className="font-bold mb-0.5">Observaciones:</div>
-                          <div>
+                      {/* Cuadro amarillo de Observaciones (editable manualmente) */}
+                      <div
+                        className={`max-w-2xl py-2.5 px-3.5 border-l-4 border-[#eab308] text-[12.5px] text-[#1e293b] ${
+                          tripCard.criticalDestinations.length === 0 && !(tripCard.manualObservaciones || '').trim()
+                            ? 'no-export'
+                            : ''
+                        }`}
+                        style={{ backgroundColor: '#fef9db' }}
+                      >
+                        <div className="font-bold mb-1">Observaciones:</div>
+                        {tripCard.criticalDestinations.length > 0 && (
+                          <div className="mb-1.5">
                             Destino prioritario: {tripCard.criticalDestinations.join(' / ')}
                           </div>
-                        </div>
+                        )}
+                        {/* Cuadro de texto interactivo para agregar información manual */}
+                        <textarea
+                          rows={2}
+                          value={tripCard.manualObservaciones || ''}
+                          onChange={(e) => handleUpdateExternalTripEdit(tripCard.tripId, 'manualObservaciones', e.target.value, tripCard.rows)}
+                          placeholder="Escribe aquí observaciones o indicaciones manuales para esta ruta..."
+                          className={`w-full text-[12.5px] text-[#1e293b] bg-white/70 focus:bg-white border border-[#eab308]/60 focus:border-[#ca8a04] rounded px-2.5 py-1.5 focus:outline-none resize-y leading-snug ${
+                            !(tripCard.manualObservaciones || '').trim() ? 'no-export' : ''
+                          }`}
+                        />
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               );
