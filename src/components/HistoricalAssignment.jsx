@@ -508,17 +508,12 @@ export default function HistoricalAssignment() {
         </div>
 
         <div className="flex items-center gap-2.5">
-          <Button 
-            onClick={() => {
-              initPlanningFromDb?.();
-              toast.success('Sincronizando histórico con la nube...');
-            }}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
-            title="Recargar y sincronizar datos con el servidor en la nube"
-          >
-            <RefreshCw size={14} />
-            Sincronizar
-          </Button>
+          {/* Botón Consulta Temporal (Google Drive) al lado de Histórico detallado */}
+          <DriveTimeMachineButton
+            currentMenu="Histórico Disponibilización"
+            activeDate={selectedDate}
+            onSelectDate={(loadedFecha) => setSelectedDate(loadedFecha)}
+          />
           <Button 
             onClick={handleExportDetailed}
             className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
@@ -564,13 +559,6 @@ export default function HistoricalAssignment() {
               </select>
             </div>
           </div>
-
-          {/* Botón Consulta Temporal (Google Drive) */}
-          <DriveTimeMachineButton
-            currentMenu="Histórico Disponibilización"
-            activeDate={selectedDate}
-            onSelectDate={(loadedFecha) => setSelectedDate(loadedFecha)}
-          />
 
           {/* 1. Multi-Filtro Conductor */}
           <MultiSelectFilter

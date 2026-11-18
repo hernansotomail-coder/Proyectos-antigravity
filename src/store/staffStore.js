@@ -110,6 +110,63 @@ const persistStaffList = (list) => {
   }
 };
 
+// Persistencia en nube (Supabase planning_assignments) para metadatos de fechas de ingreso e inactividad de personal
+const STAFF_DATES_META_KEY = '__staff_dates_meta__';
+
+const loadLocalStaffDatesMeta = () => {
+  try {
+    const saved = localStorage.getItem('keylogistics_staff_dates_meta');
+    return saved ? JSON.parse(saved) : {};
+  } catch (e) {
+    return {};
+  }
+};
+
+const saveLocalStaffDatesMeta = (map) => {
+  try {
+    localStorage.setItem('keylogistics_staff_dates_meta', JSON.stringify(map || {}));
+  } catch (e) {}
+};
+
+export const fetchStaffDatesMetaFromDb = async () => {
+  try {
+    const { data, error } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .select('assignments')
+        .eq('fecha', STAFF_DATES_META_KEY)
+        .maybeSingle(),
+      3500
+    );
+    if (error || !data || !data.assignments || typeof data.assignments !== 'object') {
+      return loadLocalStaffDatesMeta();
+    }
+    const merged = { ...loadLocalStaffDatesMeta(), ...data.assignments };
+    saveLocalStaffDatesMeta(merged);
+    return merged;
+  } catch (e) {
+    return loadLocalStaffDatesMeta();
+  }
+};
+
+export const persistStaffDatesMetaToDb = async (metaMap) => {
+  saveLocalStaffDatesMeta(metaMap);
+  try {
+    await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: STAFF_DATES_META_KEY,
+          assignments: metaMap,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' }),
+      4000
+    );
+  } catch (e) {
+    console.warn('Error sincronizando metadatos de fechas de personal:', e);
+  }
+};
+
 export const useStaffStore = create((set, get) => ({
   staffList: loadPersistedStaffList(),
   isLoading: false,
@@ -120,13 +177,18 @@ export const useStaffStore = create((set, get) => ({
       set({ isLoading: true });
     }
     try {
-      const { data, error } = await withTimeout(
-        supabase
-          .from('staff')
-          .select('*')
-          .order('name', { ascending: true }),
-        4000
-      );
+      const [staffRes, datesMetaMap] = await Promise.all([
+        withTimeout(
+          supabase
+            .from('staff')
+            .select('*')
+            .order('name', { ascending: true }),
+          4000
+        ),
+        fetchStaffDatesMetaFromDb()
+      ]);
+
+      const { data, error } = staffRes;
 
       if (error) throw error;
       if (!data || data.length === 0) {
@@ -149,11 +211,17 @@ export const useStaffStore = create((set, get) => ({
         const empresa = s.empresa_externa || empresaMap[s.id] || (s.rut ? empresaMap[s.rut] : null) || (s.name ? empresaMap[s.name.trim().toLowerCase()] : null) || '';
         const tipo = (empresa || (s.rut && String(s.rut).startsWith('EXT-')) || rawTipo.toLowerCase() === 'externo') ? 'Externo' : rawTipo;
 
+        const dateMeta = (s.id && datesMetaMap[s.id]) || (s.rut && datesMetaMap[s.rut]) || {};
+        const fecha_ingreso = s.fecha_ingreso || dateMeta.fecha_ingreso || '';
+        const fecha_inactivo = s.fecha_inactivo || dateMeta.fecha_inactivo || '';
+
         return {
           ...s,
           phone: staffPhone,
           tipo_dotacion: tipo,
-          empresa_externa: empresa
+          empresa_externa: empresa,
+          fecha_ingreso,
+          fecha_inactivo
         };
       });
 
@@ -506,5 +574,34 @@ export const useStaffStore = create((set, get) => ({
 
     const phoneMap = loadPersistedStaffPhones();
     return phoneMap[identifier] || phoneMap[norm] || '';
+  },
+
+  updateStaffDatesMeta: async (staffId, rut, { fecha_ingreso, fecha_inactivo }) => {
+    const currentMeta = await fetchStaffDatesMetaFromDb();
+    const prev = (staffId && currentMeta[staffId]) || (rut && currentMeta[rut]) || {};
+    const nextEntry = {
+      ...prev,
+      ...(fecha_ingreso !== undefined ? { fecha_ingreso: fecha_ingreso || '' } : {}),
+      ...(fecha_inactivo !== undefined ? { fecha_inactivo: fecha_inactivo || '' } : {})
+    };
+    if (staffId) currentMeta[staffId] = nextEntry;
+    if (rut) currentMeta[rut] = nextEntry;
+
+    await persistStaffDatesMetaToDb(currentMeta);
+
+    set((state) => {
+      const updated = state.staffList.map(s => {
+        if ((staffId && s.id === staffId) || (rut && s.rut === rut)) {
+          return {
+            ...s,
+            ...(fecha_ingreso !== undefined ? { fecha_ingreso: fecha_ingreso || '' } : {}),
+            ...(fecha_inactivo !== undefined ? { fecha_inactivo: fecha_inactivo || '' } : {})
+          };
+        }
+        return s;
+      });
+      persistStaffList(updated);
+      return { staffList: updated };
+    });
   }
 }));

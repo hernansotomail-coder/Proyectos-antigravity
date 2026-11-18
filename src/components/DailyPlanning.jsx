@@ -835,18 +835,6 @@ export default function DailyPlanning() {
             Rutas Especiales
           </Button>
 
-          {/* Botón Sincronizar Servidor */}
-          <Button
-            variant="outline"
-            onClick={handleManualSync}
-            disabled={isSyncingCloud}
-            className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-blue-700 border-slate-200 hover:border-blue-300 bg-white shadow-2xs py-2 px-3 rounded-xl transition-all"
-            title="Sincronizar y actualizar rutas y asignaciones con la base de datos central para todos los equipos"
-          >
-            <Cloud className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
-            {isSyncingCloud ? 'Sincronizando...' : 'Sincronizar Servidor'}
-          </Button>
-
           {/* Botón Consulta Temporal (Google Drive) */}
           <DriveTimeMachineButton
             currentMenu="Asignación Diaria"
@@ -1133,14 +1121,6 @@ export default function DailyPlanning() {
                 >
                   <Send size={13} />
                   Transmitir a Disponibilización ({selectedRouteIds.length})
-                </Button>
-
-                <Button 
-                  variant="outline" 
-                  onClick={() => navigate('/assignment')}
-                  className="flex items-center gap-1 text-xs text-slate-600 hover:text-blue-700 py-1.5"
-                >
-                  Ver Disponibilización <ArrowRight size={13} />
                 </Button>
               </div>
             </div>

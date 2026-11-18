@@ -23,6 +23,7 @@ const getServiceColor = (serviceType) => {
     case 'Permiso con goce': return 'bg-purple-100 text-purple-700';
     case 'Permiso sin goce': return 'bg-pink-100 text-pink-700';
     case 'Baja': return 'bg-slate-200 text-slate-500 line-through';
+    case 'Bloqueado': return 'bg-slate-200/90 text-slate-400 border border-slate-300 cursor-not-allowed select-none';
     default: return 'bg-slate-100 text-slate-300 border border-dashed border-slate-300';
   }
 };
@@ -37,6 +38,7 @@ const getServiceAbbr = (serviceType) => {
     case 'Permiso con goce': return 'PG';
     case 'Permiso sin goce': return 'PS';
     case 'Baja': return 'B';
+    case 'Bloqueado': return '—';
     default: return '';
   }
 };
@@ -108,11 +110,22 @@ export default function Dashboard() {
       };
 
       daysArray.forEach(day => {
+        const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        // Requisito 7: Si tiene fecha de ingreso opcional, los días hacia atrás aparecen bloqueados
+        if (staff.fecha_ingreso && dateStr < staff.fecha_ingreso) {
+          row.days[day] = 'Bloqueado';
+          return;
+        }
+        // Requisito 7: Si está Inactivo desde una fecha, los días desde esa fecha hacia adelante aparecen bloqueados
+        if (staff.status === 'Inactivo' && staff.fecha_inactivo && dateStr >= staff.fecha_inactivo) {
+          row.days[day] = 'Bloqueado';
+          return;
+        }
+
         const isSunday = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0;
         if (isSunday) {
           row.days[day] = '';
         } else {
-          const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const record = staffAttendance.find(a => a.date && a.date.startsWith(dateStr));
           if (record && record.service_type) {
             row.days[day] = record.service_type;
@@ -327,11 +340,15 @@ export default function Dashboard() {
               options={[2025, 2026, 2027].map(y => ({value: y, label: y.toString()}))}
             />
           </div>
+          <Button onClick={exportToExcel} className="flex gap-2 items-center h-10" variant="outline">
+            <Download size={18} /> Exportar Excel
+          </Button>
         </div>
       </div>
-       <div className="flex flex-col md:flex-row gap-4 mb-6">
+       <div className="flex flex-col md:flex-row md:items-end gap-4 mb-6">
         <div className="flex-1">
           <Input 
+            label="Buscar Personal"
             placeholder="Buscar por RUT o Nombre..." 
             value={searchFilter} 
             onChange={(e) => setSearchFilter(e.target.value)} 
@@ -411,9 +428,6 @@ export default function Dashboard() {
             ]}
           />
         </div>
-        <Button onClick={exportToExcel} className="flex gap-2 items-center" variant="outline">
-          <Download size={18} /> Exportar Excel
-        </Button>
       </div>
 
       {/* Tarjetas de KPIs */}

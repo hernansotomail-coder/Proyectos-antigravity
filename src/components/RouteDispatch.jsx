@@ -14,7 +14,7 @@ import { useTiendasCriticasStore, normalizeDestino } from '../store/tiendasCriti
 import { findFarthestComunaForRoute, getComunaDistance } from './RuteoView';
 import { matchVehicleByCode } from '../lib/vehicleMatcher';
 import { isAssignmentExternal } from './Briefing';
-import { resolveBodegasForRoutes, resolveClienteForStop, isFiveDigitRoute } from '../data/operacionesMaster';
+import { resolveBodegasForRoutes, resolveClienteForStop, isFiveDigitRoute, getAllOperationsForRoute } from '../data/operacionesMaster';
 import { getHtml2Canvas } from '../lib/html2canvasWrapper';
 import { Button } from './ui/Button';
 import DriveTimeMachineButton from './DriveTimeMachineButton';
@@ -135,7 +135,54 @@ export const subtractMinutesFromTime = (timeStr, minutesToSubtract) => {
   return `${String(newHours).padStart(2, '0')}:${String(newMinutes).padStart(2, '0')}`;
 };
 
-// Formateador de mensaje individual para WhatsApp
+// Helper para extraer las comunas únicas de una ruta en orden de aparición
+export const getRouteComunasSummary = (row) => {
+  const uParadas = getUniqueParadas(row?.paradas);
+  const comunas = [];
+  uParadas.forEach(p => {
+    const c = String(p?.comuna || '').trim().toUpperCase();
+    if (c && !comunas.includes(c)) comunas.push(c);
+  });
+  if (comunas.length === 0) {
+    const fallback = findFarthestComunaForRoute(row);
+    if (fallback) comunas.push(fallback);
+  }
+  return comunas.join(', ') || 'SANTIAGO';
+};
+
+// Helper para obtener el nombre del cliente / operación en mayúsculas para el bloque del viaje
+export const getTripClientesText = (viajeRows = []) => {
+  const set = new Set();
+  (viajeRows || []).forEach(r => {
+    const ops = getAllOperationsForRoute(r);
+    if (ops && ops.length > 0) {
+      ops.forEach(o => {
+        let up = String(o || '').trim().toUpperCase();
+        if (up === 'PETROLERAS') up = 'PETROLERA';
+        if (up) set.add(up);
+      });
+    } else {
+      let c = String(r.operacion || r.cliente || 'CENTRALIZADO').trim().toUpperCase();
+      if (c === 'PETROLERAS') c = 'PETROLERA';
+      if (c && !/MULTIRUTA/i.test(c)) set.add(c);
+    }
+  });
+  return Array.from(set).join(' + ') || 'CENTRALIZADO';
+};
+
+// Helper para detectar si una ruta tiene denominación MULTIRUTA (ej: "MULTIRUTA 26")
+export const getMultirutaSuffix = (row) => {
+  const candidates = [row?.denominacion, row?.nombreRuta, row?.cliente, row?.referencia];
+  for (const val of candidates) {
+    const s = String(val || '').trim();
+    if (/MULTIRUTA/i.test(s)) {
+      return ` (${s.toUpperCase()})`;
+    }
+  }
+  return '';
+};
+
+// Formateador de mensaje individual para WhatsApp (Requisito 9)
 export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anticipacionMinutos = 0) => {
   let formattedDate = fecha;
   if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
@@ -149,7 +196,6 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   const matchV = rawVuelta.match(/\d+/);
   const vueltaNum = matchV ? parseInt(matchV[0], 10) : 1;
   const ruta = row.ruta || 'S/N';
-  const cliente = (row.cliente || 'Centralizado').trim();
   const uniqueParadas = getUniqueParadas(row.paradas);
   const locales = parseInt(row.locales, 10) || (uniqueParadas.length > 0 ? uniqueParadas.length : 1);
   const localesWord = locales === 1 ? 'local' : 'locales';
@@ -157,8 +203,12 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   const camionText = formatCamionWithPlate(row.camion, fleetList) || 'Sin camión';
   const farthestComuna = findFarthestComunaForTrip([row]);
   const bodegaInfo = resolveBodegasForRoutes([row]);
+  const bodegaCodesStr = (bodegaInfo.codes && bodegaInfo.codes.length > 0) ? bodegaInfo.codes.join(' / ') : 'LRI';
+  const clienteText = getTripClientesText([row]);
+  const multirutaSuffix = getMultirutaSuffix(row);
+  const comunasDestinos = getRouteComunasSummary(row);
 
-  // Hora Cita en el apartado general (Requisito 1: solo aparece en la cabecera general)
+  // Hora Cita en el apartado general
   const rawCita = (row.hora_cita || '').trim();
   let citaGeneralHeader = '';
   if (rawCita) {
@@ -169,9 +219,6 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
     }
   }
 
-  // Requisito 2: El icono 📦 debe aparecer en cada Viaje planificado
-  const tripIcon = '   📦';
-
   let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `👤 *Conductor:* ${conductor}\n`;
@@ -180,31 +227,29 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   if (citaGeneralHeader) {
     msg += `⏰ *Hora Cita / Presentación:* ${citaGeneralHeader}\n`;
   }
-  msg += `🏭 *${bodegaInfo.prefix}:* ${bodegaInfo.fullText}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `${tripIcon} *VIAJE ${vueltaNum} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
-  msg += `   ▫️ *Ruta ${ruta}* (${cliente}): ${locales} ${localesWord} | ${m3Val} m³`;
+  msg += `   📦 *VIAJE ${vueltaNum} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
+  if (vueltaNum === 1) {
+    msg += `          *BODEGA:* ${bodegaCodesStr}\n`;
+    msg += `         *CLIENTE:* ${clienteText}\n`;
+  } else {
+    msg += `    🏭   *BODEGA A CARGAR:* ${bodegaCodesStr}\n`;
+    msg += `             *CLIENTE:* ${clienteText}\n`;
+  }
+  msg += `   ▫️ *Ruta ${ruta}${multirutaSuffix}:* ${locales} ${localesWord} | ${m3Val} m³`;
   if (row.prioridad && row.prioridad !== 'Normal') msg += ` | 🚨 ${row.prioridad.toUpperCase()}`;
   msg += `\n`;
   if (row.destino_prioritario) {
     msg += `      ⭐ *Prioritario:* ${row.destino_prioritario}\n`;
   }
-  if (uniqueParadas && uniqueParadas.length > 0) {
-    msg += `      📍 *Destinos (${uniqueParadas.length} locales):*\n`;
-    uniqueParadas.forEach((p, pIdx) => {
-      const destText = p.destino || 'Local';
-      const comText = p.comuna ? ` (${p.comuna})` : '';
-      const prioMark = row.destino_prioritario && destText.toLowerCase().includes(row.destino_prioritario.toLowerCase()) ? ' ⭐' : '';
-      msg += `         ${pIdx + 1}. ${destText}${comText}${prioMark}\n`;
-    });
-  }
+  msg += `      📍 *Destinos (${locales} ${localesWord}):* ${comunasDestinos}\n`;
   msg += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `_Favor confirmar recepción del itinerario._`;
 
   return msg.trim();
 };
 
-// Formateador de mensaje consolidado para un Conductor / Dupla (agrupado por N° Vuelta / Viaje)
+// Formateador de mensaje consolidado para un Conductor / Dupla (agrupado por N° Vuelta / Viaje - Requisito 9)
 export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows, fecha, fleetList = [], anticipacionMinutos = 0) => {
   let formattedDate = fecha;
   if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
@@ -231,8 +276,6 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     }
   }
 
-  const bodegaGroupInfo = resolveBodegasForRoutes(rows);
-
   let msg = `🚛 *PROGRAMACIÓN DE RUTAS* - ${formattedDate}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `👤 *Conductor:* ${conductorName || 'Sin Conductor'}\n`;
@@ -241,7 +284,6 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
   if (citasGeneralText) {
     msg += `⏰ *Hora Cita / Presentación:* ${citasGeneralText}\n`;
   }
-  msg += `🏭 *${bodegaGroupInfo.prefix}:* ${bodegaGroupInfo.fullText}\n`;
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
 
   // Agrupar filas por N° Vuelta (cada N° Vuelta representa UN SOLO VIAJE)
@@ -269,39 +311,35 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     const viajeRows = viaje.rows;
     const farthestComuna = findFarthestComunaForTrip(viajeRows);
     const tripBodega = resolveBodegasForRoutes(viajeRows);
+    const bodegaCodesStr = (tripBodega.codes && tripBodega.codes.length > 0) ? tripBodega.codes.join(' / ') : 'LRI';
+    const tripClientesText = getTripClientesText(viajeRows);
 
-    // Requisito 2: El icono 📦 debe aparecer en cada Viaje planificado
-    const tripIcon = '   📦';
+    msg += `   📦 *VIAJE ${viajeIndex} (VUELTA ${viaje.vueltaNum})* [${farthestComuna}]\n`;
+    if (viajeIndex === 1 && viaje.vueltaNum === 1) {
+      msg += `          *BODEGA:* ${bodegaCodesStr}\n`;
+      msg += `         *CLIENTE:* ${tripClientesText}\n`;
+    } else {
+      msg += `    🏭   *BODEGA A CARGAR:* ${bodegaCodesStr}\n`;
+      msg += `             *CLIENTE:* ${tripClientesText}\n`;
+    }
 
-    msg += `${tripIcon} *VIAJE ${viajeIndex} (VUELTA ${viaje.vueltaNum})* [${farthestComuna}]\n`;
-    msg += `   🏭 *${tripBodega.prefix}:* ${tripBodega.fullText}\n`;
-
-    // Desglose de cada ruta incluida en este viaje (Requisito 1: solo en cabecera general)
+    // Desglose de cada ruta incluida en este viaje
     viajeRows.forEach(r => {
       const uParadas = getUniqueParadas(r.paradas);
       const locales = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
       const localesWord = locales === 1 ? 'local' : 'locales';
       const m3Val = (parseFloat(r.m3) || 0).toFixed(3);
-      const clienteName = (r.cliente || 'Centralizado').trim();
       const rutaNum = r.ruta || 'S/N';
+      const multirutaSuffix = getMultirutaSuffix(r);
+      const comunasDestinos = getRouteComunasSummary(r);
 
-      msg += `   ▫️ *Ruta ${rutaNum}* (${clienteName}): ${locales} ${localesWord} | ${m3Val} m³`;
+      msg += `   ▫️ *Ruta ${rutaNum}${multirutaSuffix}:* ${locales} ${localesWord} | ${m3Val} m³`;
       if (r.prioridad && r.prioridad !== 'Normal') msg += ` | 🚨 ${r.prioridad.toUpperCase()}`;
       msg += `\n`;
       if (r.destino_prioritario) {
         msg += `      ⭐ *Prioritario:* ${r.destino_prioritario}\n`;
       }
-
-      // Desglose de todos los destinos por vuelta (no por ambiente sino por destino)
-      if (uParadas && uParadas.length > 0) {
-        msg += `      📍 *Destinos (${uParadas.length} locales):*\n`;
-        uParadas.forEach((p, pIdx) => {
-          const destText = p.destino || 'Local';
-          const comText = p.comuna ? ` (${p.comuna})` : '';
-          const prioMark = r.destino_prioritario && destText.toLowerCase().includes(r.destino_prioritario.toLowerCase()) ? ' ⭐' : '';
-          msg += `         ${pIdx + 1}. ${destText}${comText}${prioMark}\n`;
-        });
-      }
+      msg += `      📍 *Destinos (${locales} ${localesWord}):* ${comunasDestinos}\n`;
     });
 
     msg += `\n`;
@@ -1692,16 +1730,23 @@ export default function RouteDispatch({ onlyExternal = false }) {
                 Por Conductor ({groupedByConductor.length})
               </Button>
 
-              {/* Botón: Enviar / Copiar Resumen General */}
-              <Button
-                variant="outline"
-                onClick={handleCopyDailySummary}
-                className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
-                title="Copiar todas las rutas del día en formato resumen para WhatsApp"
-              >
-                <Copy size={14} />
-                Copiar Resumen General
-              </Button>
+              {/* Menú desplegable: Citar con Anticipación (al lado de Por Conductor) */}
+              <div className="flex items-center gap-1.5 bg-amber-50/80 border border-amber-200 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                <Clock size={14} className="text-amber-700 shrink-0" />
+                <span className="text-[11px] font-bold text-amber-900 whitespace-nowrap">Citar con anticipación:</span>
+                <select
+                  value={anticipacionMinutos}
+                  onChange={(e) => handleSetAnticipacion(Number(e.target.value))}
+                  className="text-xs font-black text-amber-950 bg-transparent focus:outline-none cursor-pointer pr-1"
+                  title="Calcula y ajusta automáticamente la hora de presentación en el mensaje de WhatsApp y en la tabla para todas las rutas"
+                >
+                  <option value={0}>Hora Exacta (0m)</option>
+                  <option value={15}>15 min antes</option>
+                  <option value={30}>30 min antes</option>
+                  <option value={40}>40 min antes</option>
+                  <option value={60}>1 hora antes</option>
+                </select>
+              </div>
 
               <Button
                 onClick={handleSendDailySummaryWhatsApp}
@@ -1715,62 +1760,6 @@ export default function RouteDispatch({ onlyExternal = false }) {
           )}
         </div>
       </div>
-
-      {/* Selector de Anticipación de Citación (solo en Envío de Rutas propio) */}
-      {!onlyExternal && (
-        <div className="bg-white rounded-xl border border-slate-200 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-2xs shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl shrink-0">
-              <Clock size={16} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black text-slate-800">Citar con Anticipación (Todas las Rutas):</span>
-                {anticipacionMinutos > 0 ? (
-                  <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                    <span>⏰ Citando {anticipacionMinutos === 60 ? '1 hora' : `${anticipacionMinutos} min`} antes de la Hora Cita base</span>
-                  </span>
-                ) : (
-                  <span className="bg-slate-100 text-slate-600 text-[10px] font-semibold px-2 py-0.5 rounded-full">
-                    Sin anticipación (Horario de cita oficial)
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                Calcula y ajusta automáticamente la hora de presentación en el mensaje de WhatsApp y en la tabla para todas las rutas.
-              </p>
-            </div>
-          </div>
-
-          {/* Botones selectores de rango */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {[
-              { label: 'Hora Exacta (0m)', val: 0 },
-              { label: '15 min antes', val: 15 },
-              { label: '30 min antes', val: 30 },
-              { label: '40 min antes', val: 40 },
-              { label: '1 hora antes', val: 60 },
-            ].map(opt => {
-              const isSelected = anticipacionMinutos === opt.val;
-              return (
-                <button
-                  key={opt.val}
-                  type="button"
-                  onClick={() => handleSetAnticipacion(opt.val)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                    isSelected
-                      ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200 hover:border-slate-300'
-                  }`}
-                  title={opt.val === 0 ? 'Citar a la hora exacta estipulada en Ruteo' : `Citar ${opt.label} respecto a la hora de cita de Ruteo`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* 2. Banner de Estado del Guardado */}
       {currentHistoryEntry ? (
@@ -1790,53 +1779,8 @@ export default function RouteDispatch({ onlyExternal = false }) {
           <div className="flex items-center gap-2">
             <AlertCircle size={16} className="text-amber-600 shrink-0" />
             <span>
-              <strong>Aviso:</strong> No se ha detectado guardado en histórico para la fecha <strong>{selectedDate}</strong>. Mostrando asignación actual en Disponibilización. Presiona "Guardar Disponibilización" en el menú de Transporte para oficializarla.
+              <strong>Aviso:</strong> No se ha detectado guardado en histórico para la fecha <strong>{selectedDate}</strong>. Mostrando asignación actual en Disponibilización. Presiona "Guardar" en el menú de Transporte para oficializarla.
             </span>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Tarjetas de Métricas Rápidas (solo en Envío de Rutas propio) */}
-      {!onlyExternal && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 shrink-0">
-          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400">Total Rutas</span>
-              <p className="text-lg font-black text-slate-800">{totalRutas}</p>
-            </div>
-            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-              <Truck size={18} />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400">Conductores / Duplas</span>
-              <p className="text-lg font-black text-indigo-700">{totalConductores}</p>
-            </div>
-            <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg">
-              <Users size={18} />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400">Total Locales</span>
-              <p className="text-lg font-black text-amber-700">{totalLocales}</p>
-            </div>
-            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
-              <Layers size={18} />
-            </div>
-          </div>
-
-          <div className="bg-white rounded-xl border border-slate-200 p-2.5 flex items-center justify-between shadow-2xs">
-            <div>
-              <span className="text-[10px] uppercase font-bold text-slate-400">Volumen Total</span>
-              <p className="text-lg font-black text-emerald-700">{totalM3} m³</p>
-            </div>
-            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
-              <Sparkles size={18} />
-            </div>
           </div>
         </div>
       )}

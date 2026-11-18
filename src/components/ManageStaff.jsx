@@ -8,12 +8,16 @@ import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 
 export default function ManageStaff() {
-  const { staffList, fetchStaff, isLoading, updateStaffTipoDotacion, updateStaffPhone, updateStaffEmpresaExterna } = useStaffStore();
+  const { staffList, fetchStaff, isLoading, updateStaffTipoDotacion, updateStaffPhone, updateStaffEmpresaExterna, updateStaffDatesMeta } = useStaffStore();
   const [searchTerm, setSearchTerm] = useState('');
   
   // Modal State
   const [editingStaff, setEditingStaff] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Modal de Confirmación de Inactividad con Fecha desde la cual queda inactivo
+  const [inactivateModalStaff, setInactivateModalStaff] = useState(null);
+  const [inactivateDate, setInactivateDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     fetchStaff();
@@ -38,27 +42,68 @@ export default function ManageStaff() {
       ...staff, 
       tipo_dotacion: staff.tipo_dotacion || 'Propia',
       empresa_externa: staff.empresa_externa || '',
-      phone: staff.phone || ''
+      phone: staff.phone || '',
+      fecha_ingreso: staff.fecha_ingreso || '',
+      fecha_inactivo: staff.fecha_inactivo || ''
     });
     setIsModalOpen(true);
   };
 
   const handleToggleStatus = async (staff) => {
-    const newStatus = staff.status === 'Activo' ? 'Inactivo' : 'Activo';
-    if (!window.confirm(`¿Seguro que deseas cambiar el estado de ${staff.name} a ${newStatus}?`)) return;
+    if (staff.status === 'Activo') {
+      // Preguntar desde qué fecha en adelante queda Inactivo
+      setInactivateDate(staff.fecha_inactivo || new Date().toISOString().split('T')[0]);
+      setInactivateModalStaff(staff);
+      return;
+    }
+
+    // Si estaba Inactivo y se reactiva a Activo
+    if (!window.confirm(`¿Seguro que deseas reactivar el estado de ${staff.name} a Activo?`)) return;
 
     try {
       const { error } = await supabase
         .from('staff')
-        .update({ status: newStatus })
+        .update({ status: 'Activo' })
         .eq('id', staff.id);
 
       if (error) throw error;
-      toast.success('Estado actualizado correctamente');
+      if (updateStaffDatesMeta) {
+        await updateStaffDatesMeta(staff.id, staff.rut, { fecha_inactivo: '' });
+      }
+      toast.success('Empleado reactivado correctamente');
       fetchStaff();
     } catch (err) {
       console.error(err);
       toast.error('Error al actualizar el estado');
+    }
+  };
+
+  const handleConfirmInactivate = async (e) => {
+    e.preventDefault();
+    if (!inactivateModalStaff) return;
+    if (!inactivateDate) {
+      toast.warning('Por favor selecciona la fecha desde la cual queda inactivo.');
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('staff')
+        .update({ status: 'Inactivo' })
+        .eq('id', inactivateModalStaff.id);
+
+      if (error) throw error;
+      if (updateStaffDatesMeta) {
+        await updateStaffDatesMeta(inactivateModalStaff.id, inactivateModalStaff.rut, {
+          fecha_inactivo: inactivateDate
+        });
+      }
+      toast.success(`${inactivateModalStaff.name} marcado como Inactivo desde el ${inactivateDate}`);
+      setInactivateModalStaff(null);
+      fetchStaff();
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al dejar inactivo al empleado');
     }
   };
 
@@ -96,6 +141,12 @@ export default function ManageStaff() {
       }
       if (updateStaffPhone) {
         await updateStaffPhone(editingStaff.id, phone, editingStaff.rut, editingStaff.name);
+      }
+      if (updateStaffDatesMeta) {
+        await updateStaffDatesMeta(editingStaff.id, editingStaff.rut, {
+          fecha_ingreso: editingStaff.fecha_ingreso || '',
+          fecha_inactivo: editingStaff.status === 'Inactivo' ? (editingStaff.fecha_inactivo || new Date().toISOString().split('T')[0]) : ''
+        });
       }
 
       try {
@@ -161,6 +212,7 @@ export default function ManageStaff() {
               <th className="px-4 py-3 font-medium">Nombre</th>
               <th className="px-4 py-3 font-medium">Cargo</th>
               <th className="px-4 py-3 font-medium">Tipo</th>
+              <th className="px-4 py-3 font-medium">Fecha Ingreso</th>
               <th className="px-4 py-3 font-medium">Teléfono Celular</th>
               <th className="px-4 py-3 font-medium">Estado</th>
               <th className="px-4 py-3 font-medium text-right">Acciones</th>
@@ -199,6 +251,15 @@ export default function ManageStaff() {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-xs text-slate-600 font-mono">
+                    {staff.fecha_ingreso ? (
+                      <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded-md border border-slate-200 font-semibold">
+                        {staff.fecha_ingreso}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 italic">Sin fecha</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">
                     {staff.phone ? (
                       <a
@@ -223,6 +284,11 @@ export default function ManageStaff() {
                     }`}>
                       {staff.status}
                     </span>
+                    {staff.status === 'Inactivo' && staff.fecha_inactivo && (
+                      <span className="block text-[10px] text-red-600 font-mono mt-0.5">
+                        Desde: {staff.fecha_inactivo}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">
@@ -330,12 +396,47 @@ export default function ManageStaff() {
               <Select 
                 label="Estado"
                 value={editingStaff.status}
-                onChange={(e) => setEditingStaff({...editingStaff, status: e.target.value})}
+                onChange={(e) => {
+                  const newSt = e.target.value;
+                  setEditingStaff({
+                    ...editingStaff,
+                    status: newSt,
+                    fecha_inactivo: newSt === 'Inactivo' ? (editingStaff.fecha_inactivo || new Date().toISOString().split('T')[0]) : ''
+                  });
+                }}
                 options={[
                   { value: 'Activo', label: 'Activo' },
                   { value: 'Inactivo', label: 'Inactivo' }
                 ]}
               />
+
+              <div className="space-y-1">
+                <Input
+                  type="date"
+                  label="Fecha de Ingreso (Opcional — Bloquea días anteriores)"
+                  value={editingStaff.fecha_ingreso || ''}
+                  onChange={(e) => setEditingStaff({ ...editingStaff, fecha_ingreso: e.target.value })}
+                />
+                {editingStaff.fecha_ingreso && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingStaff({ ...editingStaff, fecha_ingreso: '' })}
+                    className="text-[11px] text-red-600 hover:underline font-medium"
+                  >
+                    Quitar fecha de ingreso
+                  </button>
+                )}
+              </div>
+
+              {editingStaff.status === 'Inactivo' && (
+                <Input
+                  type="date"
+                  label="Inactivo desde la fecha (Bloquea días hacia adelante) *"
+                  value={editingStaff.fecha_inactivo || ''}
+                  onChange={(e) => setEditingStaff({ ...editingStaff, fecha_inactivo: e.target.value })}
+                  required
+                />
+              )}
               
               <div className="pt-4 flex justify-end gap-2 border-t border-slate-100">
                 <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
@@ -343,6 +444,41 @@ export default function ManageStaff() {
                 </Button>
                 <Button type="submit">
                   Guardar Cambios
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para preguntar desde qué fecha queda Inactivo */}
+      {inactivateModalStaff && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-red-50/60">
+              <h3 className="font-bold text-base text-red-900">Dar de baja / Inactivar Personal</h3>
+              <button onClick={() => setInactivateModalStaff(null)} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleConfirmInactivate} className="p-4 space-y-4">
+              <p className="text-xs text-slate-600">
+                Vas a dejar inactivo a <strong className="text-slate-900">{inactivateModalStaff.name}</strong> ({inactivateModalStaff.rut}).
+                Indica desde qué fecha en adelante queda inactivo para que en el Dashboard y Asistencia los días posteriores aparezcan bloqueados:
+              </p>
+              <Input
+                type="date"
+                label="Inactivo desde la fecha *"
+                value={inactivateDate}
+                onChange={(e) => setInactivateDate(e.target.value)}
+                required
+              />
+              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
+                <Button type="button" variant="ghost" onClick={() => setInactivateModalStaff(null)}>
+                  Cancelar
+                </Button>
+                <Button type="submit" className="bg-red-600 hover:bg-red-700 text-white">
+                  Confirmar Inactividad
                 </Button>
               </div>
             </form>

@@ -7,7 +7,7 @@ import { Input } from './ui/Input';
 import { Select } from './ui/Select';
 import { useDropzone } from 'react-dropzone';
 import * as XLSX from 'xlsx';
-import { UploadCloud, CheckCircle2, AlertCircle, Trash2, Plus, X, RefreshCw } from 'lucide-react';
+import { UploadCloud, CheckCircle2, AlertCircle, Trash2, Plus, X, RefreshCw, Search } from 'lucide-react';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { toast } from 'sonner';
 import DriveTimeMachineButton from './DriveTimeMachineButton';
@@ -25,6 +25,7 @@ const getServiceColor = (serviceType) => {
     case 'Permiso con goce': return 'bg-purple-100 text-purple-700';
     case 'Permiso sin goce': return 'bg-pink-100 text-pink-700';
     case 'Baja': return 'bg-slate-200 text-slate-500 line-through';
+    case 'Bloqueado': return 'bg-slate-200/90 text-slate-400 border border-slate-300 cursor-not-allowed select-none';
     default: return 'bg-slate-100 text-slate-300 border border-dashed border-slate-300';
   }
 };
@@ -39,6 +40,7 @@ const getServiceAbbr = (serviceType) => {
     case 'Permiso con goce': return 'PG';
     case 'Permiso sin goce': return 'PS';
     case 'Baja': return 'B';
+    case 'Bloqueado': return '—';
     default: return '';
   }
 };
@@ -49,7 +51,8 @@ const serviceOptions = [
 ];
 
 export default function Attendance() {
-  const [activeTab, setActiveTab] = useState('masiva');
+  const [activeTab, setActiveTab] = useState('edicion');
+  const [quickSearch, setQuickSearch] = useState('');
   const { staffList, fetchStaff } = useStaffStore();
   const { saveAttendanceBulk, saveAttendanceRange, attendanceList, fetchAttendanceByDateRange, isLoading } = useAttendanceStore();
   const { transmittedAssignments } = usePlanningStore();
@@ -109,11 +112,22 @@ export default function Attendance() {
       };
 
       daysArray.forEach(day => {
+        const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        // Requisito 7: Si tiene fecha de ingreso opcional, los días hacia atrás aparecen bloqueados
+        if (staff.fecha_ingreso && dateStr < staff.fecha_ingreso) {
+          row.days[day] = 'Bloqueado';
+          return;
+        }
+        // Requisito 7: Si está Inactivo desde una fecha, los días desde esa fecha hacia adelante aparecen bloqueados
+        if (staff.status === 'Inactivo' && staff.fecha_inactivo && dateStr >= staff.fecha_inactivo) {
+          row.days[day] = 'Bloqueado';
+          return;
+        }
+
         const isSunday = new Date(selectedYear, selectedMonth - 1, day).getDay() === 0;
         if (isSunday) {
           row.days[day] = '';
         } else {
-          const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const record = staffAttendance.find(a => a.date && a.date.startsWith(dateStr));
           
           if (record && record.service_type) {
@@ -150,15 +164,26 @@ export default function Attendance() {
       return row;
     });
 
-    if (statusFilter) {
-      if (statusFilter === 'Vacio') {
-        return rawMatrix.filter(row => Object.values(row.days).includes(''));
-      }
-      return rawMatrix.filter(row => Object.values(row.days).includes(statusFilter));
+    let filteredMatrix = rawMatrix;
+
+    if (quickSearch && quickSearch.trim() !== '') {
+      const q = quickSearch.trim().toLowerCase();
+      filteredMatrix = filteredMatrix.filter(row =>
+        (row.name && row.name.toLowerCase().includes(q)) ||
+        (row.rut && row.rut.toLowerCase().includes(q)) ||
+        (row.role && row.role.toLowerCase().includes(q))
+      );
     }
 
-    return rawMatrix;
-  }, [ownActiveStaff, attendanceList, daysArray, selectedYear, selectedMonth, statusFilter, transmittedAssignments]);
+    if (statusFilter) {
+      if (statusFilter === 'Vacio') {
+        return filteredMatrix.filter(row => Object.values(row.days).includes(''));
+      }
+      return filteredMatrix.filter(row => Object.values(row.days).includes(statusFilter));
+    }
+
+    return filteredMatrix;
+  }, [ownActiveStaff, attendanceList, daysArray, selectedYear, selectedMonth, statusFilter, quickSearch, transmittedAssignments]);
 
   // Sincronizar masivamente todas las rutas del mes desde Disponibilización a Asistencia (solo dotación propia)
   const handleSyncFromDisponibilizacion = async () => {
@@ -542,18 +567,11 @@ export default function Attendance() {
       {/* Tabs */}
       <div className="flex space-x-2 border-b border-slate-200 mb-6 overflow-x-auto pb-2">
         <button
-          className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap relative ${activeTab === 'masiva' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-          onClick={() => setActiveTab('masiva')}
+          className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap relative ${activeTab === 'edicion' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+          onClick={() => setActiveTab('edicion')}
         >
-          Masiva (Excel)
-          {activeTab === 'masiva' && <div className="absolute bottom-[-9px] left-0 w-full h-0.5 bg-blue-600" />}
-        </button>
-        <button
-          className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap relative ${activeTab === 'manual' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-          onClick={() => setActiveTab('manual')}
-        >
-          Asignación Manual
-          {activeTab === 'manual' && <div className="absolute bottom-[-9px] left-0 w-full h-0.5 bg-blue-600" />}
+          Edición Detallada
+          {activeTab === 'edicion' && <div className="absolute bottom-[-9px] left-0 w-full h-0.5 bg-blue-600" />}
         </button>
         <button
           className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap relative ${activeTab === 'rango' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
@@ -561,13 +579,6 @@ export default function Attendance() {
         >
           Permisos y Vacaciones
           {activeTab === 'rango' && <div className="absolute bottom-[-9px] left-0 w-full h-0.5 bg-blue-600" />}
-        </button>
-        <button
-          className={`px-4 py-2 font-medium text-sm transition-colors whitespace-nowrap relative ${activeTab === 'edicion' ? 'text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
-          onClick={() => setActiveTab('edicion')}
-        >
-          Edición Detallada
-          {activeTab === 'edicion' && <div className="absolute bottom-[-9px] left-0 w-full h-0.5 bg-blue-600" />}
         </button>
       </div>
 
@@ -804,6 +815,14 @@ export default function Attendance() {
                 ]}
               />
             </div>
+            <div className="w-60">
+              <Input
+                label="Búsqueda Rápida"
+                placeholder="Buscar por nombre, RUT o cargo..."
+                value={quickSearch}
+                onChange={(e) => setQuickSearch(e.target.value)}
+              />
+            </div>
 
             <Button
               type="button"
@@ -851,9 +870,12 @@ export default function Attendance() {
                       return (
                         <td 
                           key={day} 
-                          className={`p-1 border-r border-slate-100 text-center cursor-pointer transition-colors relative ${isWeekend ? 'bg-orange-100 hover:bg-orange-200' : 'hover:bg-blue-50'}`} 
-                          title={`Editar asistencia de ${row.name} el ${day}/${selectedMonth} - Actual: ${service || 'Vacío'}`}
-                          onClick={() => setEditCell({ staff_id: row.rut, id_db: row.id, name: row.name, day, dateStr, currentService: service })}
+                          className={`p-1 border-r border-slate-100 text-center transition-colors relative ${service === 'Bloqueado' ? 'cursor-not-allowed bg-slate-100' : isWeekend ? 'cursor-pointer bg-orange-100 hover:bg-orange-200' : 'cursor-pointer hover:bg-blue-50'}`} 
+                          title={service === 'Bloqueado' ? `${row.name} - Día bloqueado por fecha de ingreso/inactividad` : `Editar asistencia de ${row.name} el ${day}/${selectedMonth} - Actual: ${service || 'Vacío'}`}
+                          onClick={() => {
+                            if (service === 'Bloqueado') return;
+                            setEditCell({ staff_id: row.rut, id_db: row.id, name: row.name, day, dateStr, currentService: service });
+                          }}
                         >
                           <div className={`w-full h-8 flex items-center justify-center rounded-md transition-transform hover:scale-110 ${getServiceColor(service)}`}>
                             {getServiceAbbr(service)}

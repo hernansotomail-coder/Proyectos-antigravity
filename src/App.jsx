@@ -100,6 +100,13 @@ function App() {
             }, 600);
             return;
           }
+          if (changedFecha === '__staff_dates_meta__') {
+            if (staffTimer) clearTimeout(staffTimer);
+            staffTimer = setTimeout(() => {
+              useStaffStore.getState().fetchStaff?.();
+            }, 600);
+            return;
+          }
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(() => {
             const status = usePlanningStore.getState().cloudSyncStatus;

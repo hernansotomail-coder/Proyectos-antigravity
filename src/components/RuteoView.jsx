@@ -1868,16 +1868,6 @@ export default function RuteoView() {
             <Copy size={15} className="text-indigo-600" />
             Copiar imagen
           </Button>
-
-          <Button 
-            onClick={handleDownloadImage}
-            variant="outline"
-            className="flex items-center gap-2 text-sky-700 bg-sky-50/70 hover:bg-sky-100 hover:text-sky-800 text-xs font-bold px-3.5 py-2 rounded-xl border-sky-200 shadow-2xs transition-all"
-            title="Descargar matriz en formato de imagen PNG"
-          >
-            <Camera size={15} className="text-sky-600" />
-            Descargar imagen
-          </Button>
         </div>
       </div>
 
@@ -1890,43 +1880,6 @@ export default function RuteoView() {
               <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
                 Operación:
               </span>
-            </div>
-
-            {/* Selector de tipo de ruta: Todos / 4 Dígitos / Sin Ruteo */}
-            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setRouteTypeFilter('all')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                  routeTypeFilter === 'all'
-                    ? 'bg-white text-slate-800 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Todos ({currentRoutes.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setRouteTypeFilter('standard')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                  routeTypeFilter === 'standard'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                4 Dígitos ({standardRoutesCount})
-              </button>
-              <button
-                type="button"
-                onClick={() => setRouteTypeFilter('special')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
-                  routeTypeFilter === 'special'
-                    ? 'bg-purple-600 text-white shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Sin Ruteo ({specialRoutesCount})
-              </button>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -2059,54 +2012,48 @@ export default function RuteoView() {
             </div>
           </div>
 
-          {/* 2. FILTROS COMBINADOS DINÁMICOS (Requisito 2) */}
-          <MultiSelectFilter
-            label="Transportista"
-            options={transportistasList}
-            selectedValues={selectedTransportistas}
-            onChange={setSelectedTransportistas}
-            placeholder="Todos"
-          />
+          {/* Tarjetas KPI de Totales integradas al lado de Filtro Rápido */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="bg-emerald-50/60 px-3 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2.5">
+              <div>
+                <p className="text-[9px] font-bold text-emerald-700 uppercase tracking-wider">Total m³</p>
+                <p className="text-sm font-black text-emerald-800 leading-tight">{totalM3}</p>
+              </div>
+              <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                <Package size={14} />
+              </div>
+            </div>
 
-          <MultiSelectFilter
-            label="Cliente"
-            options={clientesList}
-            selectedValues={selectedClientes}
-            onChange={setSelectedClientes}
-            placeholder="Todos"
-          />
+            <div className="bg-indigo-50/60 px-3 py-1.5 rounded-xl border border-indigo-200 flex items-center gap-2.5">
+              <div>
+                <p className="text-[9px] font-bold text-indigo-700 uppercase tracking-wider">Total Locales</p>
+                <p className="text-sm font-black text-indigo-800 leading-tight">{totalLocales}</p>
+              </div>
+              <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                <MapPin size={14} />
+              </div>
+            </div>
 
-          <MultiSelectFilter
-            label="N° de Ruta"
-            options={rutasList}
-            selectedValues={selectedRutas}
-            onChange={setSelectedRutas}
-            placeholder="Todas"
-          />
+            <div className="bg-amber-50/60 px-3 py-1.5 rounded-xl border border-amber-200 flex items-center gap-2.5">
+              <div>
+                <p className="text-[9px] font-bold text-amber-700 uppercase tracking-wider">Suma Peso (kg)</p>
+                <p className="text-sm font-black text-amber-800 leading-tight">{totalPeso}</p>
+              </div>
+              <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+                <Weight size={14} />
+              </div>
+            </div>
 
-          <MultiSelectFilter
-            label="Conductor"
-            options={conductoresList}
-            selectedValues={selectedConductores}
-            onChange={setSelectedConductores}
-            placeholder="Todos"
-          />
-
-          <MultiSelectFilter
-            label="Auxiliar"
-            options={auxiliaresList}
-            selectedValues={selectedAuxiliares}
-            onChange={setSelectedAuxiliares}
-            placeholder="Todos"
-          />
-
-          <MultiSelectFilter
-            label="N° de Vuelta"
-            options={vueltasList}
-            selectedValues={selectedVueltas}
-            onChange={setSelectedVueltas}
-            placeholder="Todas"
-          />
+            <div className="bg-blue-50/60 px-3 py-1.5 rounded-xl border border-blue-200 flex items-center gap-2.5">
+              <div>
+                <p className="text-[9px] font-bold text-blue-700 uppercase tracking-wider">Total Cajas (CJ)</p>
+                <p className="text-sm font-black text-blue-800 leading-tight">{totalCajas}</p>
+              </div>
+              <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                <Layers size={14} />
+              </div>
+            </div>
+          </div>
 
           {hasActiveFilters && (
             <Button 
@@ -2124,49 +2071,6 @@ export default function RuteoView() {
           <span className="text-xs text-slate-700 font-bold bg-slate-100 px-3 py-1 rounded-xl">
             {tripsList.length} viajes ({filteredRoutes.length} rutas)
           </span>
-        </div>
-      </div>
-
-      {/* 3. Tarjetas KPI de Totales */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 shrink-0">
-        <div className="bg-white p-2.5 px-3.5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total m³</p>
-            <p className="text-xl font-black text-emerald-700">{totalM3}</p>
-          </div>
-          <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-            <Package size={17} />
-          </div>
-        </div>
-
-        <div className="bg-white p-2.5 px-3.5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Locales</p>
-            <p className="text-xl font-black text-indigo-700">{totalLocales}</p>
-          </div>
-          <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-            <MapPin size={17} />
-          </div>
-        </div>
-
-        <div className="bg-white p-2.5 px-3.5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Suma Peso (kg)</p>
-            <p className="text-xl font-black text-amber-700">{totalPeso}</p>
-          </div>
-          <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
-            <Weight size={17} />
-          </div>
-        </div>
-
-        <div className="bg-white p-2.5 px-3.5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Cajas (CJ)</p>
-            <p className="text-xl font-black text-blue-700">{totalCajas}</p>
-          </div>
-          <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-            <Layers size={17} />
-          </div>
         </div>
       </div>
 
