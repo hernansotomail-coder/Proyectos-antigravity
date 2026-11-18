@@ -13,6 +13,7 @@ import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { isFiveDigitRoute } from '../data/operacionesMaster';
 import { useAuthStore } from '../store/authStore';
 import { Button } from './ui/Button';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // Componente de Badge para columna Ambiente (Requisitos 2 y 3)
 export function AmbienteBadge({ ambiente }) {
@@ -845,6 +846,17 @@ export default function DailyPlanning() {
             <Cloud className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin text-blue-600' : 'text-slate-500'}`} />
             {isSyncingCloud ? 'Sincronizando...' : 'Sincronizar Servidor'}
           </Button>
+
+          {/* Botón Consulta Temporal (Google Drive) */}
+          <DriveTimeMachineButton
+            currentMenu="Asignación Diaria"
+            activeDate={transformedRoutes[0]?.fecha || selectedDisponibilizarDate}
+            onSelectDate={(loadedFecha, dayData) => {
+              if (Array.isArray(dayData?.assignments) && dayData.assignments.length > 0) {
+                setActiveTab('ruteo');
+              }
+            }}
+          />
         </div>
       </div>
 

@@ -17,6 +17,7 @@ import { AmbienteBadge } from './DailyPlanning';
 import { copyMatrixAsImage, downloadMatrixAsImage } from '../lib/matrixImageExporter';
 import { getOperacionName, ALL_OPERACIONES, getAllOperationsForRoute, canonicalizeOperation, isOperationMatching, splitOperationNames, isFiveDigitRoute } from '../data/operacionesMaster';
 import { getBriefingOperation } from './Briefing';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // ==========================================
 // 1. MAPA DE DISTANCIAS Y CÁLCULO DE COMUNA
@@ -2022,6 +2023,13 @@ export default function RuteoView() {
               </select>
             </div>
           </div>
+
+          {/* Botón Consulta Temporal (Google Drive) */}
+          <DriveTimeMachineButton
+            currentMenu="Ruteo"
+            activeDate={activeDate}
+            onSelectDate={(loadedFecha) => setSelectedRuteoDate(loadedFecha)}
+          />
 
           {/* 1. FILTRO RÁPIDO PARA BUSCAR POR CUALQUIER COLUMNA (Requisito 1) */}
           <div className="flex flex-col gap-0.5">

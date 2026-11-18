@@ -15,6 +15,7 @@ import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
 import { Button } from './ui/Button';
 import { getBriefingOperation } from './Briefing';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // Badge para columna Ambiente
 export function AmbienteBadge({ ambiente }) {
@@ -1661,6 +1662,14 @@ export default function AssignmentControl() {
                 </select>
               </div>
             </div>
+
+            {/* Botón Consulta Temporal (Google Drive) */}
+            <DriveTimeMachineButton
+              currentMenu="Disponibilización"
+              activeDate={activeDate}
+              onSelectDate={(loadedFecha) => setSelectedDisponibilizarDate(loadedFecha)}
+              compact={true}
+            />
 
             {/* Multi-Filtro Ruta (Requisito 2) */}
             <CompactMultiSelect 

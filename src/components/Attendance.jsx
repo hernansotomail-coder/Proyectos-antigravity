@@ -10,6 +10,7 @@ import * as XLSX from 'xlsx';
 import { UploadCloud, CheckCircle2, AlertCircle, Trash2, Plus, X, RefreshCw } from 'lucide-react';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { toast } from 'sonner';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // Helper to get days in month
 const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
@@ -512,6 +513,30 @@ export default function Attendance() {
             Gestión y control de asistencia exclusivo para personal propio interno (conductores y auxiliares de la empresa).
           </p>
         </div>
+
+        {/* Botón Consulta Temporal (Google Drive) para Asistencia */}
+        <DriveTimeMachineButton
+          currentMenu="Asistencia"
+          activeDate={`${String(selectedDay || 1).padStart(2, '0')}-${String(selectedMonth).padStart(2, '0')}-${selectedYear}`}
+          onSelectDate={(loadedFecha) => {
+            const parts = String(loadedFecha).split('-');
+            if (parts.length === 3) {
+              setSelectedDay(Number(parts[0]));
+              setSelectedMonth(Number(parts[1]));
+              setSelectedYear(Number(parts[2]));
+              setActiveTab('edicion');
+            }
+          }}
+          onSelectMonthAttendance={(yearMonth) => {
+            const parts = String(yearMonth).split('-');
+            if (parts.length === 2) {
+              setSelectedYear(Number(parts[0]));
+              setSelectedMonth(Number(parts[1]));
+              setSelectedDay('');
+              setActiveTab('edicion');
+            }
+          }}
+        />
       </div>
       
       {/* Tabs */}

@@ -11,6 +11,7 @@ import { Button } from './ui/Button';
 import { AmbienteBadge } from './DailyPlanning';
 import { findFarthestComunaForRoute } from './RuteoView';
 import { getBriefingOperation } from './Briefing';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // COMPONENTE MULTI-SELECT DROPDOWN REUTILIZABLE
 function MultiSelectFilter({ label, options, selectedValues, onChange, placeholder = 'Todos' }) {
@@ -563,6 +564,13 @@ export default function HistoricalAssignment() {
               </select>
             </div>
           </div>
+
+          {/* Botón Consulta Temporal (Google Drive) */}
+          <DriveTimeMachineButton
+            currentMenu="Histórico Disponibilización"
+            activeDate={selectedDate}
+            onSelectDate={(loadedFecha) => setSelectedDate(loadedFecha)}
+          />
 
           {/* 1. Multi-Filtro Conductor */}
           <MultiSelectFilter

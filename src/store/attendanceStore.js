@@ -126,5 +126,24 @@ export const useAttendanceStore = create((set) => ({
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  injectDriveAttendanceToMemory: (driveRecords = []) => {
+    if (!Array.isArray(driveRecords) || driveRecords.length === 0) return;
+    set((state) => {
+      const current = state.attendanceList || [];
+      const keySet = new Set(current.map(r => `${r.staff_id}:::${r.date}`));
+      const merged = [...current];
+      driveRecords.forEach(r => {
+        if (r && r.staff_id && r.date) {
+          const k = `${r.staff_id}:::${r.date}`;
+          if (!keySet.has(k)) {
+            keySet.add(k);
+            merged.push(r);
+          }
+        }
+      });
+      return { attendanceList: merged };
+    });
   }
 }));

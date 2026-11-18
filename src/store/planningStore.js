@@ -2622,5 +2622,165 @@ export const usePlanningStore = create((set, get) => ({
 
     toast.success(`¡${extraRows.length} servicio(s) extra(s) guardado(s) y transmitido(s) a Histórico de Disponibilización!`);
     return true;
+  },
+
+  // ==========================================
+  // CONSULTA TEMPORAL DESDE GOOGLE DRIVE (En memoria sin ocupar Supabase)
+  // ==========================================
+  loadedDriveDates: {}, // { [fechaDmy]: { archivedAt, routesCount, changesCount, attendanceCount, hasEstatusDiario, estatusDiario, attendance } }
+
+  injectDriveArchivedDayToMemory: (fechaDmy, dayData, archivedAt = null) => {
+    if (!fechaDmy || !dayData) return false;
+    const cleanFecha = normalizeDate(fechaDmy) || fechaDmy;
+    const assignments = Array.isArray(dayData.assignments)
+      ? dayData.assignments.map(r => ({
+          ...r,
+          fecha: cleanFecha,
+          transportista: ensureRowTransportista(r),
+          paradas: healParadasWithPreloaded(r.ruta, r.paradas, cleanFecha)
+        }))
+      : [];
+
+    const ruteoOv = (dayData.ruteoOverrides && typeof dayData.ruteoOverrides === 'object')
+      ? dayData.ruteoOverrides
+      : {};
+
+    const changeHist = Array.isArray(dayData.changeHistory)
+      ? dayData.changeHistory
+      : [];
+
+    const savedHistEntry = dayData.savedHistoryEntry || (assignments.length > 0 ? {
+      id: `drive-hist-${cleanFecha}`,
+      fecha: cleanFecha,
+      savedAt: archivedAt ? new Date(archivedAt).toLocaleString('es-CL') : 'Respaldo Google Drive',
+      totalServicios: assignments.length,
+      totalM3: assignments.reduce((acc, r) => acc + (parseFloat(r.m3) || 0), 0).toFixed(2),
+      totalLocales: assignments.reduce((acc, r) => acc + (parseInt(r.locales, 10) || 0), 0),
+      totalPeso: assignments.reduce((acc, r) => acc + (parseFloat(r.peso) || 0), 0).toFixed(2),
+      totalCajas: assignments.reduce((acc, r) => acc + (parseInt(r.cantCJ, 10) || 0), 0),
+      rows: assignments,
+      isFromDrive: true
+    } : null);
+
+    set((state) => {
+      const nextAssignments = {
+        ...(state.transmittedAssignments || {}),
+        ...(assignments.length > 0 ? { [cleanFecha]: assignments } : {})
+      };
+
+      const nextSavedRuteo = {
+        ...(state.savedRuteoByDate || {}),
+        ...(assignments.length > 0 ? { [cleanFecha]: assignments } : {})
+      };
+
+      const nextOverrides = {
+        ...(state.ruteoOverrides || {}),
+        ...(Object.keys(ruteoOv).length > 0 ? { [cleanFecha]: ruteoOv } : {})
+      };
+
+      let nextHistoryList = [...(state.savedHistoryList || [])];
+      if (savedHistEntry) {
+        nextHistoryList = [
+          savedHistEntry,
+          ...nextHistoryList.filter(h => normalizeDate(h.fecha) !== cleanFecha)
+        ];
+      }
+
+      let nextChangeList = [...(state.changeHistoryList || [])];
+      if (changeHist.length > 0) {
+        const existingIds = new Set(nextChangeList.map(c => c.id));
+        changeHist.forEach(ch => {
+          if (!existingIds.has(ch.id)) {
+            nextChangeList.push(ch);
+          }
+        });
+      }
+
+      return {
+        transmittedAssignments: nextAssignments,
+        savedRuteoByDate: nextSavedRuteo,
+        ruteoOverrides: nextOverrides,
+        savedHistoryList: nextHistoryList,
+        changeHistoryList: nextChangeList,
+        selectedDisponibilizarDate: cleanFecha,
+        selectedRuteoDate: cleanFecha,
+        loadedDriveDates: {
+          ...(state.loadedDriveDates || {}),
+          [cleanFecha]: {
+            archivedAt: archivedAt || new Date().toISOString(),
+            routesCount: assignments.length,
+            changesCount: changeHist.length,
+            attendanceCount: Array.isArray(dayData.attendance) ? dayData.attendance.length : 0,
+            hasEstatusDiario: Boolean(dayData.estatusDiario?.processedData),
+            estatusDiario: dayData.estatusDiario || null,
+            attendance: Array.isArray(dayData.attendance) ? dayData.attendance : []
+          }
+        }
+      };
+    });
+
+    return true;
+  },
+
+  removePurgedDatesFromLocalState: (purgedDatesArray) => {
+    if (!Array.isArray(purgedDatesArray) || purgedDatesArray.length === 0) return;
+    const purgedSet = new Set(purgedDatesArray.map(d => normalizeDate(d)));
+
+    set((state) => {
+      const nextAssignments = {};
+      Object.entries(state.transmittedAssignments || {}).forEach(([k, v]) => {
+        if (!purgedSet.has(normalizeDate(k))) nextAssignments[k] = v;
+      });
+
+      const nextSavedRuteo = {};
+      Object.entries(state.savedRuteoByDate || {}).forEach(([k, v]) => {
+        if (!purgedSet.has(normalizeDate(k))) nextSavedRuteo[k] = v;
+      });
+
+      const nextBaseline = {};
+      Object.entries(state.savedRuteoBaseline || {}).forEach(([k, v]) => {
+        if (!purgedSet.has(normalizeDate(k))) nextBaseline[k] = v;
+      });
+
+      const nextOverrides = {};
+      Object.entries(state.ruteoOverrides || {}).forEach(([k, v]) => {
+        if (!purgedSet.has(normalizeDate(k))) nextOverrides[k] = v;
+      });
+
+      const nextHistory = (state.savedHistoryList || []).filter(
+        h => !purgedSet.has(normalizeDate(h?.fecha))
+      );
+
+      const nextChangeHistory = (state.changeHistoryList || []).filter(
+        ch => !purgedSet.has(normalizeDate(ch?.fechaPlanificacion))
+      );
+
+      persistAssignments(nextAssignments);
+      persistSavedRuteo(nextSavedRuteo);
+      persistSavedBaseline(nextBaseline);
+      try {
+        localStorage.setItem('keylogistics_ruteo_overrides_v1', JSON.stringify(nextOverrides));
+        localStorage.setItem('keylogistics_saved_history_list', JSON.stringify(nextHistory));
+        localStorage.setItem('keylogistics_change_history', JSON.stringify(nextChangeHistory));
+      } catch (e) {}
+
+      const remainingDates = Object.keys(nextAssignments);
+      const latestDate = getMostRecentDate(remainingDates, '28-10-2026');
+
+      return {
+        transmittedAssignments: nextAssignments,
+        savedRuteoByDate: nextSavedRuteo,
+        savedRuteoBaseline: nextBaseline,
+        ruteoOverrides: nextOverrides,
+        savedHistoryList: nextHistory,
+        changeHistoryList: nextChangeHistory,
+        selectedDisponibilizarDate: purgedSet.has(normalizeDate(state.selectedDisponibilizarDate))
+          ? latestDate
+          : state.selectedDisponibilizarDate,
+        selectedRuteoDate: purgedSet.has(normalizeDate(state.selectedRuteoDate))
+          ? latestDate
+          : state.selectedRuteoDate
+      };
+    });
   }
 }));

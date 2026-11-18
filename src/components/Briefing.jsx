@@ -25,6 +25,7 @@ import {
 import { Button } from './ui/Button';
 import { copyBriefingAsImage } from '../lib/matrixImageExporter';
 import PaseIngresoMatrix, { NEWREST_PASE_ROUTES, JUAN_VALDEZ_PASE_ROUTES } from './PaseIngresoMatrix';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // Limpia de la operación la denominación "RUTA ENVÍOS" más el número y conectores sobrantes
 export const cleanBriefingOperationName = (name) => {
@@ -1505,6 +1506,13 @@ export default function Briefing() {
               </select>
             </div>
           </div>
+
+          {/* Botón Consulta Temporal (Google Drive) */}
+          <DriveTimeMachineButton
+            currentMenu="Briefing"
+            activeDate={activeDate}
+            onSelectDate={(loadedFecha) => setActiveDate(normalizeDate(loadedFecha))}
+          />
 
           {/* Botones Acceso Rápido Pase de Ingreso (Requisito 2) */}
           <button

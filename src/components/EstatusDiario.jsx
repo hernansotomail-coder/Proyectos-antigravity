@@ -13,6 +13,8 @@ import { Button } from './ui/Button';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
+import { uploadSingleDayToDrive } from '../lib/googleDriveArchive';
 
 // Hojas oficiales a procesar
 export const HOJAS_OBJETIVO = [
@@ -1067,6 +1069,11 @@ export default function EstatusDiario() {
         toast.success(`Reporte generado localmente con ${allRows.length} registros para el día ${isoToDmy(isoTarget)}.`);
       }
 
+      // Respaldar automáticamente el Estatus Diario en Google Drive para consultas históricas futuras
+      uploadSingleDayToDrive(isoToDmy(isoTarget), {
+        estatusDiario: payload
+      }).catch(() => {});
+
       // Cambiar automáticamente a la pestaña de Matrices
       setMainTab('matrices');
     } catch (err) {
@@ -1314,38 +1321,76 @@ export default function EstatusDiario() {
       </div>
 
       {/* 2. Pestañas de Navegación Principal: Reporte y Matrices vs Carga de Información */}
-      <div className="flex items-center gap-2 border-b border-slate-200 bg-white px-3 pt-2.5 rounded-2xl shadow-xs">
-        <button
-          type="button"
-          onClick={() => setMainTab('matrices')}
-          className={`flex items-center gap-2 px-5 py-3 font-bold text-xs rounded-xl transition-all ${
-            mainTab === 'matrices'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <BarChart3 size={16} />
-          <span>Reporte y Matrices</span>
-          {processedData && (
-            <span className="w-2 h-2 rounded-full bg-emerald-400" title="Estatus activo disponible" />
-          )}
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 pt-2.5 pb-2 rounded-2xl shadow-xs">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setMainTab('matrices')}
+            className={`flex items-center gap-2 px-5 py-3 font-bold text-xs rounded-xl transition-all ${
+              mainTab === 'matrices'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <BarChart3 size={16} />
+            <span>Reporte y Matrices</span>
+            {processedData && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400" title="Estatus activo disponible" />
+            )}
+          </button>
 
-        <button
-          type="button"
-          onClick={() => setMainTab('carga')}
-          className={`flex items-center gap-2 px-5 py-3 font-bold text-xs rounded-xl transition-all ${
-            mainTab === 'carga'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <UploadCloud size={16} />
-          <span>Carga de Información</span>
-          {file && (
-            <span className="w-2 h-2 rounded-full bg-emerald-400" title="Archivo cargado" />
-          )}
-        </button>
+          <button
+            type="button"
+            onClick={() => setMainTab('carga')}
+            className={`flex items-center gap-2 px-5 py-3 font-bold text-xs rounded-xl transition-all ${
+              mainTab === 'carga'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <UploadCloud size={16} />
+            <span>Carga de Información</span>
+            {file && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400" title="Archivo cargado" />
+            )}
+          </button>
+        </div>
+
+        {/* Botón Consulta Temporal (Google Drive) para Estatus Diario */}
+        <DriveTimeMachineButton
+          currentMenu="Estatus Diario"
+          activeDate={processedData?.fechaCorteDmy || fechaCorte}
+          customCurrentDayPayload={
+            processedData
+              ? {
+                  estatusDiario: {
+                    processedData,
+                    dispMetrics: effectiveDisp,
+                    fechaCorte: processedData?.fechaCorteDmy || fechaCorte,
+                    savedAt: remoteInfo?.savedAt || new Date().toISOString(),
+                    uploadedBy: remoteInfo?.uploadedBy || user?.name || 'Usuario'
+                  }
+                }
+              : null
+          }
+          onSelectDate={(loadedFecha, dayData) => {
+            setFechaCorte(loadedFecha);
+            if (dayData?.estatusDiario?.processedData) {
+              setProcessedData(dayData.estatusDiario.processedData);
+              if (dayData.estatusDiario.dispMetrics) {
+                setCachedDispMetrics(dayData.estatusDiario.dispMetrics);
+              }
+              setRemoteInfo({
+                uploadedBy: `${dayData.estatusDiario.uploadedBy || 'Drive'} (Respaldo Histórico)`,
+                savedAt: dayData.estatusDiario.savedAt || new Date().toISOString(),
+                dateChile: getChileLocalDateString(new Date())
+              });
+              setMainTab('matrices');
+            } else {
+              toast.info(`Se cargó la Disponibilización de ${loadedFecha} desde Drive (este día no tenía matriz de Estatus Diario guardada).`);
+            }
+          }}
+        />
       </div>
 
       {/* ========================================================================= */}

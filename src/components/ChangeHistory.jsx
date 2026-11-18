@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { usePlanningStore, normalizeDate, sortDatesDescending, getMostRecentDate } from '../store/planningStore';
 import { useAuthStore, canUserDeleteHistory } from '../store/authStore';
 import { Button } from './ui/Button';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 export default function ChangeHistory() {
   const { 
@@ -395,6 +396,13 @@ export default function ChangeHistory() {
                   <option key={d} value={d}>{d}</option>
                 ))}
               </select>
+
+              {/* Botón Consulta Temporal (Google Drive) */}
+              <DriveTimeMachineButton
+                currentMenu="Histórico de Cambios"
+                activeDate={filterDate !== 'TODAS' ? filterDate : (availableDates[0] || '')}
+                onSelectDate={(loadedFecha) => setFilterDate(loadedFecha)}
+              />
 
               {/* User Filter */}
               <select

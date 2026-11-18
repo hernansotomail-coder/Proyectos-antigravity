@@ -17,6 +17,7 @@ import { isAssignmentExternal } from './Briefing';
 import { resolveBodegasForRoutes, resolveClienteForStop, isFiveDigitRoute } from '../data/operacionesMaster';
 import { getHtml2Canvas } from '../lib/html2canvasWrapper';
 import { Button } from './ui/Button';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // Persistencia local para teléfonos de conductores (para compatibilidad de envíos por WhatsApp Personal)
 const loadPersistedPhones = () => {
@@ -1646,6 +1647,13 @@ export default function RouteDispatch({ onlyExternal = false }) {
               ))}
             </select>
           </div>
+
+          {/* Botón Consulta Temporal (Google Drive) */}
+          <DriveTimeMachineButton
+            currentMenu={onlyExternal ? 'Envío de Rutas Externos' : 'Envío de Rutas'}
+            activeDate={selectedDate}
+            onSelectDate={(loadedFecha) => setSelectedDate(loadedFecha)}
+          />
 
           {onlyExternal ? (
             /* Botón: Envío de rutas (Pop-up por Empresa con Copiar Imagen por fila) */
