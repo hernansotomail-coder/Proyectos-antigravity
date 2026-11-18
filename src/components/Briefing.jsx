@@ -110,7 +110,12 @@ export const getBriefingOperation = (route) => {
   });
   if (anySbarro) return 'Sbarro';
 
-  // 4. Petroleras: considera T300, T302 y T312
+  // 4. SPID explícito (debe evaluarse antes que T300 por defecto de ensureRowTransportista)
+  if (rawClient.toUpperCase().includes('SPID') || rawRuta.toUpperCase().includes('SPID') || rawOp.toUpperCase().includes('SPID')) {
+    return 'SPID';
+  }
+
+  // 5. Petroleras: considera T300, T302 y T312
   const transpCodes = rawTransp.match(/T\d{3}/g) || [];
   if (transpCodes.length > 0 && transpCodes.every(c => PETROLERAS_TRANSPORTISTAS.includes(c))) {
     return 'PETROLERAS';
@@ -123,7 +128,7 @@ export const getBriefingOperation = (route) => {
   });
   if (anyPetroleras) return 'PETROLERAS';
 
-  // 5. Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
+  // 6. Las rutas que comienzan con "ESPECIALES CARLS " dentro de "Carls Jr"
   if (rawTransp === 'T305') return 'Carls Jr';
   const anyCarls = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
@@ -131,7 +136,7 @@ export const getBriefingOperation = (route) => {
   });
   if (anyCarls) return 'Carls Jr';
 
-  // 6. Las rutas que parten con "SBW " dentro de "Subway"
+  // 7. Las rutas que parten con "SBW " dentro de "Subway"
   if (rawTransp === 'T310') return 'Subway';
   const anySbw = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
     const s = String(val || '').trim().toUpperCase();
@@ -139,15 +144,10 @@ export const getBriefingOperation = (route) => {
   });
   if (anySbw) return 'Subway';
 
-  // 7. Las rutas que parten con 1500 a 1549 o T400 son consideradas con el cliente "El Golfo"
+  // 8. Las rutas que parten con 1500 a 1549 o T400 son consideradas con el cliente "El Golfo"
   const rutaNum = parseInt(rawRuta.replace(/\D/g, ''), 10);
   if (rawTransp === 'T400' || (!isNaN(rutaNum) && rutaNum >= 1500 && rutaNum <= 1549)) {
     return 'El Golfo';
-  }
-
-  // 8. Si es servicio SPID explícito (ej: desde Servicios Extras o ruta directa)
-  if (rawClient.toUpperCase().includes('SPID') || rawRuta.toUpperCase().includes('SPID')) {
-    return 'SPID';
   }
 
   // 9. Rutas explícitas de Newrest para Pase de Ingreso y Briefing
@@ -197,6 +197,12 @@ export const classifyParadaForBriefing = (parada, parentRoute = {}) => {
   // 1. Aramark rutas fijas 8360 y 1962 o T503 -> Centralizado
   if (isAramarkFixedRoute(rawRuta) || pTransp === 'T503') {
     return { operacion: 'Centralizado', subCatCode: null };
+  }
+
+  // 1b. SPID explícito (prioritario sobre T300 por defecto)
+  const parentClient = String(parentRoute?.cliente || parentRoute?.servicio || parentRoute?.operacion || '').toUpperCase();
+  if (parentClient.includes('SPID') || rawRuta.toUpperCase().includes('SPID')) {
+    return { operacion: 'SPID', subCatCode: null };
   }
 
   // 2. Juan Valdez: Owner C31274 (reparto T313 o centralizado T604) o T313 directo
@@ -831,323 +837,281 @@ export default function Briefing() {
         rows = matchedTrans.length > 0 ? matchedTrans : (transformedRoutes || []);
       }
     }
-    return rows.filter(r => !isTraspasoExcluded(r) && !isFiveDigitRoute(r?.ruta));
+    const validRows = rows.filter(r => !isTraspasoExcluded(r) && !isFiveDigitRoute(r?.ruta));
+
+    // Deduplicación estricta por número de ruta y vuelta (consistente con RuteoView.jsx)
+    // Evita que filas huérfanas sin asignación (ej. duplicados al reimportar) dupliquen volumen o "Sin cobertura"
+    const dedupedMap = new Map();
+    validRows.forEach((r, idx) => {
+      const rutaKey = String(r?.ruta || '').trim();
+      const vKey = String(r?.n_vuelta || r?.vuelta || '1').trim().replace(/vuelta\s*/i, '') || '1';
+      const uniqueKey = rutaKey ? `${rutaKey}:::${vKey}` : `no-ruta:::${r?.id || idx}`;
+
+      if (!dedupedMap.has(uniqueKey)) {
+        dedupedMap.set(uniqueKey, r);
+        return;
+      }
+
+      const existing = dedupedMap.get(uniqueKey);
+      const hasValidAssign = (item) => Boolean(
+        item?.camion &&
+        item.camion.trim() !== '' &&
+        !item.camion.toLowerCase().includes('sin cami') &&
+        item.camion.trim() !== '-' &&
+        item?.conductor_name &&
+        item.conductor_name.trim() !== '' &&
+        !item.conductor_name.toLowerCase().includes('sin asign') &&
+        !item.conductor_name.toLowerCase().includes('sin cond')
+      );
+
+      const existingHasAssign = hasValidAssign(existing);
+      const newHasAssign = hasValidAssign(r);
+
+      if (newHasAssign && !existingHasAssign) {
+        dedupedMap.set(uniqueKey, r);
+      } else if (newHasAssign === existingHasAssign) {
+        const existingStops = existing?.paradas?.length || 0;
+        const newStops = r?.paradas?.length || 0;
+        if (newStops > existingStops) {
+          dedupedMap.set(uniqueKey, r);
+        }
+      }
+    });
+
+    return Array.from(dedupedMap.values());
   }, [savedRuteoByDate, transmittedAssignments, transformedRoutes, activeDate]);
 
-  // Construcción de la Matriz de Briefing agrupada por Operación (Cliente) y Sub-categorías de Petroleras (T300, T302, T312)
+  // Construcción de la Matriz de Briefing agrupada por Camión/Viaje y asignada a una única Operación
+  // Regla: si un camión/viaje atiende más de una operación (ej. Petroleras + Carls Jr + Streat Burguer),
+  // se cuenta como 1 sola unidad (en # Rutas y en todas las columnas de carga/volumen/destinos)
+  // y se asigna íntegramente a la operación candidata que tenga menos rutas.
   const briefingData = useMemo(() => {
-    const createBucket = (operacion, extra = {}) => ({
+    const createOpBucket = (operacion, extra = {}) => ({
       operacion,
-      routesMap: new Map(),
+      units: [],
+      numRutas: 0,
+      propia1v: 0,
+      externa1v: 0,
+      propia2v: 0,
+      externa2v: 0,
+      sinCobertura: 0,
       totalCajas: 0,
       totalKilos: 0,
       totalCongeladoM3: 0,
       totalRefrigeradoM3: 0,
       totalSecoM3: 0,
       totalVolumenM3: 0,
-      destinosSet: new Set(),
+      totalDestinos: 0,
       ...extra
     });
 
-    const computeRowFromBucket = (bucket) => {
-      const routes = Array.from(bucket.routesMap.values());
-      const trucks1vPropia = new Set();
-      const trucks1vExterna = new Set();
-      const trucks2vPropia = new Set();
-      const trucks2vExterna = new Set();
-      let sinCoberturaCount = 0;
-
-      routes.forEach(r => {
-        const camion = (r.camion || '').trim();
-        const conductor = (r.conductor_name || '').trim();
-        const aux = (r.aux1_name || '').trim();
-
-        const hasCamion = Boolean(camion && !camion.toLowerCase().includes('sin cami') && camion !== '-');
-        const hasConductor = Boolean(conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-');
-        const hasAux = Boolean(aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
-
-        const isCovered = hasCamion || hasConductor || hasAux;
-        if (!isCovered) {
-          sinCoberturaCount++;
-        } else {
-          const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
-          const matchVuelta = rawVuelta.match(/\d+/);
-          const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
-          const isExt = isAssignmentExternal(r, fleetList, staffList);
-          const identifier = hasCamion ? camion : (hasConductor ? conductor : (hasAux ? aux : `ruta-${r.ruta}`));
-
-          if (vueltaNum === 1) {
-            if (isExt) trucks1vExterna.add(identifier);
-            else trucks1vPropia.add(identifier);
-          } else {
-            if (isExt) trucks2vExterna.add(identifier);
-            else trucks2vPropia.add(identifier);
-          }
-        }
-      });
-
-      const numRutasFinal = trucks1vPropia.size + trucks1vExterna.size + trucks2vPropia.size + trucks2vExterna.size + sinCoberturaCount;
-
-      return {
-        operacion: bucket.operacion,
-        subCode: bucket.subCode || null,
-        isSubRow: !!bucket.isSubRow,
-        parentOp: bucket.parentOp || null,
-        numRutas: numRutasFinal,
-        propia1v: trucks1vPropia.size,
-        externa1v: trucks1vExterna.size,
-        propia2v: trucks2vPropia.size,
-        externa2v: trucks2vExterna.size,
-        sinCobertura: sinCoberturaCount,
-        cajas: Math.round(bucket.totalCajas),
-        kilos: Number(bucket.totalKilos.toFixed(2)),
-        congeladoM3: Number(bucket.totalCongeladoM3.toFixed(2)),
-        refrigeradoM3: Number(bucket.totalRefrigeradoM3.toFixed(2)),
-        secoM3: Number(bucket.totalSecoM3.toFixed(2)),
-        volumenM3: Number(bucket.totalVolumenM3.toFixed(2)),
-        numDestinos: bucket.destinosSet.size || (routes.length > 0 && !bucket.isSubRow ? routes.length : 0)
-      };
-    };
-
-    const clientsMap = new Map();
-    const petrolerasSubBuckets = new Map();
-    PETROLERAS_SUBCATEGORIES.forEach(sub => {
-      petrolerasSubBuckets.set(sub.code, createBucket(sub.label, {
-        subCode: sub.code,
-        isSubRow: true,
-        parentOp: 'PETROLERAS'
-      }));
-    });
-
-    const addCargoToBucket = (bucket, { cj, kg, vol, amb, destino }) => {
-      bucket.totalCajas += cj;
-      bucket.totalKilos += kg;
-      bucket.totalVolumenM3 += vol;
-      if (amb === 'C') bucket.totalCongeladoM3 += vol;
-      else if (amb === 'R') bucket.totalRefrigeradoM3 += vol;
-      else bucket.totalSecoM3 += vol;
-      if (destino) bucket.destinosSet.add(String(destino).trim());
-    };
+    const unitsMap = new Map();
 
     currentAssignedRows.forEach((r, idx) => {
       const rKey = r.id || `${r.ruta}-${r.n_vuelta || 1}-${idx}`;
       const paradas = r.paradas || [];
+      const routeOpDirect = getBriefingOperation(r);
+      const isSpidRow = routeOpDirect.toUpperCase() === 'SPID';
+
+      const camion = (r.camion || '').trim();
+      const conductor = (r.conductor_name || '').trim();
+      const aux = (r.aux1_name || '').trim();
+
+      const hasCamion = Boolean(camion && !camion.toLowerCase().includes('sin cami') && camion !== '-');
+      const hasConductor = Boolean(conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-');
+      const hasAux = Boolean(aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
+      const isCovered = hasCamion || hasConductor || hasAux;
+
+      let colKey = 'sinCobertura';
+      let unitKey = `sinCobertura:::${rKey}`;
+
+      if (isCovered) {
+        const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
+        const matchVuelta = rawVuelta.match(/\d+/);
+        const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
+        const isExt = isAssignmentExternal(r, fleetList, staffList);
+        const identifier = hasCamion ? camion : (hasConductor ? conductor : (hasAux ? aux : `ruta-${r.ruta}`));
+        if (vueltaNum === 1) {
+          colKey = isExt ? 'externa1v' : 'propia1v';
+        } else {
+          colKey = isExt ? 'externa2v' : 'propia2v';
+        }
+        // Mantener servicios SPID separados para no absorberlos dentro de viajes regulares del mismo camión
+        unitKey = isSpidRow ? `spid:::${colKey}:::${r.ruta || rKey}` : `${colKey}:::${identifier}`;
+      }
+
+      if (!unitsMap.has(unitKey)) {
+        unitsMap.set(unitKey, {
+          unitKey,
+          colKey,
+          opsSet: new Set(),
+          petSubCodesSet: new Set(),
+          totalCajas: 0,
+          totalKilos: 0,
+          totalCongeladoM3: 0,
+          totalRefrigeradoM3: 0,
+          totalSecoM3: 0,
+          totalVolumenM3: 0,
+          destinosSet: new Set(),
+          fallbackDestCount: 0,
+          routeCount: 0
+        });
+      }
+
+      const unit = unitsMap.get(unitKey);
+      unit.routeCount++;
+
+      const addStopCargo = (cj, kg, vol, amb, destino) => {
+        unit.totalCajas += cj;
+        unit.totalKilos += kg;
+        unit.totalVolumenM3 += vol;
+        if (amb === 'C') unit.totalCongeladoM3 += vol;
+        else if (amb === 'R') unit.totalRefrigeradoM3 += vol;
+        else unit.totalSecoM3 += vol;
+        if (destino) unit.destinosSet.add(String(destino).trim());
+      };
 
       if (paradas.length > 0) {
         paradas.forEach(p => {
           const { operacion: rawOp, subCatCode } = classifyParadaForBriefing(p, r);
           const clientName = rawOp || 'Otros';
-
-          if (!clientsMap.has(clientName)) {
-            clientsMap.set(clientName, createBucket(clientName));
+          unit.opsSet.add(clientName);
+          if (clientName === 'PETROLERAS') {
+            unit.petSubCodesSet.add(PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300');
           }
-          const mainBucket = clientsMap.get(clientName);
-          mainBucket.routesMap.set(rKey, r);
 
           const cj = parseFloat(String(p.cantCJ || p.cajas || 0).replace(',', '.')) || 0;
           const kg = parseFloat(String(p.peso || p.kilos || 0).replace(',', '.')) || 0;
           const vol = parseFloat(String(p.volumen || p.m3 || 0).replace(',', '.')) || 0;
           const amb = String(p.ambiente || 'S').trim().toUpperCase();
-
-          addCargoToBucket(mainBucket, { cj, kg, vol, amb, destino: p.destino });
-
-          if (clientName === 'PETROLERAS') {
-            const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
-            const subBucket = petrolerasSubBuckets.get(effSub);
-            if (subBucket) {
-              subBucket.routesMap.set(rKey, r);
-              addCargoToBucket(subBucket, { cj, kg, vol, amb, destino: p.destino });
-            }
-          }
+          addStopCargo(cj, kg, vol, amb, p.destino);
         });
       } else {
         const { operacion: rawOp, subCatCode } = classifyParadaForBriefing(null, r);
         const clientName = rawOp || 'Otros';
-
-        if (!clientsMap.has(clientName)) {
-          clientsMap.set(clientName, createBucket(clientName));
+        unit.opsSet.add(clientName);
+        if (clientName === 'PETROLERAS') {
+          unit.petSubCodesSet.add(PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300');
         }
-        const mainBucket = clientsMap.get(clientName);
-        mainBucket.routesMap.set(rKey, r);
 
         const cj = parseFloat(String(r.cantCJ || r.cajas || 0).replace(',', '.')) || 0;
         const kg = parseFloat(String(r.peso || r.kilos || 0).replace(',', '.')) || 0;
         const vol = parseFloat(String(r.volumen || r.m3 || 0).replace(',', '.')) || 0;
         const amb = String(r.ambiente || 'S').trim().toUpperCase();
-
-        addCargoToBucket(mainBucket, { cj, kg, vol, amb, destino: r.destino });
-        if (r.recuentoDestino) {
-          for (let i = 0; i < r.recuentoDestino; i++) {
-            mainBucket.destinosSet.add(`dest-${r.ruta}-${i}`);
-          }
-        }
-
-        if (clientName === 'PETROLERAS') {
-          const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
-          const subBucket = petrolerasSubBuckets.get(effSub);
-          if (subBucket) {
-            subBucket.routesMap.set(rKey, r);
-            addCargoToBucket(subBucket, { cj, kg, vol, amb, destino: r.destino });
-            if (r.recuentoDestino) {
-              for (let i = 0; i < r.recuentoDestino; i++) {
-                subBucket.destinosSet.add(`dest-${r.ruta}-${i}`);
-              }
-            }
-          }
+        addStopCargo(cj, kg, vol, amb, r.destino);
+        if (!r.destino && r.recuentoDestino) {
+          unit.fallbackDestCount += r.recuentoDestino;
         }
       }
     });
 
+    const clientsMap = new Map();
+    const ensureBucket = (opName) => {
+      if (!clientsMap.has(opName)) {
+        clientsMap.set(opName, createOpBucket(opName));
+      }
+      return clientsMap.get(opName);
+    };
+
+    const assignUnitToBucket = (bucket, unit) => {
+      bucket.units.push(unit);
+      bucket.numRutas++;
+      bucket[unit.colKey]++;
+      bucket.totalCajas += unit.totalCajas;
+      bucket.totalKilos += unit.totalKilos;
+      bucket.totalCongeladoM3 += unit.totalCongeladoM3;
+      bucket.totalRefrigeradoM3 += unit.totalRefrigeradoM3;
+      bucket.totalSecoM3 += unit.totalSecoM3;
+      bucket.totalVolumenM3 += unit.totalVolumenM3;
+      const unitDest = unit.destinosSet.size || unit.fallbackDestCount || (unit.routeCount > 0 && !unit.opsSet.has('SPID') ? unit.routeCount : 0);
+      bucket.totalDestinos += unitDest;
+    };
+
+    // Paso 1: Asignar camiones exclusivos de una sola operación
+    const sharedUnits = [];
+    unitsMap.forEach(unit => {
+      if (unit.opsSet.size === 1) {
+        const onlyOp = Array.from(unit.opsSet)[0] || 'Otros';
+        assignUnitToBucket(ensureBucket(onlyOp), unit);
+      } else {
+        sharedUnits.push(unit);
+      }
+    });
+
+    // Paso 2: Asignar camiones compartidos íntegramente a la operación candidata con menos rutas
+    sharedUnits.sort((a, b) => a.opsSet.size - b.opsSet.size);
+    sharedUnits.forEach(unit => {
+      const candidates = Array.from(unit.opsSet);
+      candidates.sort((opA, opB) => {
+        const countA = ensureBucket(opA).numRutas;
+        const countB = ensureBucket(opB).numRutas;
+        if (countA !== countB) return countA - countB;
+        return opA.localeCompare(opB);
+      });
+      const chosenOp = candidates[0] || 'Otros';
+      assignUnitToBucket(ensureBucket(chosenOp), unit);
+    });
+
+    const formatBucketToRow = (bucket) => ({
+      operacion: bucket.operacion,
+      subCode: bucket.subCode || null,
+      isSubRow: !!bucket.isSubRow,
+      parentOp: bucket.parentOp || null,
+      numRutas: bucket.numRutas,
+      propia1v: bucket.propia1v,
+      externa1v: bucket.externa1v,
+      propia2v: bucket.propia2v,
+      externa2v: bucket.externa2v,
+      sinCobertura: bucket.sinCobertura,
+      cajas: Math.round(bucket.totalCajas),
+      kilos: Number(bucket.totalKilos.toFixed(2)),
+      congeladoM3: Number(bucket.totalCongeladoM3.toFixed(2)),
+      refrigeradoM3: Number(bucket.totalRefrigeradoM3.toFixed(2)),
+      secoM3: Number(bucket.totalSecoM3.toFixed(2)),
+      volumenM3: Number(bucket.totalVolumenM3.toFixed(2)),
+      numDestinos: bucket.totalDestinos
+    });
+
     // Construir filas principales y sub-categorías de Petroleras (T300, T302, T312)
+    // distribuyendo únicamente los camiones asignados a PETROLERAS para que sumen 100% en todas las columnas
     const rows = Array.from(clientsMap.values()).map(bucket => {
-      const baseRow = computeRowFromBucket(bucket);
+      const baseRow = formatBucketToRow(bucket);
 
       if (baseRow.operacion === 'PETROLERAS') {
-        // Distribuir cada camión/ruta único de PETROLERAS entre T300, T302 y T312 sin duplicar,
-        // asignando los camiones compartidos a la sub-categoría que tenga menos rutas,
-        // de modo que la suma de T300 + T302 + T312 coincida exactamente con PETROLERAS en todas las columnas.
-        const petUnitsMap = new Map();
-        Array.from(bucket.routesMap.entries()).forEach(([rKey, r]) => {
-          const camion = (r.camion || '').trim();
-          const conductor = (r.conductor_name || '').trim();
-          const aux = (r.aux1_name || '').trim();
-
-          const hasCamion = Boolean(camion && !camion.toLowerCase().includes('sin cami') && camion !== '-');
-          const hasConductor = Boolean(conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-');
-          const hasAux = Boolean(aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
-          const isCovered = hasCamion || hasConductor || hasAux;
-
-          let colKey = 'sinCobertura';
-          let unitKey = `sinCobertura:::${rKey}`;
-
-          if (isCovered) {
-            const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
-            const matchVuelta = rawVuelta.match(/\d+/);
-            const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
-            const isExt = isAssignmentExternal(r, fleetList, staffList);
-            const identifier = hasCamion ? camion : (hasConductor ? conductor : (hasAux ? aux : `ruta-${r.ruta}`));
-            if (vueltaNum === 1) {
-              colKey = isExt ? 'externa1v' : 'propia1v';
-            } else {
-              colKey = isExt ? 'externa2v' : 'propia2v';
-            }
-            unitKey = `${colKey}:::${identifier}`;
-          }
-
-          if (!petUnitsMap.has(unitKey)) {
-            petUnitsMap.set(unitKey, {
-              unitKey,
-              colKey,
-              subCodesSet: new Set()
-            });
-          }
-          const unitEntry = petUnitsMap.get(unitKey);
-
-          const paradas = r.paradas || [];
-          if (paradas.length > 0) {
-            paradas.forEach(p => {
-              const { operacion: pOp, subCatCode } = classifyParadaForBriefing(p, r);
-              if (pOp === 'PETROLERAS') {
-                const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
-                unitEntry.subCodesSet.add(effSub);
-              }
-            });
-          } else {
-            const { operacion: pOp, subCatCode } = classifyParadaForBriefing(null, r);
-            if (pOp === 'PETROLERAS') {
-              const effSub = PETROLERAS_TRANSPORTISTAS.includes(subCatCode) ? subCatCode : 'T300';
-              unitEntry.subCodesSet.add(effSub);
-            }
-          }
-
-          if (unitEntry.subCodesSet.size === 0) {
-            unitEntry.subCodesSet.add('T300');
-          }
-        });
-
-        const subFleetCounts = {};
+        const subBucketsMap = new Map();
         PETROLERAS_SUBCATEGORIES.forEach(sub => {
-          subFleetCounts[sub.code] = {
-            numRutas: 0,
-            propia1v: 0,
-            externa1v: 0,
-            propia2v: 0,
-            externa2v: 0,
-            sinCobertura: 0
-          };
+          subBucketsMap.set(sub.code, createOpBucket(sub.label, {
+            subCode: sub.code,
+            isSubRow: true,
+            parentOp: 'PETROLERAS'
+          }));
         });
 
-        // Paso 1: Asignar unidades exclusivas de una sola sub-categoría (T300, T302 o T312)
-        const sharedUnits = [];
-        petUnitsMap.forEach(unit => {
-          if (unit.subCodesSet.size === 1) {
-            const onlyCode = Array.from(unit.subCodesSet)[0];
-            subFleetCounts[onlyCode][unit.colKey]++;
-            subFleetCounts[onlyCode].numRutas++;
+        const sharedSubUnits = [];
+        bucket.units.forEach(unit => {
+          const codes = unit.petSubCodesSet.size > 0 ? Array.from(unit.petSubCodesSet) : ['T300'];
+          if (codes.length === 1) {
+            assignUnitToBucket(subBucketsMap.get(codes[0]) || subBucketsMap.get('T300'), unit);
           } else {
-            sharedUnits.push(unit);
+            sharedSubUnits.push({ unit, codes });
           }
         });
 
-        // Paso 2: Asignar unidades compartidas a la sub-categoría candidata que tenga menos rutas
-        sharedUnits.sort((a, b) => a.subCodesSet.size - b.subCodesSet.size);
-        sharedUnits.forEach(unit => {
-          const candidates = Array.from(unit.subCodesSet);
-          candidates.sort((codeA, codeB) => {
-            const diff = subFleetCounts[codeA].numRutas - subFleetCounts[codeB].numRutas;
+        sharedSubUnits.sort((a, b) => a.codes.length - b.codes.length);
+        sharedSubUnits.forEach(({ unit, codes }) => {
+          codes.sort((cA, cB) => {
+            const diff = subBucketsMap.get(cA).numRutas - subBucketsMap.get(cB).numRutas;
             if (diff !== 0) return diff;
-            return PETROLERAS_TRANSPORTISTAS.indexOf(codeA) - PETROLERAS_TRANSPORTISTAS.indexOf(codeB);
+            return PETROLERAS_TRANSPORTISTAS.indexOf(cA) - PETROLERAS_TRANSPORTISTAS.indexOf(cB);
           });
-          const chosenCode = candidates[0] || 'T300';
-          subFleetCounts[chosenCode][unit.colKey]++;
-          subFleetCounts[chosenCode].numRutas++;
+          const chosenCode = codes[0] || 'T300';
+          assignUnitToBucket(subBucketsMap.get(chosenCode), unit);
         });
 
-        const subRows = PETROLERAS_SUBCATEGORIES.map(sub => {
-          const sb = petrolerasSubBuckets.get(sub.code);
-          const rawSubRow = computeRowFromBucket(sb);
-          const fCounts = subFleetCounts[sub.code];
-          return {
-            ...rawSubRow,
-            numRutas: fCounts.numRutas,
-            propia1v: fCounts.propia1v,
-            externa1v: fCounts.externa1v,
-            propia2v: fCounts.propia2v,
-            externa2v: fCounts.externa2v,
-            sinCobertura: fCounts.sinCobertura
-          };
-        });
-
-        // Sumar T300, T302 y T312 en PETROLERAS para que coincidan 100% todas las columnas del Briefing
-        const sumNumRutas = subRows.reduce((acc, s) => acc + s.numRutas, 0);
-        const sumPropia1v = subRows.reduce((acc, s) => acc + s.propia1v, 0);
-        const sumExterna1v = subRows.reduce((acc, s) => acc + s.externa1v, 0);
-        const sumPropia2v = subRows.reduce((acc, s) => acc + s.propia2v, 0);
-        const sumExterna2v = subRows.reduce((acc, s) => acc + s.externa2v, 0);
-        const sumSinCobertura = subRows.reduce((acc, s) => acc + s.sinCobertura, 0);
-        const sumCajas = subRows.reduce((acc, s) => acc + s.cajas, 0);
-        const sumKilos = Number(subRows.reduce((acc, s) => acc + s.kilos, 0).toFixed(2));
-        const sumCong = Number(subRows.reduce((acc, s) => acc + s.congeladoM3, 0).toFixed(2));
-        const sumRefr = Number(subRows.reduce((acc, s) => acc + s.refrigeradoM3, 0).toFixed(2));
-        const sumSeco = Number(subRows.reduce((acc, s) => acc + s.secoM3, 0).toFixed(2));
-        const sumVol = Number(subRows.reduce((acc, s) => acc + s.volumenM3, 0).toFixed(2));
-        const sumDestinos = subRows.reduce((acc, s) => acc + s.numDestinos, 0);
+        const subRows = PETROLERAS_SUBCATEGORIES.map(sub => formatBucketToRow(subBucketsMap.get(sub.code)));
 
         return {
           ...baseRow,
-          numRutas: sumNumRutas,
-          propia1v: sumPropia1v,
-          externa1v: sumExterna1v,
-          propia2v: sumPropia2v,
-          externa2v: sumExterna2v,
-          sinCobertura: sumSinCobertura,
-          cajas: sumCajas,
-          kilos: sumKilos,
-          congeladoM3: sumCong,
-          refrigeradoM3: sumRefr,
-          secoM3: sumSeco,
-          volumenM3: sumVol,
-          numDestinos: sumDestinos || baseRow.numDestinos,
           hasPetrolerasSubcategories: true,
           subRows
         };
@@ -1316,75 +1280,26 @@ export default function Briefing() {
     return list;
   }, [briefingData.rows, selectedOperations, searchTerm]);
 
-  // Totales dinámicos calculados sobre las filas mostradas (para tarjetas y pie de tabla)
-  // Deduplica camiones únicos de primera y segunda vuelta a nivel global (Requisito: exactamente 13 Terceros en primeras vueltas)
+  // Totales dinámicos calculados sobre las filas mostradas (para tarjetas, pie de tabla y exportación)
+  // Como cada camión/viaje ya está asignado a una única operación sin duplicar, la suma de las filas cuadra 100% en todas las columnas
   const displayedTotals = useMemo(() => {
-    const activeOpSet = new Set(displayedRows.map(r => r.operacion.toLowerCase()));
-    const uniqueExt1v = new Set();
-    const uniqueProp1v = new Set();
-    const uniqueExt2v = new Set();
-    const uniqueProp2v = new Set();
-
-    currentAssignedRows.forEach(r => {
-      const op = getBriefingOperation(r);
-      if (!activeOpSet.has(op.toLowerCase())) return;
-
-      const camion = (r.camion || '').trim();
-      const conductor = (r.conductor_name || '').trim();
-      const aux = (r.aux1_name || '').trim();
-      const isCovered = (camion && !camion.toLowerCase().includes('sin cami') && camion !== '-') ||
-                        (conductor && !conductor.toLowerCase().includes('sin cond') && conductor !== '-') ||
-                        (aux && !aux.toLowerCase().includes('sin aux') && aux !== '-');
-      if (!isCovered) return;
-
-      const isExt = isAssignmentExternal(r, fleetList, staffList);
-      const rawVuelta = String(r.n_vuelta || r.vuelta || '1').trim();
-      const matchVuelta = rawVuelta.match(/\d+/);
-      const vueltaNum = matchVuelta ? parseInt(matchVuelta[0], 10) : 1;
-      const identifier = camion || conductor || (aux || `ruta-${r.ruta}`);
-
-      if (vueltaNum === 1) {
-        if (isExt) uniqueExt1v.add(identifier);
-        else uniqueProp1v.add(identifier);
-      } else {
-        if (isExt) uniqueExt2v.add(identifier);
-        else uniqueProp2v.add(identifier);
-      }
-    });
-
-    // Si SPID está visible y fue editado manualmente sin rutas reales en currentAssignedRows:
-    const spidRow = displayedRows.find(r => r.operacion.toUpperCase() === 'SPID');
-    let extraPropia1v = 0;
-    let extraExterna1v = 0;
-    let extraPropia2v = 0;
-    let extraExterna2v = 0;
-    if (spidRow && (!spidRow.hasRealRoutes || spidRow.isManualOverride)) {
-      const spidRealRoutes = currentAssignedRows.filter(r => getBriefingOperation(r).toUpperCase() === 'SPID');
-      if (spidRealRoutes.length === 0) {
-        extraPropia1v = spidRow.propia1v || 0;
-        extraExterna1v = spidRow.externa1v || 0;
-        extraPropia2v = spidRow.propia2v || 0;
-        extraExterna2v = spidRow.externa2v || 0;
-      }
-    }
-
     return {
       operacion: selectedOperations.length > 0 ? `Subtotal (${selectedOperations.length} ops)` : 'Total general',
-      numRutas: displayedRows.reduce((acc, r) => acc + r.numRutas, 0),
+      numRutas: displayedRows.reduce((acc, r) => acc + (r.numRutas || 0), 0),
       propia1v: displayedRows.reduce((acc, r) => acc + (r.propia1v || 0), 0),
       externa1v: displayedRows.reduce((acc, r) => acc + (r.externa1v || 0), 0),
       propia2v: displayedRows.reduce((acc, r) => acc + (r.propia2v || 0), 0),
       externa2v: displayedRows.reduce((acc, r) => acc + (r.externa2v || 0), 0),
-      sinCobertura: displayedRows.reduce((acc, r) => acc + r.sinCobertura, 0),
-      cajas: displayedRows.reduce((acc, r) => acc + r.cajas, 0),
-      kilos: Number(displayedRows.reduce((acc, r) => acc + r.kilos, 0).toFixed(2)),
-      congeladoM3: Number(displayedRows.reduce((acc, r) => acc + r.congeladoM3, 0).toFixed(2)),
-      refrigeradoM3: Number(displayedRows.reduce((acc, r) => acc + r.refrigeradoM3, 0).toFixed(2)),
-      secoM3: Number(displayedRows.reduce((acc, r) => acc + r.secoM3, 0).toFixed(2)),
-      volumenM3: Number(displayedRows.reduce((acc, r) => acc + r.volumenM3, 0).toFixed(2)),
-      numDestinos: displayedRows.reduce((acc, r) => acc + r.numDestinos, 0)
+      sinCobertura: displayedRows.reduce((acc, r) => acc + (r.sinCobertura || 0), 0),
+      cajas: displayedRows.reduce((acc, r) => acc + (r.cajas || 0), 0),
+      kilos: Number(displayedRows.reduce((acc, r) => acc + (r.kilos || 0), 0).toFixed(2)),
+      congeladoM3: Number(displayedRows.reduce((acc, r) => acc + (r.congeladoM3 || 0), 0).toFixed(2)),
+      refrigeradoM3: Number(displayedRows.reduce((acc, r) => acc + (r.refrigeradoM3 || 0), 0).toFixed(2)),
+      secoM3: Number(displayedRows.reduce((acc, r) => acc + (r.secoM3 || 0), 0).toFixed(2)),
+      volumenM3: Number(displayedRows.reduce((acc, r) => acc + (r.volumenM3 || 0), 0).toFixed(2)),
+      numDestinos: displayedRows.reduce((acc, r) => acc + (r.numDestinos || 0), 0)
     };
-  }, [displayedRows, selectedOperations, currentAssignedRows, fleetList, staffList]);
+  }, [displayedRows, selectedOperations]);
 
   // Exportar a Excel exactamente con las columnas solicitadas (incluyendo desglose de sub-categorías en Petroleras)
   const handleExportExcel = () => {
@@ -1429,22 +1344,23 @@ export default function Briefing() {
       }
     });
 
-    // Fila Total General
+    // Fila Total General (usando totales deduplicados de displayedTotals cuando no hay filtros, o briefingData.totals)
+    const exportTotals = selectedOperations.length === 0 && !searchTerm.trim() ? displayedTotals : briefingData.totals;
     exportData.push({
       'Operación': 'Total general',
-      '# Rutas': briefingData.totals.numRutas,
-      'Real Key 1era V': briefingData.totals.propia1v,
-      'Real Terceros 1era V': briefingData.totals.externa1v,
-      '2da V (Cubiertas Key)': briefingData.totals.propia2v,
-      '2da V (Terceros)': briefingData.totals.externa2v,
-      'Sin cobertura': briefingData.totals.sinCobertura,
-      'Cajas': briefingData.totals.cajas,
-      'Kilos': `${briefingData.totals.kilos.toFixed(2)} Kg`,
-      'Congelado m3': briefingData.totals.congeladoM3,
-      'Refrigerado m3': briefingData.totals.refrigeradoM3,
-      'Seco m3': briefingData.totals.secoM3,
-      'Volumen': `${briefingData.totals.volumenM3.toFixed(2)} m3`,
-      'N° Destinos': briefingData.totals.numDestinos
+      '# Rutas': exportTotals.numRutas,
+      'Real Key 1era V': exportTotals.propia1v,
+      'Real Terceros 1era V': exportTotals.externa1v,
+      '2da V (Cubiertas Key)': exportTotals.propia2v,
+      '2da V (Terceros)': exportTotals.externa2v,
+      'Sin cobertura': exportTotals.sinCobertura,
+      'Cajas': exportTotals.cajas,
+      'Kilos': `${exportTotals.kilos.toFixed(2)} Kg`,
+      'Congelado m3': exportTotals.congeladoM3,
+      'Refrigerado m3': exportTotals.refrigeradoM3,
+      'Seco m3': exportTotals.secoM3,
+      'Volumen': `${exportTotals.volumenM3.toFixed(2)} m3`,
+      'N° Destinos': exportTotals.numDestinos
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
