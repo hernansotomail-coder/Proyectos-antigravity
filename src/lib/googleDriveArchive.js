@@ -192,12 +192,28 @@ export const scanSupabaseForArchivableData = async (retentionDays = 30, attendan
 
   if (planErr) throw planErr;
 
-  // 2. Leer attendance
-  const { data: attendanceRows, error: attErr } = await supabase
-    .from('attendance')
-    .select('*');
+  // 2. Leer attendance (con paginación de bloques de 1000 para superar el límite max-rows=1000 de Supabase PostgREST)
+  let attendanceRows = [];
+  let attFrom = 0;
+  const attLimit = 1000;
+  let attHasMore = true;
 
-  if (attErr) throw attErr;
+  while (attHasMore) {
+    const { data: attPage, error: attErr } = await supabase
+      .from('attendance')
+      .select('*')
+      .order('id', { ascending: true })
+      .range(attFrom, attFrom + attLimit - 1);
+
+    if (attErr) throw attErr;
+    if (attPage && attPage.length > 0) {
+      attendanceRows = attendanceRows.concat(attPage);
+      attFrom += attLimit;
+      if (attPage.length < attLimit) attHasMore = false;
+    } else {
+      attHasMore = false;
+    }
+  }
 
   const daysMap = new Map(); // fecha (DD-MM-YYYY) -> { assignments, ruteoOverrides, savedHistoryEntry, changeHistory, attendance, estatusDiario, hasPlanningRow, rawDbFechaKey }
   const ensureDayBucket = (dmy) => {
