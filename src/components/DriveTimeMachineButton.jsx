@@ -46,9 +46,11 @@ export default function DriveTimeMachineButton({
   const [searchQuery, setSearchQuery] = useState('');
   const [loadingDateKey, setLoadingDateKey] = useState(null);
 
-  // Estado Pestaña 2: Archivar > 30 días y liberar espacio en Supabase
+  // Estado Pestaña 2: Archivar > 30 días (y > 60 días en Gestión de Dotación / Asistencia) y liberar espacio en Supabase
+  const isDotacionMenu = currentMenu === 'Asistencia' || currentMenu.toLowerCase().includes('dotación') || currentMenu.toLowerCase().includes('dotacion');
   const [isScanningSupabase, setIsScanningSupabase] = useState(false);
-  const [retentionDays, setRetentionDays] = useState(30);
+  const [retentionDays, setRetentionDays] = useState(isDotacionMenu ? 60 : 30);
+  const [attendanceRetentionDays, setAttendanceRetentionDays] = useState(60); // Gestión de dotación siempre mantiene 2 meses (60 días) por defecto
   const [scanResult, setScanResult] = useState(null);
   const [selectedToArchive, setSelectedToArchive] = useState([]);
   const [purgeAfterArchive, setPurgeAfterArchive] = useState(true);
@@ -81,13 +83,19 @@ export default function DriveTimeMachineButton({
   };
 
   // Escanear Supabase al cambiar a la pestaña de Archivado
-  const runSupabaseScan = async (days = retentionDays) => {
+  const runSupabaseScan = async (days = retentionDays, attDays = attendanceRetentionDays) => {
     setIsScanningSupabase(true);
     try {
-      const res = await scanSupabaseForArchivableData(days);
+      const effectiveAttDays = isDotacionMenu ? days : attDays;
+      const res = await scanSupabaseForArchivableData(days, effectiveAttDays);
       setScanResult(res);
-      // Pre-seleccionar automáticamente todas las fechas con más de N días (1 mes hacia atrás)
-      setSelectedToArchive((res.archivableOldDays || []).map(d => d.fecha));
+      // Pre-seleccionar automáticamente según el menú actual:
+      // - Si estamos en Gestión de Dotación (Asistencia), seleccionar solo las fechas con > 60 días (2 meses)
+      // - En los demás menús, seleccionar las fechas con > 30 días (1 mes)
+      const autoSelected = (res.allDays || [])
+        .filter(d => isDotacionMenu ? (d.isOlderThanAttendanceCutoff && d.attendance?.length > 0) : d.isOlderThanCutoff)
+        .map(d => d.fecha);
+      setSelectedToArchive(autoSelected);
     } catch (err) {
       console.error('Error escaneando Supabase:', err);
       toast.error('Error al analizar fechas en Supabase: ' + (err.message || ''));
@@ -228,22 +236,24 @@ export default function DriveTimeMachineButton({
 
     setIsArchiving(true);
     try {
+      const effectiveAttDays = isDotacionMenu ? retentionDays : attendanceRetentionDays;
       const res = await archiveAndPurgeDatesFromSupabase(selectedToArchive, {
         purgeFromSupabase: purgeAfterArchive,
-        retentionDays
+        retentionDays,
+        attendanceRetentionDays: effectiveAttDays
       });
 
       if (res.ok) {
-        if (purgeAfterArchive && res.confirmedDates?.length > 0) {
+        if (purgeAfterArchive && res.confirmedDates?.length > 0 && !isDotacionMenu) {
           removePurgedDatesFromLocalState(res.confirmedDates);
         }
         toast.success(
           purgeAfterArchive
-            ? `¡Éxito! ${res.archivedCount} fecha(s) guardadas en Google Drive y liberadas de Supabase.`
+            ? `¡Éxito! ${res.archivedCount} fecha(s) guardadas en Google Drive. Se liberaron ${res.purgedCount} días de Planificación (>1 mes) y ${res.purgedAttendanceDays || 0} días de Dotación/Asistencia (>2 meses).`
             : `¡Éxito! ${res.archivedCount} fecha(s) respaldadas en Google Drive.`
         );
         await loadDriveCatalog();
-        await runSupabaseScan(retentionDays);
+        await runSupabaseScan(retentionDays, effectiveAttDays);
       }
     } catch (err) {
       console.error('Error en archivado y purga:', err);
@@ -345,7 +355,9 @@ export default function DriveTimeMachineButton({
                   }`}
                 >
                   <FolderArchive size={15} />
-                  2. Archivar Mes Anterior (&gt;30 días) y Liberar Supabase
+                  {isDotacionMenu
+                    ? '2. Archivar Dotación (>2 meses / 60 días) y Liberar Supabase'
+                    : '2. Archivar (>1 mes Operación / >2 meses Dotación) y Liberar Supabase'}
                 </button>
               </div>
 
@@ -515,10 +527,10 @@ export default function DriveTimeMachineButton({
                     <div className="space-y-1 max-w-xl">
                       <h3 className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
                         <CheckCircle2 size={15} className="text-emerald-600" />
-                        Liberación Segura de Espacio en Supabase (Verify-then-Purge)
+                        Retención Diferenciada: 1 Mes Operación (30 días) | 2 Meses Gestión de Dotación (60 días)
                       </h3>
                       <p className="text-[11px] text-emerald-800">
-                        Este proceso empaqueta todas las rutas, disponibilización, ruteo, cambios, estatus diario y asistencia de cada día seleccionado en un archivo <code>DD-MM-YYYY.json</code> dentro de tu Google Drive y luego libera ese espacio en Supabase.
+                        Los módulos de <strong>Planificación y Transporte</strong> se envían a Google Drive y liberan espacio tras <strong>1 mes (30 días)</strong>. La información de <strong>Gestión de Dotación (Asistencia)</strong> se conserva en Supabase durante <strong>2 meses (60 días)</strong> antes de liberarse.
                       </p>
                     </div>
 
@@ -529,11 +541,14 @@ export default function DriveTimeMachineButton({
                         onChange={(e) => {
                           const val = Number(e.target.value);
                           setRetentionDays(val);
-                          runSupabaseScan(val);
+                          const attVal = val === 0 ? 0 : Math.max(60, val);
+                          setAttendanceRetentionDays(attVal);
+                          runSupabaseScan(val, attVal);
                         }}
                         className="text-xs font-bold bg-white border border-emerald-300 rounded-lg px-2.5 py-1.5 text-slate-800"
                       >
-                        <option value={30}>Más de 30 días (1 mes hacia atrás)</option>
+                        <option value={60}>Más de 60 días (2 meses — Gestión de Dotación)</option>
+                        <option value={30}>Más de 30 días (1 mes — Planificación y Transporte)</option>
                         <option value={15}>Más de 15 días</option>
                         <option value={7}>Más de 7 días</option>
                         <option value={0}>Mostrar todas las fechas en Supabase</option>
@@ -626,15 +641,28 @@ export default function DriveTimeMachineButton({
                                 </td>
                                 <td className="px-3 py-2 font-black text-slate-900">{day.fecha}</td>
                                 <td className="px-3 py-2">
-                                  {day.isOlderThanCutoff ? (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                                      &gt; {retentionDays} días (Recomendado archivar)
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                                      Mes actual (&le; {retentionDays} días)
-                                    </span>
-                                  )}
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    {day.isOlderThanCutoff ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                        Operación &gt; 1 mes (Archivar)
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                        Operación &le; 1 mes
+                                      </span>
+                                    )}
+                                    {day.attendance?.length > 0 && (
+                                      day.isOlderThanAttendanceCutoff ? (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                                          Dotación &gt; 2 meses (Archivar)
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                          Dotación protegida (&le; 2 meses)
+                                        </span>
+                                      )
+                                    )}
+                                  </div>
                                 </td>
                                 <td className="px-3 py-2 text-center font-bold text-slate-700">
                                   {day.assignments?.length || 0} rutas

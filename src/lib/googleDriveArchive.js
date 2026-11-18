@@ -181,9 +181,10 @@ export const uploadSingleDayToDrive = async (fechaDmy, dayDataObj) => {
 
 /**
  * 6. ESCANEAR SUPABASE PARA DETECTAR QUÉ FECHAS PUEDEN ARCHIVARSE Y LIBERAR ESPACIO
- * @param {number} retentionDays Días que se mantienen en Supabase (por defecto 30 días = 1 mes)
+ * @param {number} retentionDays Días que se mantienen en Supabase para Planificación y Transporte (por defecto 30 días = 1 mes)
+ * @param {number} attendanceRetentionDays Días que se mantienen en Supabase para Gestión de Dotación / Asistencia (por defecto 60 días = 2 meses)
  */
-export const scanSupabaseForArchivableData = async (retentionDays = 30) => {
+export const scanSupabaseForArchivableData = async (retentionDays = 30, attendanceRetentionDays = 60) => {
   // 1. Leer planning_assignments
   const { data: planningRows, error: planErr } = await supabase
     .from('planning_assignments')
@@ -203,10 +204,13 @@ export const scanSupabaseForArchivableData = async (retentionDays = 30) => {
     const clean = normalizeDate(dmy);
     if (!clean || clean.startsWith('__') || clean === 'Sin Fecha') return null;
     if (!daysMap.has(clean)) {
+      const olderThanPlanning = isDateOlderThanDays(clean, retentionDays);
+      const olderThanAttendance = isDateOlderThanDays(clean, attendanceRetentionDays);
       daysMap.set(clean, {
         fecha: clean,
         isoDate: dmyToIso(clean),
-        isOlderThanCutoff: isDateOlderThanDays(clean, retentionDays),
+        isOlderThanCutoff: olderThanPlanning,
+        isOlderThanAttendanceCutoff: olderThanAttendance,
         assignments: [],
         ruteoOverrides: {},
         savedHistoryEntry: null,
@@ -299,7 +303,16 @@ export const scanSupabaseForArchivableData = async (retentionDays = 30) => {
     (a, b) => parseDateStrToTimestamp(b.fecha) - parseDateStrToTimestamp(a.fecha)
   );
 
-  const archivableOldDays = allDays.filter(d => d.isOlderThanCutoff);
+  // Una fecha es archivable si:
+  // - Tiene datos de planificación/ruteo/cambios y supera retentionDays (30 días = 1 mes)
+  // - O tiene datos de asistencia (Gestión de Dotación) y supera attendanceRetentionDays (60 días = 2 meses)
+  const archivableOldDays = allDays.filter(d => {
+    const hasPlanningData = (d.assignments?.length > 0) || (d.changeHistory?.length > 0) || (d.rawDbFechaKeys?.length > 0) || Boolean(d.savedHistoryEntry);
+    const hasAttendanceData = d.attendance?.length > 0;
+    if (hasPlanningData && d.isOlderThanCutoff) return true;
+    if (hasAttendanceData && d.isOlderThanAttendanceCutoff) return true;
+    return false;
+  });
 
   return {
     allDays,
@@ -313,14 +326,20 @@ export const scanSupabaseForArchivableData = async (retentionDays = 30) => {
 /**
  * 7. ARCHIVAR EN GOOGLE DRIVE Y PURGAR DE SUPABASE (Verify-then-Purge)
  * Sube los días seleccionados a Google Drive y, solo tras confirmación exitosa, los elimina de Supabase para liberar espacio.
+ * Respeta la regla de retención diferenciada:
+ *   - Planificación y Transporte: se libera de Supabase tras 1 mes (30 días).
+ *   - Gestión de Dotación (Asistencia): se mantiene en Supabase por 2 meses (60 días) antes de liberarse.
  */
-export const archiveAndPurgeDatesFromSupabase = async (targetDatesDmy, { purgeFromSupabase = true, retentionDays = 30 } = {}) => {
-  const scan = await scanSupabaseForArchivableData(retentionDays);
+export const archiveAndPurgeDatesFromSupabase = async (
+  targetDatesDmy,
+  { purgeFromSupabase = true, retentionDays = 30, attendanceRetentionDays = 60 } = {}
+) => {
+  const scan = await scanSupabaseForArchivableData(retentionDays, attendanceRetentionDays);
   const targetSet = new Set((targetDatesDmy || []).map(d => normalizeDate(d)));
 
   const bucketsToProcess = scan.allDays.filter(b => targetSet.has(b.fecha));
   if (bucketsToProcess.length === 0) {
-    return { ok: true, archivedCount: 0, purgedCount: 0, message: 'No hay fechas seleccionadas para archivar.' };
+    return { ok: true, archivedCount: 0, purgedCount: 0, purgedAttendanceCount: 0, message: 'No hay fechas seleccionadas para archivar.' };
   }
 
   // Armar lotes para subir a Google Drive (de a 10 días por petición para máxima velocidad y estabilidad)
@@ -355,17 +374,28 @@ export const archiveAndPurgeDatesFromSupabase = async (targetDatesDmy, { purgeFr
   }
 
   let purgedCount = 0;
+  let purgedAttendanceDays = 0;
 
   // FASE 2: Solo eliminar de Supabase aquellas fechas que Google Drive confirmó con fileId y ok:true
   if (purgeFromSupabase && confirmedFechas.size > 0) {
-    // 1. Eliminar filas por fecha en planning_assignments
     const rawKeysToDelete = [];
-    const isoDatesToDelete = [];
+    const isoDatesToDeleteAttendance = [];
+    const planningConfirmedPurgeSet = new Set();
 
     bucketsToProcess.forEach(b => {
       if (confirmedFechas.has(b.fecha)) {
-        b.rawDbFechaKeys.forEach(k => rawKeysToDelete.push(k));
-        if (b.isoDate) isoDatesToDelete.push(b.isoDate);
+        // 1. Planificación / Transporte: Se libera si supera retentionDays (30 días) o si retentionDays === 0
+        if (b.isOlderThanCutoff || retentionDays === 0) {
+          b.rawDbFechaKeys.forEach(k => rawKeysToDelete.push(k));
+          planningConfirmedPurgeSet.add(b.fecha);
+        }
+
+        // 2. Gestión de Dotación (Asistencia): Se mantiene por 2 meses (60 días) en Supabase.
+        // Solo se borra de la tabla 'attendance' si tiene más de attendanceRetentionDays (60 días) o si attendanceRetentionDays === 0.
+        if ((b.isOlderThanAttendanceCutoff || attendanceRetentionDays === 0) && b.isoDate) {
+          isoDatesToDeleteAttendance.push(b.isoDate);
+          purgedAttendanceDays++;
+        }
       }
     });
 
@@ -376,60 +406,63 @@ export const archiveAndPurgeDatesFromSupabase = async (targetDatesDmy, { purgeFr
         .in('fecha', rawKeysToDelete);
     }
 
-    // 2. Eliminar filas de attendance de las fechas archivadas
-    if (isoDatesToDelete.length > 0) {
+    // Eliminar filas de attendance ÚNICAMENTE de las fechas que superaron los 2 meses (60 días)
+    if (isoDatesToDeleteAttendance.length > 0) {
       await supabase
         .from('attendance')
         .delete()
-        .in('date', isoDatesToDelete);
+        .in('date', isoDatesToDeleteAttendance);
     }
 
-    // 3. Recortar __saved_history__ en Supabase quitando las fechas ya archivadas
-    const remainingSavedHistory = (scan.fullSavedHistory || []).filter(
-      h => !confirmedFechas.has(normalizeDate(h?.fecha))
-    );
-    await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__saved_history__',
-        assignments: remainingSavedHistory,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+    if (planningConfirmedPurgeSet.size > 0) {
+      // 3. Recortar __saved_history__ en Supabase quitando las fechas de planificación ya archivadas
+      const remainingSavedHistory = (scan.fullSavedHistory || []).filter(
+        h => !planningConfirmedPurgeSet.has(normalizeDate(h?.fecha))
+      );
+      await supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__saved_history__',
+          assignments: remainingSavedHistory,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' });
 
-    // 4. Recortar __change_history__ en Supabase quitando las fechas ya archivadas
-    const remainingChangeHistory = (scan.fullChangeHistory || []).filter(
-      ch => !confirmedFechas.has(normalizeDate(ch?.fechaPlanificacion))
-    );
-    await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__change_history__',
-        assignments: remainingChangeHistory,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+      // 4. Recortar __change_history__ en Supabase quitando las fechas de planificación ya archivadas
+      const remainingChangeHistory = (scan.fullChangeHistory || []).filter(
+        ch => !planningConfirmedPurgeSet.has(normalizeDate(ch?.fechaPlanificacion))
+      );
+      await supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__change_history__',
+          assignments: remainingChangeHistory,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' });
 
-    // 5. Recortar __ruteo_overrides__ en Supabase quitando las fechas ya archivadas
-    const remainingOverrides = {};
-    Object.entries(scan.fullRuteoOverrides || {}).forEach(([k, v]) => {
-      if (!confirmedFechas.has(normalizeDate(k))) {
-        remainingOverrides[k] = v;
-      }
-    });
-    await supabase
-      .from('planning_assignments')
-      .upsert({
-        fecha: '__ruteo_overrides__',
-        assignments: remainingOverrides,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'fecha' });
+      // 5. Recortar __ruteo_overrides__ en Supabase quitando las fechas de planificación ya archivadas
+      const remainingOverrides = {};
+      Object.entries(scan.fullRuteoOverrides || {}).forEach(([k, v]) => {
+        if (!planningConfirmedPurgeSet.has(normalizeDate(k))) {
+          remainingOverrides[k] = v;
+        }
+      });
+      await supabase
+        .from('planning_assignments')
+        .upsert({
+          fecha: '__ruteo_overrides__',
+          assignments: remainingOverrides,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'fecha' });
+    }
 
-    purgedCount = confirmedFechas.size;
+    purgedCount = planningConfirmedPurgeSet.size;
   }
 
   return {
     ok: true,
     archivedCount: totalArchived,
     purgedCount,
+    purgedAttendanceDays,
     confirmedDates: Array.from(confirmedFechas)
   };
 };
