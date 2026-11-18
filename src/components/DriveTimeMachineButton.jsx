@@ -13,8 +13,14 @@ import {
   archiveAndPurgeDatesFromSupabase,
   uploadSingleDayToDrive
 } from '../lib/googleDriveArchive';
-import { usePlanningStore, normalizeDate, persistAssignmentsToDb } from '../store/planningStore';
+import { 
+  usePlanningStore, 
+  normalizeDate, 
+  persistAssignmentsToDb,
+  syncDisponibilizacionToAttendance
+} from '../store/planningStore';
 import { useAttendanceStore } from '../store/attendanceStore';
+import { supabase } from '../lib/supabase';
 import { Button } from './ui/Button';
 
 /**
@@ -155,9 +161,25 @@ export default function DriveTimeMachineButton({
       }
 
       // 3. Si el usuario pidió restaurar permanentemente a Supabase
-      if (restoreToSupabase && Array.isArray(dayData.assignments) && dayData.assignments.length > 0) {
-        await persistAssignmentsToDb(fechaDmy, dayData.assignments);
-        toast.success(`Fecha ${fechaDmy} restaurada permanentemente en Supabase.`);
+      if (restoreToSupabase) {
+        if (Array.isArray(dayData.assignments) && dayData.assignments.length > 0) {
+          await persistAssignmentsToDb(fechaDmy, dayData.assignments);
+          // Sincronizar también conductores y auxiliares con ruta como "Trabajado" en Asistencia / Dashboard
+          await syncDisponibilizacionToAttendance(fechaDmy, dayData.assignments);
+        }
+        if (Array.isArray(dayData.attendance) && dayData.attendance.length > 0) {
+          const cleanAtt = dayData.attendance
+            .filter(a => a && a.staff_id && a.date && a.service_type)
+            .map(a => ({
+              staff_id: a.staff_id,
+              date: a.date,
+              service_type: a.service_type
+            }));
+          if (cleanAtt.length > 0) {
+            await supabase.from('attendance').upsert(cleanAtt, { onConflict: 'staff_id,date' });
+          }
+        }
+        toast.success(`Fecha ${fechaDmy} (Rutas + Asistencia) restaurada permanentemente en Supabase.`);
       } else {
         toast.success(`Consulta Temporal cargada desde Google Drive: ${fechaDmy}`);
       }

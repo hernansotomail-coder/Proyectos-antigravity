@@ -2,8 +2,9 @@ import { create } from 'zustand';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 
-export const useAttendanceStore = create((set) => ({
+export const useAttendanceStore = create((set, get) => ({
   attendanceList: [],
+  driveInjectedAttendance: [], // Registros cargados temporalmente desde Google Drive
   isLoading: false,
 
   fetchAttendanceByDateRange: async (startDate, endDate) => {
@@ -55,6 +56,19 @@ export const useAttendanceStore = create((set) => ({
           hasMore = false;
         }
       }
+
+      // Preservar registros inyectados desde Google Drive que pertenezcan a este rango y no estén aún en DB
+      const injected = get().driveInjectedAttendance || [];
+      const dbKeys = new Set(allData.map(r => `${r.staff_id}:::${r.date}`));
+      injected.forEach(r => {
+        if (r && r.staff_id && r.date && r.date >= cleanStart && r.date <= cleanEnd) {
+          const k = `${r.staff_id}:::${r.date}`;
+          if (!dbKeys.has(k)) {
+            dbKeys.add(k);
+            allData.push(r);
+          }
+        }
+      });
 
       set({ attendanceList: allData });
       return allData;
@@ -132,8 +146,12 @@ export const useAttendanceStore = create((set) => ({
     if (!Array.isArray(driveRecords) || driveRecords.length === 0) return;
     set((state) => {
       const current = state.attendanceList || [];
+      const currentInjected = state.driveInjectedAttendance || [];
       const keySet = new Set(current.map(r => `${r.staff_id}:::${r.date}`));
+      const injectedKeySet = new Set(currentInjected.map(r => `${r.staff_id}:::${r.date}`));
       const merged = [...current];
+      const mergedInjected = [...currentInjected];
+
       driveRecords.forEach(r => {
         if (r && r.staff_id && r.date) {
           const k = `${r.staff_id}:::${r.date}`;
@@ -141,9 +159,16 @@ export const useAttendanceStore = create((set) => ({
             keySet.add(k);
             merged.push(r);
           }
+          if (!injectedKeySet.has(k)) {
+            injectedKeySet.add(k);
+            mergedInjected.push(r);
+          }
         }
       });
-      return { attendanceList: merged };
+      return {
+        attendanceList: merged,
+        driveInjectedAttendance: mergedInjected
+      };
     });
   }
 }));

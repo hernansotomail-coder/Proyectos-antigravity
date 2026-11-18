@@ -1,12 +1,14 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useStaffStore, isStaffExternal } from '../store/staffStore';
 import { useAttendanceStore } from '../store/attendanceStore';
+import { usePlanningStore } from '../store/planningStore';
 import { Select } from './ui/Select';
 import { Input } from './ui/Input';
 import { Button } from './ui/Button';
 import { Download, Users, Briefcase, CalendarOff, AlertTriangle, ChevronDown, Check } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import DriveTimeMachineButton from './DriveTimeMachineButton';
 
 // Helper to get days in month
 const getDaysInMonth = (year, month) => new Date(year, month, 0).getDate();
@@ -42,6 +44,7 @@ const getServiceAbbr = (serviceType) => {
 export default function Dashboard() {
   const { staffList, fetchStaff } = useStaffStore();
   const { attendanceList, fetchAttendanceByDateRange, isLoading } = useAttendanceStore();
+  const { transmittedAssignments } = usePlanningStore();
   
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
@@ -87,9 +90,14 @@ export default function Dashboard() {
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
   // Matrix generation with KPI filtering
+  const cleanRut = (r) => String(r || '').replace(/[^0-9kK]/g, '').toUpperCase();
+  const cleanName = (n) => String(n || '').trim().toUpperCase();
+
   const matrix = useMemo(() => {
     const rawMatrix = filteredStaff.map(staff => {
       const staffAttendance = attendanceList.filter(a => a.staff_id === staff.id);
+      const sRut = cleanRut(staff.rut);
+      const sName = cleanName(staff.name);
       
       const row = {
         rut: staff.rut,
@@ -106,7 +114,26 @@ export default function Dashboard() {
         } else {
           const dateStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const record = staffAttendance.find(a => a.date && a.date.startsWith(dateStr));
-          row.days[day] = record ? record.service_type : '';
+          if (record && record.service_type) {
+            row.days[day] = record.service_type;
+          } else {
+            // Si en Disponibilización (o consulta temporal de Google Drive) tiene ruta asignada en esta fecha, mostrar como "Trabajado"
+            const ddmmyyyy = `${String(day).padStart(2, '0')}-${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
+            const dayAssigns = transmittedAssignments?.[ddmmyyyy] || [];
+            const hasAssignedRoute = dayAssigns.some(r => {
+              if (!r.ruta) return false;
+              const cRut = cleanRut(r.conductor_rut);
+              const cName = cleanName(r.conductor_name);
+              const a1Rut = cleanRut(r.aux1_rut);
+              const a1Name = cleanName(r.aux1_name);
+              const a2Rut = cleanRut(r.aux2_rut);
+              const a2Name = cleanName(r.aux2_name);
+              if (sRut && (cRut === sRut || a1Rut === sRut || a2Rut === sRut)) return true;
+              if (sName && (cName === sName || a1Name === sName || a2Name === sName)) return true;
+              return false;
+            });
+            row.days[day] = hasAssignedRoute ? 'Trabajado' : '';
+          }
         }
       });
 
@@ -147,7 +174,7 @@ export default function Dashboard() {
     }
 
     return rawMatrix;
-  }, [filteredStaff, attendanceList, daysArray, selectedYear, selectedMonth, activeKpiFilter, selectedDayKpi]);
+  }, [filteredStaff, attendanceList, daysArray, selectedYear, selectedMonth, activeKpiFilter, selectedDayKpi, transmittedAssignments]);
 
   // KPIs Calculation
   const kpis = useMemo(() => {
@@ -264,7 +291,28 @@ export default function Dashboard() {
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-6 gap-4 shrink-0">
         <h2 className="text-2xl font-bold text-slate-800">Dashboard y Reportes</h2>
         
-        <div className="flex flex-wrap gap-3 items-end">
+        <div className="flex flex-wrap gap-3 items-center">
+          <DriveTimeMachineButton
+            currentMenu="Dashboard Dotación"
+            activeDate={`01-${String(selectedMonth).padStart(2, '0')}-${selectedYear}`}
+            onSelectDate={(loadedFecha) => {
+              const parts = String(loadedFecha).split('-');
+              if (parts.length === 3) {
+                const m = Number(parts[1]);
+                const y = Number(parts[2]);
+                setSelectedMonth(m);
+                setSelectedYear(y);
+                setTimeout(() => loadData(), 300);
+              }
+            }}
+            onSelectMonthAttendance={(yearMonth) => {
+              const parts = String(yearMonth).split('-');
+              if (parts.length === 2) {
+                setSelectedYear(Number(parts[0]));
+                setSelectedMonth(Number(parts[1]));
+              }
+            }}
+          />
           <div className="w-32">
             <Select 
               value={selectedMonth} 
