@@ -16,6 +16,7 @@ const AddFleet = lazy(() => import('./components/AddFleet'));
 const ManageFleet = lazy(() => import('./components/ManageFleet'));
 const FleetDashboard = lazy(() => import('./components/FleetDashboard'));
 const WashDashboard = lazy(() => import('./components/WashDashboard'));
+const WashCertification = lazy(() => import('./components/WashCertification'));
 const FleetWashes = lazy(() => import('./components/FleetWashes'));
 const DailyPlanning = lazy(() => import('./components/DailyPlanning'));
 const RuteoView = lazy(() => import('./components/RuteoView'));
@@ -165,6 +166,7 @@ function App() {
             <Route path="fleet-dashboard" element={<Login><FleetDashboard /></Login>} />
             <Route path="fleet-spid" element={<Login><FleetDashboard isSpidOnly={true} /></Login>} />
             <Route path="wash-dashboard" element={<Login><WashDashboard /></Login>} />
+            <Route path="wash-certification" element={<Login><WashCertification /></Login>} />
             <Route path="fleet" element={<Login><AddFleet /></Login>} />
             <Route path="manage-fleet" element={<Login><ManageFleet /></Login>} />
             <Route path="fleet-washes" element={<Login><FleetWashes /></Login>} />

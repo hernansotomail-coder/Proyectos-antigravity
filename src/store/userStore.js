@@ -29,6 +29,7 @@ export const APP_MODULES = [
       { key: 'fleet-dashboard', label: 'Dashboard Flota', path: '/fleet-dashboard' },
       { key: 'fleet-spid', label: 'Flota SPID', path: '/fleet-spid' },
       { key: 'wash-dashboard', label: 'Dashboard de lavados', path: '/wash-dashboard' },
+      { key: 'wash-certification', label: 'Certificación de lavados', path: '/wash-certification' },
       { key: 'fleet', label: 'Agregar Flota', path: '/fleet' },
       { key: 'manage-fleet', label: 'Gestión Flota', path: '/manage-fleet' },
       { key: 'fleet-washes', label: 'Lavados', path: '/fleet-washes' },
@@ -66,7 +67,7 @@ export const getDefaultPermissionsForRole = (role) => {
     if (role === 'Administrador') {
       menus[k] = { view: true, edit: true };
     } else if (role === 'Visualizador') {
-      const canView = ['dashboard', 'fleet-dashboard', 'fleet-spid', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(k);
+      const canView = ['dashboard', 'fleet-dashboard', 'fleet-spid', 'wash-dashboard', 'wash-certification', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(k);
       menus[k] = { view: canView, edit: false };
     } else {
       // Administrativo

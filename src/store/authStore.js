@@ -57,10 +57,12 @@ export const canUserViewMenu = (user, menuKey) => {
     }
   } catch (e) {}
 
+  if (menuKey === 'wash-certification') return true;
+
   // Fallbacks predeterminados por Rol
   if (user.role === 'Visualizador') {
     // Por defecto el visualizador puede ver reportes/dashboards
-    return ['dashboard', 'fleet-dashboard', 'fleet-spid', 'wash-dashboard', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(menuKey);
+    return ['dashboard', 'fleet-dashboard', 'fleet-spid', 'wash-dashboard', 'wash-certification', 'change-history', 'briefing', 'historical-assignment', 'estatus-diario'].includes(menuKey);
   }
 
   // Administrativo por defecto ve todos excepto mantenedor de usuarios

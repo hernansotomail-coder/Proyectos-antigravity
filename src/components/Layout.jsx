@@ -3,7 +3,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { 
   Users, UserCog, CalendarClock, LayoutDashboard, Menu, X, 
   LogOut, ChevronDown, ChevronRight, ChevronLeft, Truck, Key, Layers, 
-  FileText, FileSpreadsheet, History, Shield, Wrench, Send, Droplets, Sparkles, BookOpen,
+  FileText, FileSpreadsheet, History, Shield, ShieldCheck, Wrench, Send, Droplets, Sparkles, BookOpen,
   BarChart3, Zap
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
@@ -92,6 +92,7 @@ export default function Layout() {
     { key: 'fleet-dashboard', name: 'Dashboard Flota', path: '/fleet-dashboard', icon: LayoutDashboard },
     { key: 'fleet-spid', name: 'Flota SPID', path: '/fleet-spid', icon: Zap },
     { key: 'wash-dashboard', name: 'Dashboard de lavados', path: '/wash-dashboard', icon: Sparkles },
+    { key: 'wash-certification', name: 'Certificación de lavados', path: '/wash-certification', icon: ShieldCheck },
     { key: 'fleet', name: 'Agregar Flota', path: '/fleet', icon: Truck },
     { key: 'manage-fleet', name: 'Gestión Flota', path: '/manage-fleet', icon: UserCog },
     { key: 'fleet-washes', name: 'Lavados', path: '/fleet-washes', icon: Droplets },
