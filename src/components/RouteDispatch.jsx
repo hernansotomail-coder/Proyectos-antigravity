@@ -182,6 +182,54 @@ export const getMultirutaSuffix = (row) => {
   return '';
 };
 
+// Formatea el bloque visual limpio de un viaje (usado tanto para ruta individual como para grupo por conductor)
+const formatViajeBlock = ({ viajeIndex, vueltaNum, farthestComuna, bodegaCodesStr, clienteText, viajeRows }) => {
+  const isFirstTrip = viajeIndex === 1 && vueltaNum === 1;
+  const bodegaLabel = isFirstTrip ? 'BODEGA' : 'BODEGA A CARGAR';
+
+  const rutaLabels = [];
+  let totalLocales = 0;
+  let totalM3 = 0;
+  const prioridades = [];
+  const destinosPrioritarios = [];
+
+  viajeRows.forEach(r => {
+    const uParadas = getUniqueParadas(r.paradas);
+    const locales = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
+    const m3 = parseFloat(r.m3) || 0;
+    const rutaNum = r.ruta || 'S/N';
+    const multirutaSuffix = getMultirutaSuffix(r);
+
+    rutaLabels.push(`${rutaNum}${multirutaSuffix}`);
+    totalLocales += locales;
+    totalM3 += m3;
+
+    if (r.prioridad && r.prioridad !== 'Normal') {
+      const pText = r.prioridad.toUpperCase();
+      if (!prioridades.includes(pText)) prioridades.push(pText);
+    }
+    if (r.destino_prioritario && !destinosPrioritarios.includes(r.destino_prioritario)) {
+      destinosPrioritarios.push(r.destino_prioritario);
+    }
+  });
+
+  const localesWord = totalLocales === 1 ? 'local' : 'locales';
+  const m3Val = totalM3.toFixed(3);
+  const rutasStr = rutaLabels.join(' + ');
+
+  let block = `   📦 *VIAJE ${viajeIndex} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
+  block += `    🏭 *${bodegaLabel}:* ${bodegaCodesStr}\n`;
+  block += `    🏢 *CLIENTE:* ${clienteText}\n`;
+  block += `    🛣️ *RUTA:* ${rutasStr}`;
+  if (prioridades.length > 0) block += ` | 🚨 ${prioridades.join(', ')}`;
+  block += `\n`;
+  block += `    📍 *DESTINOS:* ${totalLocales} ${localesWord} | ${m3Val} m³\n`;
+  if (destinosPrioritarios.length > 0) {
+    block += `    ⭐ *PRIORITARIO:* ${destinosPrioritarios.join(' / ')}\n`;
+  }
+  return block;
+};
+
 // Formateador de mensaje individual para WhatsApp (Requisito 9)
 export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anticipacionMinutos = 0) => {
   let formattedDate = fecha;
@@ -195,18 +243,11 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
   const rawVuelta = String(row.n_vuelta || '1').trim();
   const matchV = rawVuelta.match(/\d+/);
   const vueltaNum = matchV ? parseInt(matchV[0], 10) : 1;
-  const ruta = row.ruta || 'S/N';
-  const uniqueParadas = getUniqueParadas(row.paradas);
-  const locales = parseInt(row.locales, 10) || (uniqueParadas.length > 0 ? uniqueParadas.length : 1);
-  const localesWord = locales === 1 ? 'local' : 'locales';
-  const m3Val = (parseFloat(row.m3) || 0).toFixed(3);
   const camionText = formatCamionWithPlate(row.camion, fleetList) || 'Sin camión';
   const farthestComuna = findFarthestComunaForTrip([row]);
   const bodegaInfo = resolveBodegasForRoutes([row]);
   const bodegaCodesStr = (bodegaInfo.codes && bodegaInfo.codes.length > 0) ? bodegaInfo.codes.join(' / ') : 'LRI';
   const clienteText = getTripClientesText([row]);
-  const multirutaSuffix = getMultirutaSuffix(row);
-  const comunasDestinos = getRouteComunasSummary(row);
 
   // Hora Cita en el apartado general
   const rawCita = (row.hora_cita || '').trim();
@@ -228,21 +269,14 @@ export const buildSingleRouteWhatsAppMessage = (row, fecha, fleetList = [], anti
     msg += `⏰ *Hora Cita / Presentación:* ${citaGeneralHeader}\n`;
   }
   msg += `━━━━━━━━━━━━━━━━━━━━━\n`;
-  msg += `   📦 *VIAJE ${vueltaNum} (VUELTA ${vueltaNum})* [${farthestComuna}]\n`;
-  if (vueltaNum === 1) {
-    msg += `          *BODEGA:* ${bodegaCodesStr}\n`;
-    msg += `         *CLIENTE:* ${clienteText}\n`;
-  } else {
-    msg += `    🏭   *BODEGA A CARGAR:* ${bodegaCodesStr}\n`;
-    msg += `             *CLIENTE:* ${clienteText}\n`;
-  }
-  msg += `   ▫️ *Ruta ${ruta}${multirutaSuffix}:* ${locales} ${localesWord} | ${m3Val} m³`;
-  if (row.prioridad && row.prioridad !== 'Normal') msg += ` | 🚨 ${row.prioridad.toUpperCase()}`;
-  msg += `\n`;
-  if (row.destino_prioritario) {
-    msg += `      ⭐ *Prioritario:* ${row.destino_prioritario}\n`;
-  }
-  msg += `      📍 *Destinos (${locales} ${localesWord}):* ${comunasDestinos}\n`;
+  msg += formatViajeBlock({
+    viajeIndex: vueltaNum,
+    vueltaNum,
+    farthestComuna,
+    bodegaCodesStr,
+    clienteText,
+    viajeRows: [row]
+  });
   msg += `\n━━━━━━━━━━━━━━━━━━━━━\n`;
   msg += `_Favor confirmar recepción del itinerario._`;
 
@@ -314,34 +348,14 @@ export const buildConductorGroupWhatsAppMessage = (conductorName, auxName, rows,
     const bodegaCodesStr = (tripBodega.codes && tripBodega.codes.length > 0) ? tripBodega.codes.join(' / ') : 'LRI';
     const tripClientesText = getTripClientesText(viajeRows);
 
-    msg += `   📦 *VIAJE ${viajeIndex} (VUELTA ${viaje.vueltaNum})* [${farthestComuna}]\n`;
-    if (viajeIndex === 1 && viaje.vueltaNum === 1) {
-      msg += `          *BODEGA:* ${bodegaCodesStr}\n`;
-      msg += `         *CLIENTE:* ${tripClientesText}\n`;
-    } else {
-      msg += `    🏭   *BODEGA A CARGAR:* ${bodegaCodesStr}\n`;
-      msg += `             *CLIENTE:* ${tripClientesText}\n`;
-    }
-
-    // Desglose de cada ruta incluida en este viaje
-    viajeRows.forEach(r => {
-      const uParadas = getUniqueParadas(r.paradas);
-      const locales = parseInt(r.locales, 10) || (uParadas.length > 0 ? uParadas.length : 1);
-      const localesWord = locales === 1 ? 'local' : 'locales';
-      const m3Val = (parseFloat(r.m3) || 0).toFixed(3);
-      const rutaNum = r.ruta || 'S/N';
-      const multirutaSuffix = getMultirutaSuffix(r);
-      const comunasDestinos = getRouteComunasSummary(r);
-
-      msg += `   ▫️ *Ruta ${rutaNum}${multirutaSuffix}:* ${locales} ${localesWord} | ${m3Val} m³`;
-      if (r.prioridad && r.prioridad !== 'Normal') msg += ` | 🚨 ${r.prioridad.toUpperCase()}`;
-      msg += `\n`;
-      if (r.destino_prioritario) {
-        msg += `      ⭐ *Prioritario:* ${r.destino_prioritario}\n`;
-      }
-      msg += `      📍 *Destinos (${locales} ${localesWord}):* ${comunasDestinos}\n`;
+    msg += formatViajeBlock({
+      viajeIndex,
+      vueltaNum: viaje.vueltaNum,
+      farthestComuna,
+      bodegaCodesStr,
+      clienteText: tripClientesText,
+      viajeRows
     });
-
     msg += `\n`;
   });
 
