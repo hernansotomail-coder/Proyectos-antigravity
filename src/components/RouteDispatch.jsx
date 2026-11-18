@@ -184,8 +184,7 @@ export const getMultirutaSuffix = (row) => {
 
 // Formatea el bloque visual limpio de un viaje (usado tanto para ruta individual como para grupo por conductor)
 const formatViajeBlock = ({ viajeIndex, vueltaNum, farthestComuna, bodegaCodesStr, clienteText, viajeRows }) => {
-  const isFirstTrip = viajeIndex === 1 && vueltaNum === 1;
-  const bodegaLabel = isFirstTrip ? 'BODEGA' : 'BODEGA A CARGAR';
+  const bodegaLabel = 'BODEGA A CARGAR';
 
   const rutaLabels = [];
   let totalLocales = 0;
