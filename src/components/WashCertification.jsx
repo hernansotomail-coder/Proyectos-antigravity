@@ -219,6 +219,9 @@ export default function WashCertification() {
   const [correlativoInput, setCorrelativoInput] = useState(() => String(getNextCorrelativo()));
   const [emittingTruckId, setEmittingTruckId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [editingCertTruckId, setEditingCertTruckId] = useState(null);
+  const [editingCertDate, setEditingCertDate] = useState('');
+  const [savingCertTruckId, setSavingCertTruckId] = useState(null);
 
   const fetchRecords = useCallback(async (showSpinner = true) => {
     if (showSpinner) setIsLoading(true);
@@ -522,7 +525,25 @@ export default function WashCertification() {
     setModalStatusFilter(statusPreset);
     setModalSearch('');
     setModalVehicleType('Todos');
+    setEditingCertTruckId(null);
     setIsEmissionModalOpen(true);
+  };
+
+  // Guardar fecha de emisión manual por camión
+  const handleSaveManualCertDate = async (truckRow, newDateYmd) => {
+    const truckKey = truckRow.id || truckRow.internal_number;
+    setSavingCertTruckId(truckKey);
+    try {
+      const ok = await updateSingleFleetWash(truckRow.internal_number || truckRow.id, {
+        ultima_certificacion: newDateYmd ? newDateYmd : null
+      });
+      if (ok) {
+        setEditingCertTruckId(null);
+        setEditingCertDate('');
+      }
+    } finally {
+      setSavingCertTruckId(null);
+    }
   };
 
   // Registros filtrados para la tabla y exportación a Excel
@@ -665,7 +686,7 @@ export default function WashCertification() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Tarjeta 1: Camiones certificación al día (dentro de los 27 días) */}
           <div
             onClick={() => openEmissionModal('al_dia')}
@@ -723,14 +744,30 @@ export default function WashCertification() {
             <div className="my-2 flex items-baseline gap-2">
               <span className="text-3xl font-black text-rose-900">{kpiStats.vencidaCount}</span>
               <span className="text-xs font-semibold text-rose-700">camiones</span>
-              {kpiStats.sinCertCount > 0 && (
-                <span className="text-[11px] font-semibold text-slate-500 ml-1">
-                  (+{kpiStats.sinCertCount} sin cert.)
-                </span>
-              )}
             </div>
             <span className="text-[11px] text-rose-700 font-medium">
               Pasaron más de 30 días desde la última emisión
+            </span>
+          </div>
+
+          {/* Tarjeta 4: Sin certificación (sin fecha de emisión de documento) */}
+          <div
+            onClick={() => openEmissionModal('sin_cert')}
+            className="p-4 rounded-xl border bg-slate-50 border-slate-300 text-slate-900 flex flex-col justify-between cursor-pointer transition-all hover:shadow-md hover:border-slate-400"
+            title="Camiones que aún no tienen fecha de emisión de certificado (clic para ver matriz)"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                Sin certificación
+              </span>
+              <FileText size={18} className="text-slate-500 shrink-0" />
+            </div>
+            <div className="my-2 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-slate-900">{kpiStats.sinCertCount}</span>
+              <span className="text-xs font-semibold text-slate-600">camiones</span>
+            </div>
+            <span className="text-[11px] text-slate-600 font-medium">
+              Sin fecha de emisión de documento registrada
             </span>
           </div>
         </div>
@@ -1182,12 +1219,60 @@ export default function WashCertification() {
                             )}
                           </td>
 
-                          {/* Última Emisión Certificado */}
+                          {/* Última Emisión Certificado (editable manualmente) */}
                           <td className="px-4 py-3 whitespace-nowrap">
-                            {emissionDmy ? (
-                              <span className="font-mono font-bold text-slate-800">{emissionDmy}</span>
+                            {editingCertTruckId === (truck.id || truck.internal_number) ? (
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="date"
+                                  value={editingCertDate}
+                                  onChange={(e) => setEditingCertDate(e.target.value)}
+                                  className="px-2 py-1 text-xs font-mono border border-blue-400 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={savingCertTruckId === (truck.id || truck.internal_number)}
+                                  onClick={() => handleSaveManualCertDate(truck, editingCertDate)}
+                                  className="p-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer disabled:opacity-50"
+                                  title="Guardar fecha de emisión"
+                                >
+                                  <Check size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingCertTruckId(null);
+                                    setEditingCertDate('');
+                                  }}
+                                  className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 cursor-pointer"
+                                  title="Cancelar"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </div>
                             ) : (
-                              <span className="text-slate-400 italic">Sin emisión</span>
+                              <div className="flex items-center gap-2 group">
+                                {emissionDmy ? (
+                                  <span className="font-mono font-bold text-slate-800">{emissionDmy}</span>
+                                ) : (
+                                  <span className="text-slate-400 italic">Sin emisión</span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const parsed = parseDateOnly(truck.ultima_certificacion);
+                                    const ymd = parsed
+                                      ? `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`
+                                      : '';
+                                    setEditingCertTruckId(truck.id || truck.internal_number);
+                                    setEditingCertDate(ymd);
+                                  }}
+                                  className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                                  title="Editar manualmente la fecha de emisión"
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                              </div>
                             )}
                           </td>
 

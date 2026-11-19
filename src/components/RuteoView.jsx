@@ -2365,23 +2365,21 @@ export default function RuteoView() {
                         {trip.totalM3}
                       </td>
 
-                      {/* 11. Turno (Dropdown del 1 al 10, 2da vuelta, 3ra vuelta, Nocturno, No aplica) */}
+                      {/* 11. Turno (Input manual de texto libre editable) */}
                       <td className="px-2 py-2 border-r border-slate-200/80 text-center">
-                        <select
-                          value={trip.turno}
+                        <input
+                          type="text"
+                          value={trip.turno || ''}
                           onChange={e => handleUpdateTripField(trip.key, 'turno', e.target.value)}
-                          className={`w-28 text-xs font-bold py-1 px-1.5 rounded-lg border focus:outline-none cursor-pointer transition-all ${
+                          placeholder="Turno..."
+                          className={`w-28 text-center text-xs font-bold py-1 px-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all ${
                             hasPriorityBg
                               ? 'bg-white/95 border-black/20 text-slate-900 shadow-xs'
                               : trip.turno
                               ? 'bg-blue-50 border-blue-300 text-blue-900 shadow-2xs'
                               : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
                           }`}
-                        >
-                          {TURNO_OPTIONS.map(opt => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ))}
-                        </select>
+                        />
                       </td>
 
                       {/* 12. Hora Cita (Input de texto libre editable) */}
