@@ -193,11 +193,11 @@ export function formatUpdateTimestamp(isoString) {
 }
 
 // Verifica si un registro guardado sigue siendo válido hoy en Chile (hasta las 23:59:59)
-export function isEstatusRecordValid(record) {
+export function isEstatusRecordValid(record, referenceDate = new Date()) {
   if (!record || typeof record !== 'object') return false;
   if (!record.processedData) return false;
   
-  const todayChile = getChileLocalDateString(new Date());
+  const todayChile = getChileLocalDateString(referenceDate);
 
   // 1. Si dateChile coincide con hoy en Chile
   if (record.dateChile && record.dateChile === todayChile) {
@@ -257,14 +257,34 @@ export default function EstatusDiario() {
   const channelRef = useRef(null);
   const lastSavedAtRef = useRef(null);
   const lastUpdatedAtRef = useRef(null);
+  const manualSyncRef = useRef(null);
+  const [syncError, setSyncError] = useState(null);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Sincronización Realtime con Supabase + Polling automático cada 5s y verificación de vigencia diaria (23:59 hrs Chile)
   useEffect(() => {
     let isMounted = true;
 
-    const applyRemoteRecord = (record, updatedAt = null, notifyUser = false) => {
+    const validateRecordWithServerFallback = async (record) => {
+      if (isEstatusRecordValid(record, new Date())) return true;
+      try {
+        const res = await fetch(window.location.origin, { method: 'HEAD', cache: 'no-store' });
+        const dateHeader = res.headers.get('date');
+        if (dateHeader) {
+          const serverDate = new Date(dateHeader);
+          if (!isNaN(serverDate.getTime())) {
+            return isEstatusRecordValid(record, serverDate);
+          }
+        }
+      } catch (e) {}
+      return false;
+    };
+
+    const applyRemoteRecord = async (record, updatedAt = null, notifyUser = false) => {
       if (!isMounted) return;
-      if (!isEstatusRecordValid(record)) {
+      const isValid = await validateRecordWithServerFallback(record);
+      if (!isMounted) return;
+      if (!isValid) {
         clearEstatusLocalCache();
         if (lastSavedAtRef.current !== null) {
           lastSavedAtRef.current = null;
@@ -275,6 +295,8 @@ export default function EstatusDiario() {
         }
         return;
       }
+
+      setSyncError(null);
 
       saveEstatusLocalCache(record);
       const incomingStamp = record.savedAt || updatedAt || '';
@@ -325,7 +347,8 @@ export default function EstatusDiario() {
     }
 
     // 1. Cargar o verificar estatus activo en Supabase
-    const loadRemoteStatus = async (isBackgroundCheck = false) => {
+    const loadRemoteStatus = async (isBackgroundCheck = false, isManual = false) => {
+      if (isManual) setIsSyncing(true);
       try {
         // Si es chequeo periódico y ya tenemos versión cargada, consultar primero solo updated_at (~150 bytes)
         if (isBackgroundCheck && lastUpdatedAtRef.current) {
@@ -355,20 +378,34 @@ export default function EstatusDiario() {
 
         if (error) {
           console.warn('Error consultando __estatus_diario__ en Supabase:', error);
+          if (isMounted) {
+            setSyncError(error.message || 'Error al consultar la base de datos.');
+            if (isManual) toast.error('No se pudo sincronizar: ' + (error.message || 'Error de conexión'));
+          }
           return;
         }
         if (!isMounted) return;
+        setSyncError(null);
 
         if (data && data.assignments) {
-          applyRemoteRecord(data.assignments, data.updated_at, isBackgroundCheck);
+          await applyRemoteRecord(data.assignments, data.updated_at, isBackgroundCheck);
+          if (isManual) toast.success('Sincronización completada.');
         } else {
           handleRemoteClear(isBackgroundCheck);
+          if (isManual) toast.info('No hay un reporte guardado en el servidor para hoy.');
         }
       } catch (err) {
         console.warn('Error al consultar estatus diario remoto en Supabase:', err);
+        if (isMounted) {
+          setSyncError(err?.message || 'Sin conexión al servidor.');
+          if (isManual) toast.error('Error de red al sincronizar.');
+        }
+      } finally {
+        if (isManual && isMounted) setIsSyncing(false);
       }
     };
 
+    manualSyncRef.current = () => loadRemoteStatus(false, true);
     loadRemoteStatus(false);
 
     // 2. Canal Realtime con Broadcast directo + Postgres Changes para actualización instantánea entre computadores
@@ -2331,7 +2368,21 @@ export default function EstatusDiario() {
               <p className="text-xs text-slate-500 max-w-md mx-auto mt-2 leading-relaxed">
                 La información se reinicia automáticamente cada día a las 23:59 horas. Puedes cargar el archivo de operaciones en la pestaña <strong className="text-slate-700 font-semibold">"Carga de Información"</strong> para generar y visualizar las matrices y tarjetas de avance.
               </p>
-              <div className="mt-6 flex justify-center">
+              {syncError && (
+                <div className="mt-4 max-w-md mx-auto p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+                  Error de sincronización: {syncError}
+                </div>
+              )}
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                <Button
+                  onClick={() => manualSyncRef.current?.()}
+                  disabled={isSyncing}
+                  variant="outline"
+                  className="border-slate-200 text-slate-700 hover:bg-slate-50 font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 text-xs transition-all"
+                >
+                  <RefreshCw size={15} className={isSyncing ? 'animate-spin' : ''} />
+                  <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar ahora'}</span>
+                </Button>
                 <Button
                   onClick={() => setMainTab('carga')}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl shadow-xs flex items-center gap-2 text-xs transition-all"
