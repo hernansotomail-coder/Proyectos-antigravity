@@ -8521,12 +8521,18 @@ export function isAramarkFixedRoute(ruta) {
 }
 
 // Resuelve la Operación oficial a partir de código de transportista, owner y ruta
-export function resolveOperationByTransportistaAndOwner({ transportista = '', owner = '', ruta = '', fallbackName = '' }) {
+export function resolveOperationByTransportistaAndOwner({ transportista = '', owner = '', ruta = '', fallbackName = '', destino = '' }) {
   const cleanTransp = String(transportista || '').trim().toUpperCase();
   const cleanOwner = String(owner || '').trim().toUpperCase();
   const cleanRuta = String(ruta || '').trim();
   const baseRuta = cleanRuta.replace(/^0+/, '').split(/[-_]/)[0];
   const upperFallback = String(fallbackName || '').trim().toUpperCase();
+  const upperDestino = String(destino || '').trim().toUpperCase();
+
+  // 0. Si el destino explícitamente corresponde a Streat Burger (aunque venga con T313/C31274 por error de origen)
+  if (upperDestino.includes('STREAT')) {
+    return 'Streat Burguer';
+  }
 
   // 1. Aramark rutas fijas 8360 y 1962 o transportista T503 -> Centralizado
   if (isAramarkFixedRoute(cleanRuta) || cleanTransp === 'T503' || upperFallback.includes('ARAMARK')) {
@@ -8576,6 +8582,11 @@ export function resolveClienteForStop(parada, parentRoute = {}) {
   const pOwner = String(parada?.owner || parentRoute?.owner || '').trim().toUpperCase();
   const ruta = String(parentRoute?.ruta || '').trim();
   const fallback = String(parada?.cliente || parentRoute?.cliente || parentRoute?.nombreRuta || '').trim();
+  const destUpperDirect = String(parada?.destino || '').toUpperCase();
+
+  if (destUpperDirect.includes('STREAT')) {
+    return 'Streat Burguer';
+  }
 
   if (isAramarkFixedRoute(ruta) || pTransp === 'T503' || fallback.toUpperCase().includes('ARAMARK')) {
     return 'Centralizado';
@@ -8956,7 +8967,8 @@ export function getAllOperationsForRoute(r) {
           transportista: pTransp,
           owner: pOwner,
           ruta: rawRuta,
-          fallbackName: p.cliente || r.cliente || r.nombreRuta || ''
+          fallbackName: p.cliente || r.cliente || r.nombreRuta || '',
+          destino: p.destino || ''
         });
         if (resolved) ops.add(canonicalizeOperation(resolved));
       }

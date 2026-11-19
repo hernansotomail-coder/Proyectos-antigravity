@@ -593,9 +593,9 @@ export const consolidateRouteStopsForExternal = (routeRow) => {
   const paradas = Array.isArray(routeRow?.paradas) ? routeRow.paradas : [];
   if (paradas.length === 0) {
     const clienteDisplay = resolveClienteForStop({}, routeRow);
-    const pesoVal = parseFloat(routeRow?.kilos) || 0;
-    const cjVal = parseInt(routeRow?.cajas, 10) || 0;
-    const volVal = parseFloat(routeRow?.m3) || 0;
+    const pesoVal = parseFloat(String(routeRow?.peso ?? routeRow?.kilos ?? 0).replace(',', '.')) || 0;
+    const cjVal = parseInt(routeRow?.cantCJ ?? routeRow?.cajas ?? 0, 10) || 0;
+    const volVal = parseFloat(String(routeRow?.volumen ?? routeRow?.m3 ?? 0).replace(',', '.')) || 0;
     return [
       {
         stopId: `${routeRow?.ruta || 'R'}:::1:::unico`,
@@ -643,9 +643,9 @@ export const consolidateRouteStopsForExternal = (routeRow) => {
     }
 
     const entry = groupedMap.get(key);
-    entry.peso = Number((entry.peso + (parseFloat(p.peso) || 0)).toFixed(3));
-    entry.cantCJ += parseInt(p.cajas, 10) || 0;
-    entry.volumen = Number((entry.volumen + (parseFloat(p.volumen) || 0)).toFixed(4));
+    entry.peso = Number((entry.peso + (parseFloat(String(p.peso ?? p.kilos ?? 0).replace(',', '.')) || 0)).toFixed(3));
+    entry.cantCJ += parseInt(p.cantCJ ?? p.cajas ?? 0, 10) || 0;
+    entry.volumen = Number((entry.volumen + (parseFloat(String(p.volumen ?? p.m3 ?? 0).replace(',', '.')) || 0)).toFixed(4));
     if (!entry.direccion && p.direccion) entry.direccion = String(p.direccion).trim();
     if (!entry.comuna && p.comuna) entry.comuna = String(p.comuna).trim();
     if (!entry.horaIni && p.horaIni) entry.horaIni = String(p.horaIni).trim();

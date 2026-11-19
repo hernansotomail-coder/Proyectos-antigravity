@@ -205,6 +205,11 @@ export const classifyParadaForBriefing = (parada, parentRoute = {}) => {
     return { operacion: 'SPID', subCatCode: null };
   }
 
+  // 1c. Si el destino de la parada indica explícitamente Streat Burger (aunque venga con T313/C31274)
+  if (String(parada?.destino || '').toUpperCase().includes('STREAT')) {
+    return { operacion: 'Streat Burguer', subCatCode: null };
+  }
+
   // 2. Juan Valdez: Owner C31274 (reparto T313 o centralizado T604) o T313 directo
   if (pOwner === 'C31274' && (pTransp === 'T313' || pTransp === 'T604' || !pTransp)) {
     return { operacion: 'Juan Valdez', subCatCode: null };
