@@ -1,13 +1,20 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   ShieldCheck, Search, Calendar, Download, RefreshCw,
-  Truck, Droplets, Snowflake, Sparkles, User, Clock, Filter, CheckCircle2, Radio
+  Truck, Droplets, Snowflake, Sparkles, User, Clock, Filter, CheckCircle2, Radio,
+  FileText, Trash2, MapPin, AlertTriangle, X, Edit2, Check
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
-import { useFleetStore } from '../store/fleetStore';
-import { matchVehicleByCode } from '../lib/vehicleMatcher';
+import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
+import {
+  generateAndSaveCertificatePdf,
+  getNextCorrelativo,
+  setNextCorrelativo,
+  formatCorrelativo
+} from '../lib/certificateGenerator';
 import { Button } from './ui/Button';
 
 const SERVICE_TYPES = [
@@ -60,6 +67,74 @@ const getChileDateParts = (dateInput) => {
     dmy: `${day}-${month}-${year}`,
     time: `${hour}:${minute}:${second}`,
     formatted: `${day}-${month}-${year} ${hour}:${minute}`
+  };
+};
+
+// Parsear fecha YYYY-MM-DD o DD-MM-YYYY a Date local (medianoche)
+const parseDateOnly = (dateStr) => {
+  if (!dateStr) return null;
+  const clean = String(dateStr).trim().split(' ')[0].split('T')[0];
+  const parts = clean.split(/[-/]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      return isNaN(d.getTime()) ? null : d;
+    } else {
+      const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+      return isNaN(d.getTime()) ? null : d;
+    }
+  }
+  const d = new Date(clean);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+const formatDateDmy = (d) => {
+  if (!d || isNaN(d.getTime())) return '';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+};
+
+// Calcular vigencia de 30 días desde la fecha de emisión del último certificado
+// - Al día: dentro de los primeros 27 días (daysElapsed < 27, es decir, daysRemaining > 3)
+// - Por vencer: últimos 3 días para llegar a los 30 (daysRemaining >= 1 && daysRemaining <= 3)
+// - Vencida: pasaron 30 días o más (daysRemaining <= 0)
+const getCert30DayStatus = (certDateStr, todayChileYmd) => {
+  const emissionDate = parseDateOnly(certDateStr);
+  if (!emissionDate) {
+    return {
+      status: 'sin_cert',
+      emissionDmy: null,
+      expirationDmy: null,
+      daysElapsed: null,
+      daysRemaining: null
+    };
+  }
+  const todayDate = parseDateOnly(todayChileYmd) || new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  emissionDate.setHours(0, 0, 0, 0);
+
+  const expirationDate = new Date(emissionDate.getTime());
+  expirationDate.setDate(expirationDate.getDate() + 30);
+
+  const diffMs = todayDate.getTime() - emissionDate.getTime();
+  const daysElapsed = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const daysRemaining = 30 - daysElapsed;
+
+  let status = 'al_dia';
+  if (daysRemaining <= 0) {
+    status = 'vencida';
+  } else if (daysRemaining <= 3) {
+    status = 'por_vencer';
+  }
+
+  return {
+    status,
+    emissionDmy: formatDateDmy(emissionDate),
+    expirationDmy: formatDateDmy(expirationDate),
+    daysElapsed,
+    daysRemaining
   };
 };
 
@@ -121,17 +196,29 @@ const getServiceBadgeConfig = (serviceName) => {
 };
 
 export default function WashCertification() {
-  const { fleetList, fetchFleet } = useFleetStore();
+  const { fleetList, fetchFleet, updateSingleFleetWash } = useFleetStore();
 
   const [records, setRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
 
-  // Filtros
+  // Filtros tabla principal
   const [searchTerm, setSearchTerm] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [serviceFilter, setServiceFilter] = useState('Todos');
+  const [regionFilter, setRegionFilter] = useState('Todas');
+
+  // Estado Modal "Emisión de certificado"
+  const [isEmissionModalOpen, setIsEmissionModalOpen] = useState(false);
+  const [modalSearch, setModalSearch] = useState('');
+  const [modalVehicleType, setModalVehicleType] = useState('Todos');
+  const [modalStatusFilter, setModalStatusFilter] = useState('Todos');
+  const [correlativoNum, setCorrelativoNum] = useState(() => getNextCorrelativo());
+  const [isEditingCorrelativo, setIsEditingCorrelativo] = useState(false);
+  const [correlativoInput, setCorrelativoInput] = useState(() => String(getNextCorrelativo()));
+  const [emittingTruckId, setEmittingTruckId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   const fetchRecords = useCallback(async (showSpinner = true) => {
     if (showSpinner) setIsLoading(true);
@@ -227,55 +314,216 @@ export default function WashCertification() {
       });
   }, [records, fleetList]);
 
-  // Fecha de hoy en Chile (YYYY-MM-DD)
-  const todayChileYmd = useMemo(() => {
-    return getChileDateParts(new Date())?.ymd || '';
+  // Fecha de hoy en Chile (YYYY-MM-DD y DD-MM-YYYY)
+  const todayChileParts = useMemo(() => {
+    return getChileDateParts(new Date()) || { ymd: '', dmy: '' };
   }, []);
+  const todayChileYmd = todayChileParts.ymd;
+  const todayChileDmy = todayChileParts.dmy;
 
-  // Indicadores Superiores (KPIs)
+  // Matriz de Flota Propia (Gestión Flota -> N° Interno) cruzada con último lavado Telegram y última emisión
+  const ownFleetMatrix = useMemo(() => {
+    // Indexar el último registro de Telegram por vehículo (ya ordenados del más reciente al más antiguo)
+    const latestWashByVehicleId = new Map();
+    const latestWashByCode = new Map();
+
+    enrichedRecords.forEach((rec) => {
+      const matched = matchVehicleByCode(rec.camion, '', fleetList);
+      if (matched?.id && !latestWashByVehicleId.has(matched.id)) {
+        latestWashByVehicleId.set(matched.id, rec);
+      }
+      const normCamion = normalizeVehicleCode(rec.camion);
+      if (normCamion && !latestWashByCode.has(normCamion)) {
+        latestWashByCode.set(normCamion, rec);
+      }
+    });
+
+    return (fleetList || [])
+      .filter((f) => !isVehicleExternal(f) && f.internal_number && String(f.internal_number).trim() !== '')
+      .map((truck) => {
+        const normInt = normalizeVehicleCode(truck.internal_number);
+        const normPlate = normalizeVehicleCode(truck.plate);
+        const lastTelegramWash =
+          latestWashByVehicleId.get(truck.id) ||
+          (normInt && latestWashByCode.get(normInt)) ||
+          (normPlate && latestWashByCode.get(normPlate)) ||
+          null;
+
+        const certInfo = getCert30DayStatus(truck.ultima_certificacion, todayChileYmd);
+
+        return {
+          ...truck,
+          lastTelegramWash,
+          lastTelegramWashDmy: lastTelegramWash?.chileDateOnly || '',
+          lastTelegramWashFormatted: lastTelegramWash?.chileFormatted || '',
+          certInfo
+        };
+      })
+      .sort((a, b) =>
+        String(a.internal_number || '').localeCompare(String(b.internal_number || ''), undefined, {
+          numeric: true,
+          sensitivity: 'base'
+        })
+      );
+  }, [fleetList, enrichedRecords, todayChileYmd]);
+
+  // Regiones y Tipos de vehículos disponibles en Flota Propia
+  const availableRegions = useMemo(() => {
+    const rSet = new Set(ownFleetMatrix.map((t) => String(t.region || '').trim()).filter(Boolean));
+    return Array.from(rSet).sort((a, b) => a.localeCompare(b));
+  }, [ownFleetMatrix]);
+
+  const availableVehicleTypes = useMemo(() => {
+    const tSet = new Set(ownFleetMatrix.map((t) => String(t.type || '').trim()).filter(Boolean));
+    return Array.from(tSet).sort((a, b) => a.localeCompare(b));
+  }, [ownFleetMatrix]);
+
+  // Indicadores Superiores (KPIs) filtrados por Ubicación (Región)
   const kpiStats = useMemo(() => {
-    const certifiedTodayRecords = enrichedRecords.filter((r) => r.chileYmd === todayChileYmd);
-    const uniqueTrucksToday = new Set(
-      certifiedTodayRecords.map((r) => String(r.camion || '').trim().toUpperCase()).filter(Boolean)
-    );
+    const regionTrucks =
+      regionFilter === 'Todas'
+        ? ownFleetMatrix
+        : ownFleetMatrix.filter((t) => String(t.region || '').trim() === regionFilter);
 
-    const serviceCounts = {
-      'Limpieza interna': 0,
-      'Deshielo': 0,
-      'Sanitización': 0,
-      'Limpieza externa': 0
-    };
+    let alDiaCount = 0;
+    let porVencerCount = 0;
+    let vencidaCount = 0;
+    let sinCertCount = 0;
 
-    const serviceCountsToday = {
-      'Limpieza interna': 0,
-      'Deshielo': 0,
-      'Sanitización': 0,
-      'Limpieza externa': 0
-    };
-
-    enrichedRecords.forEach((r) => {
-      const isToday = r.chileYmd === todayChileYmd;
-      const normalizedServices = r.servicesList.map(normalizeServiceText);
-
-      SERVICE_TYPES.forEach((serviceType) => {
-        const targetNorm = normalizeServiceText(serviceType);
-        if (normalizedServices.some((s) => s.includes(targetNorm))) {
-          serviceCounts[serviceType] += 1;
-          if (isToday) {
-            serviceCountsToday[serviceType] += 1;
-          }
-        }
-      });
+    regionTrucks.forEach((t) => {
+      if (t.certInfo.status === 'al_dia') alDiaCount += 1;
+      else if (t.certInfo.status === 'por_vencer') porVencerCount += 1;
+      else if (t.certInfo.status === 'vencida') vencidaCount += 1;
+      else sinCertCount += 1;
     });
 
     return {
-      totalCertifiedToday: certifiedTodayRecords.length,
-      uniqueTrucksTodayCount: uniqueTrucksToday.size,
-      totalRecords: enrichedRecords.length,
-      serviceCounts,
-      serviceCountsToday
+      totalOwnFleet: regionTrucks.length,
+      alDiaCount,
+      porVencerCount,
+      vencidaCount,
+      sinCertCount
     };
-  }, [enrichedRecords, todayChileYmd]);
+  }, [ownFleetMatrix, regionFilter]);
+
+  // Camiones filtrados para el Modal "Emisión de certificado"
+  const filteredModalTrucks = useMemo(() => {
+    return ownFleetMatrix.filter((t) => {
+      if (regionFilter !== 'Todas' && String(t.region || '').trim() !== regionFilter) {
+        return false;
+      }
+      if (modalVehicleType !== 'Todos' && String(t.type || '').trim() !== modalVehicleType) {
+        return false;
+      }
+      if (modalStatusFilter !== 'Todos' && t.certInfo.status !== modalStatusFilter) {
+        return false;
+      }
+      if (modalSearch.trim() !== '') {
+        const q = modalSearch.toLowerCase().trim();
+        const mInt = String(t.internal_number || '').toLowerCase().includes(q);
+        const mPlate = String(t.plate || '').toLowerCase().includes(q);
+        const mType = String(t.type || '').toLowerCase().includes(q);
+        const mRegion = String(t.region || '').toLowerCase().includes(q);
+        if (!mInt && !mPlate && !mType && !mRegion) return false;
+      }
+      return true;
+    });
+  }, [ownFleetMatrix, regionFilter, modalVehicleType, modalStatusFilter, modalSearch]);
+
+  // Emitir certificado PDF (pregunta carpeta de guardado, no guarda archivo en la plataforma, solo captura fecha de emisión)
+  const handleEmitCertificate = async (truckRow) => {
+    setEmittingTruckId(truckRow.id || truckRow.internal_number);
+    try {
+      const todayDate = parseDateOnly(todayChileYmd) || new Date();
+      const expDate = new Date(todayDate.getTime());
+      expDate.setDate(expDate.getDate() + 30);
+
+      const emissionDateDmy = todayChileDmy || formatDateDmy(todayDate);
+      const expirationDateDmy = formatDateDmy(expDate);
+
+      // Fecha de inic. Tratamiento: último registro del camión en la matriz (Telegram)
+      let treatmentStartDateDmy = truckRow.lastTelegramWashDmy;
+      if (!treatmentStartDateDmy && truckRow.fecha_ultimo_lavado) {
+        const parsedWash = parseDateOnly(truckRow.fecha_ultimo_lavado);
+        if (parsedWash) treatmentStartDateDmy = formatDateDmy(parsedWash);
+      }
+      if (!treatmentStartDateDmy) {
+        treatmentStartDateDmy = emissionDateDmy;
+      }
+
+      const result = await generateAndSaveCertificatePdf({
+        correlativoNum,
+        plate: truckRow.plate || truckRow.internal_number,
+        internalNumber: truckRow.internal_number,
+        treatmentStartDateDmy,
+        emissionDateDmy,
+        expirationDateDmy
+      });
+
+      if (result.cancelled) {
+        toast.info('Emisión cancelada: no se seleccionó carpeta de guardado.');
+        return;
+      }
+
+      if (result.saved) {
+        // Incrementar correlativo
+        const nextNum = setNextCorrelativo(correlativoNum + 1);
+        setCorrelativoNum(nextNum);
+        setCorrelativoInput(String(nextNum));
+
+        // Capturar únicamente la fecha de emisión en la plataforma
+        await updateSingleFleetWash(truckRow.internal_number || truckRow.id, {
+          ultima_certificacion: todayChileYmd
+        });
+
+        toast.success(
+          `Certificado N° ${result.correlativoStr} emitido para ${truckRow.internal_number} (${truckRow.plate || 'S/P'})`
+        );
+      }
+    } catch (err) {
+      console.error('[Certificación de lavados] Error emitiendo certificado:', err);
+      toast.error('Ocurrió un error al generar el certificado PDF.');
+    } finally {
+      setEmittingTruckId(null);
+    }
+  };
+
+  // Eliminar un registro de la tabla de lavados (Telegram)
+  const handleDeleteRecord = async (rec) => {
+    if (!rec?.id) return;
+    const confirmed = window.confirm(
+      `¿Eliminar el registro de lavado del camión ${rec.camion || 'S/N'} (${rec.chileFormatted})?`
+    );
+    if (!confirmed) return;
+
+    setDeletingId(rec.id);
+    try {
+      const { error } = await supabase
+        .from('registro_servicios_flota')
+        .delete()
+        .eq('id', rec.id);
+
+      if (error) {
+        console.error('[Certificación de lavados] Error eliminando registro:', error);
+        toast.error('No se pudo eliminar el registro en Supabase.');
+      } else {
+        setRecords((prev) => prev.filter((r) => r.id !== rec.id));
+        toast.success(`Registro de ${rec.camion || 'S/N'} eliminado.`);
+      }
+    } catch (err) {
+      console.error('[Certificación de lavados] Error inesperado al eliminar:', err);
+      toast.error('Error inesperado al eliminar el registro.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const openEmissionModal = (statusPreset = 'Todos') => {
+    setModalStatusFilter(statusPreset);
+    setModalSearch('');
+    setModalVehicleType('Todos');
+    setIsEmissionModalOpen(true);
+  };
 
   // Registros filtrados para la tabla y exportación a Excel
   const filteredRecords = useMemo(() => {
@@ -361,7 +609,16 @@ export default function WashCertification() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            type="button"
+            onClick={() => openEmissionModal('Todos')}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs"
+          >
+            <FileText size={15} />
+            Emisión de certificado
+          </Button>
+
           <Button
             type="button"
             variant="outline"
@@ -384,114 +641,99 @@ export default function WashCertification() {
         </div>
       </div>
 
-      {/* 2. Indicadores Superiores (KPIs) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-        {/* Total Camiones Certificados Hoy */}
-        <div
-          onClick={() => {
-            if (startDate === todayChileYmd && endDate === todayChileYmd) {
-              setStartDate('');
-              setEndDate('');
-            } else {
-              setStartDate(todayChileYmd);
-              setEndDate(todayChileYmd);
-            }
-          }}
-          className={`p-3.5 rounded-xl border flex flex-col justify-between cursor-pointer transition-all hover:shadow-sm ${
-            startDate === todayChileYmd && endDate === todayChileYmd
-              ? 'bg-emerald-100/80 border-emerald-500 ring-2 ring-emerald-300 text-emerald-950'
-              : 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-          }`}
-          title="Clic para filtrar los certificados de hoy"
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
-              Camiones Certificados Hoy
-            </span>
-            <ShieldCheck size={16} className="text-emerald-600 shrink-0" />
+      {/* 2. Filtro de Ubicación (Región) + 3 Tarjetas de Vigencia de Certificación */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+            <MapPin size={14} className="text-blue-600 shrink-0" />
+            <span className="text-xs font-bold text-slate-600">Ubicación (Región):</span>
+            <select
+              value={regionFilter}
+              onChange={(e) => setRegionFilter(e.target.value)}
+              className="text-xs font-bold text-slate-800 bg-transparent outline-none cursor-pointer pr-2"
+            >
+              <option value="Todas">Todas las regiones</option>
+              {availableRegions.map((reg) => (
+                <option key={reg} value={reg}>
+                  {reg}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="my-1 flex items-baseline gap-2">
-            <span className="text-2xl font-black text-emerald-900">{kpiStats.totalCertifiedToday}</span>
-            <span className="text-[11px] font-semibold text-emerald-700">
-              ({kpiStats.uniqueTrucksTodayCount} {kpiStats.uniqueTrucksTodayCount === 1 ? 'camión único' : 'camiones únicos'})
-            </span>
-          </div>
-          <span className="text-[10px] text-emerald-700 font-medium">
-            Total histórico: {kpiStats.totalRecords} reg.
+          <span className="text-[11px] font-semibold text-slate-500">
+            Flota propia evaluada: <strong className="text-slate-800">{kpiStats.totalOwnFleet}</strong> camiones
           </span>
         </div>
 
-        {/* Desglose por Tipo de Servicio */}
-        {[
-          {
-            type: 'Limpieza interna',
-            title: 'Limpieza Interna',
-            bgActive: 'bg-blue-100 border-blue-500 ring-2 ring-blue-300 text-blue-950',
-            bgIdle: 'bg-blue-50/60 border-blue-200 text-blue-900',
-            labelColor: 'text-blue-700',
-            iconColor: 'text-blue-600',
-            Icon: Droplets
-          },
-          {
-            type: 'Deshielo',
-            title: 'Deshielo',
-            bgActive: 'bg-cyan-100 border-cyan-500 ring-2 ring-cyan-300 text-cyan-950',
-            bgIdle: 'bg-cyan-50/60 border-cyan-200 text-cyan-900',
-            labelColor: 'text-cyan-800',
-            iconColor: 'text-cyan-600',
-            Icon: Snowflake
-          },
-          {
-            type: 'Sanitización',
-            title: 'Sanitización',
-            bgActive: 'bg-teal-100 border-teal-500 ring-2 ring-teal-300 text-teal-950',
-            bgIdle: 'bg-teal-50/60 border-teal-200 text-teal-900',
-            labelColor: 'text-teal-800',
-            iconColor: 'text-teal-600',
-            Icon: Sparkles
-          },
-          {
-            type: 'Limpieza externa',
-            title: 'Limpieza Externa',
-            bgActive: 'bg-indigo-100 border-indigo-500 ring-2 ring-indigo-300 text-indigo-950',
-            bgIdle: 'bg-indigo-50/60 border-indigo-200 text-indigo-900',
-            labelColor: 'text-indigo-700',
-            iconColor: 'text-indigo-600',
-            Icon: Truck
-          }
-        ].map((card) => {
-          const isSelected = serviceFilter === card.type;
-          const totalCount = kpiStats.serviceCounts[card.type] || 0;
-          const todayCount = kpiStats.serviceCountsToday[card.type] || 0;
-          const IconComp = card.Icon;
-
-          return (
-            <div
-              key={card.type}
-              onClick={() => setServiceFilter(isSelected ? 'Todos' : card.type)}
-              className={`p-3.5 rounded-xl border flex flex-col justify-between cursor-pointer transition-all hover:shadow-sm ${
-                isSelected ? card.bgActive : card.bgIdle
-              }`}
-              title={`Clic para filtrar por ${card.title}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${card.labelColor}`}>
-                  {card.title}
-                </span>
-                <IconComp size={15} className={`${card.iconColor} shrink-0`} />
-              </div>
-              <div className="my-1 flex items-baseline gap-2">
-                <span className="text-2xl font-black">{totalCount}</span>
-                <span className={`text-[11px] font-bold ${card.labelColor}`}>
-                  ({todayCount} hoy)
-                </span>
-              </div>
-              <span className="text-[10px] opacity-75 font-medium">
-                {isSelected ? 'Filtro activo (clic para quitar)' : 'Clic para filtrar servicio'}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Tarjeta 1: Camiones certificación al día (dentro de los 27 días) */}
+          <div
+            onClick={() => openEmissionModal('al_dia')}
+            className="p-4 rounded-xl border bg-emerald-50/80 border-emerald-200 text-emerald-900 flex flex-col justify-between cursor-pointer transition-all hover:shadow-md hover:border-emerald-400"
+            title="Camiones con certificación emitida dentro de los últimos 27 días (clic para ver matriz)"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
+                Camiones certificación al día
               </span>
+              <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
             </div>
-          );
-        })}
+            <div className="my-2 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-emerald-900">{kpiStats.alDiaCount}</span>
+              <span className="text-xs font-semibold text-emerald-700">camiones</span>
+            </div>
+            <span className="text-[11px] text-emerald-700 font-medium">
+              Certificación vigente dentro de los 27 días
+            </span>
+          </div>
+
+          {/* Tarjeta 2: Camiones con certificación por vencer (últimos 3 días para llegar a 30) */}
+          <div
+            onClick={() => openEmissionModal('por_vencer')}
+            className="p-4 rounded-xl border bg-amber-50/90 border-amber-300 text-amber-950 flex flex-col justify-between cursor-pointer transition-all hover:shadow-md hover:border-amber-500 ring-1 ring-amber-200"
+            title="Clic para abrir el popup de emisión de certificados para camiones por vencer"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-800">
+                Camiones con certificación por vencer
+              </span>
+              <Clock size={18} className="text-amber-600 shrink-0" />
+            </div>
+            <div className="my-2 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-amber-900">{kpiStats.porVencerCount}</span>
+              <span className="text-xs font-semibold text-amber-700">camiones</span>
+            </div>
+            <span className="text-[11px] text-amber-800 font-semibold">
+              Dentro de los últimos 3 días para llegar a 30 · Clic para emitir
+            </span>
+          </div>
+
+          {/* Tarjeta 3: Camiones con certificación vencida (pasaron 30 días) */}
+          <div
+            onClick={() => openEmissionModal('vencida')}
+            className="p-4 rounded-xl border bg-rose-50/85 border-rose-200 text-rose-950 flex flex-col justify-between cursor-pointer transition-all hover:shadow-md hover:border-rose-400"
+            title="Camiones cuya certificación superó los 30 días desde su emisión (clic para ver matriz)"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-rose-800">
+                Camiones con certificación vencida
+              </span>
+              <AlertTriangle size={18} className="text-rose-600 shrink-0" />
+            </div>
+            <div className="my-2 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-rose-900">{kpiStats.vencidaCount}</span>
+              <span className="text-xs font-semibold text-rose-700">camiones</span>
+              {kpiStats.sinCertCount > 0 && (
+                <span className="text-[11px] font-semibold text-slate-500 ml-1">
+                  (+{kpiStats.sinCertCount} sin cert.)
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] text-rose-700 font-medium">
+              Pasaron más de 30 días desde la última emisión
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* 3. Barra de Búsqueda y Filtros */}
@@ -574,19 +816,20 @@ export default function WashCertification() {
               <th className="px-4 py-3">Camión</th>
               <th className="px-4 py-3">Servicios Realizados</th>
               <th className="px-4 py-3">Reportado por</th>
+              <th className="px-4 py-3 text-center">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
             {isLoading ? (
               <tr>
-                <td colSpan="4" className="py-12 text-center text-slate-400">
+                <td colSpan="5" className="py-12 text-center text-slate-400">
                   <RefreshCw size={28} className="mx-auto text-blue-500 animate-spin mb-2" />
                   <p className="font-semibold text-sm text-slate-600">Cargando certificaciones de lavado...</p>
                 </td>
               </tr>
             ) : filteredRecords.length === 0 ? (
               <tr>
-                <td colSpan="4" className="py-12 text-center text-slate-400">
+                <td colSpan="5" className="py-12 text-center text-slate-400">
                   <ShieldCheck size={34} className="mx-auto text-slate-300 mb-2" />
                   <p className="font-semibold text-sm text-slate-600">
                     No se encontraron registros de certificación de lavados.
@@ -673,6 +916,23 @@ export default function WashCertification() {
                         <span>{rec.usuario_telegram || 'Desconocido'}</span>
                       </div>
                     </td>
+
+                    {/* Columna 5: Acciones (Eliminar registro) */}
+                    <td className="px-4 py-3 whitespace-nowrap text-center">
+                      <button
+                        type="button"
+                        disabled={deletingId === rec.id}
+                        onClick={() => handleDeleteRecord(rec)}
+                        className="inline-flex items-center justify-center p-1.5 rounded-lg text-rose-600 hover:text-rose-800 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors cursor-pointer disabled:opacity-50"
+                        title="Eliminar este registro"
+                      >
+                        {deletingId === rec.id ? (
+                          <RefreshCw size={15} className="animate-spin" />
+                        ) : (
+                          <Trash2 size={15} />
+                        )}
+                      </button>
+                    </td>
                   </tr>
                 );
               })
@@ -680,6 +940,302 @@ export default function WashCertification() {
           </tbody>
         </table>
       </div>
+
+      {/* 5. Modal / Pop-up: Emisión de certificado (Matriz Flota Propia) */}
+      {isEmissionModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header Modal */}
+            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <FileText className="text-blue-600" size={20} />
+                  Emisión de Certificado — Flota Propia
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Seleccione un camión de flota propia para generar y descargar su certificado ADQUIM (solo se captura la fecha de emisión).
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 self-end sm:self-center">
+                {/* Correlativo actual */}
+                <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+                  <span className="text-slate-500 font-semibold">Próximo N°:</span>
+                  {isEditingCorrelativo ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min="1"
+                        value={correlativoInput}
+                        onChange={(e) => setCorrelativoInput(e.target.value)}
+                        className="w-20 px-1.5 py-0.5 border border-blue-400 rounded text-xs font-mono font-bold text-slate-800 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const saved = setNextCorrelativo(correlativoInput);
+                          setCorrelativoNum(saved);
+                          setCorrelativoInput(String(saved));
+                          setIsEditingCorrelativo(false);
+                          toast.success(`Correlativo actualizado a ${formatCorrelativo(saved)}`);
+                        }}
+                        className="p-1 text-emerald-600 hover:bg-emerald-50 rounded cursor-pointer"
+                        title="Guardar correlativo"
+                      >
+                        <Check size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono font-black text-blue-700">
+                        {formatCorrelativo(correlativoNum)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCorrelativoInput(String(correlativoNum));
+                          setIsEditingCorrelativo(true);
+                        }}
+                        className="text-slate-400 hover:text-blue-600 cursor-pointer"
+                        title="Editar número correlativo"
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsEmissionModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/70 transition-colors cursor-pointer"
+                  title="Cerrar"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Barra de Filtros del Modal */}
+            <div className="px-6 py-3 bg-white border-b border-slate-200 flex flex-col lg:flex-row items-stretch lg:items-center gap-2.5">
+              {/* Buscador rápido */}
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+                <input
+                  type="text"
+                  placeholder="Buscador rápido (N° Interno, Patente, Tipo, Región)..."
+                  value={modalSearch}
+                  onChange={(e) => setModalSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 h-9 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs text-slate-800"
+                />
+              </div>
+
+              {/* Filtro por Tipo de vehículo */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-3 rounded-xl border border-slate-200 h-9">
+                <Truck size={14} className="text-slate-400 shrink-0" />
+                <select
+                  value={modalVehicleType}
+                  onChange={(e) => setModalVehicleType(e.target.value)}
+                  className="text-xs font-semibold text-slate-700 bg-transparent outline-none cursor-pointer pr-1"
+                >
+                  <option value="Todos">Tipo de vehículo: Todos</option>
+                  {availableVehicleTypes.map((vt) => (
+                    <option key={vt} value={vt}>
+                      {vt}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filtro por Ubicación (Región) */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-3 rounded-xl border border-slate-200 h-9">
+                <MapPin size={14} className="text-slate-400 shrink-0" />
+                <select
+                  value={regionFilter}
+                  onChange={(e) => setRegionFilter(e.target.value)}
+                  className="text-xs font-semibold text-slate-700 bg-transparent outline-none cursor-pointer pr-1"
+                >
+                  <option value="Todas">Región: Todas</option>
+                  {availableRegions.map((reg) => (
+                    <option key={reg} value={reg}>
+                      {reg}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filtro por Estado de Vigencia */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-3 rounded-xl border border-slate-200 h-9">
+                <Filter size={13} className="text-slate-400 shrink-0" />
+                <select
+                  value={modalStatusFilter}
+                  onChange={(e) => setModalStatusFilter(e.target.value)}
+                  className="text-xs font-semibold text-slate-700 bg-transparent outline-none cursor-pointer pr-1"
+                >
+                  <option value="Todos">Vigencia: Todos ({ownFleetMatrix.length})</option>
+                  <option value="al_dia">Al día (≤ 27 días)</option>
+                  <option value="por_vencer">Por vencer (últimos 3 días)</option>
+                  <option value="vencida">Vencida (&gt; 30 días)</option>
+                  <option value="sin_cert">Sin certificado emitido</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Matriz de Camiones Flota Propia */}
+            <div className="flex-1 overflow-auto bg-slate-50">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead className="bg-slate-100 text-slate-700 sticky top-0 z-10 border-b border-slate-200 font-bold uppercase text-[10px] tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3">N° Interno / Patente</th>
+                    <th className="px-4 py-3">Tipo de Vehículo</th>
+                    <th className="px-4 py-3">Último Lavado (Telegram)</th>
+                    <th className="px-4 py-3">Última Emisión Certificado</th>
+                    <th className="px-4 py-3">Vigencia (30 días)</th>
+                    <th className="px-4 py-3 text-right">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                  {filteredModalTrucks.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="py-12 text-center text-slate-400">
+                        <Truck size={32} className="mx-auto text-slate-300 mb-2" />
+                        <p className="font-semibold text-sm text-slate-600">
+                          No se encontraron camiones de flota propia con los filtros seleccionados.
+                        </p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredModalTrucks.map((truck) => {
+                      const { status, emissionDmy, daysRemaining, daysElapsed } = truck.certInfo;
+                      const isEmitting = emittingTruckId === (truck.id || truck.internal_number);
+
+                      let vigenciaBadge = (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                          Sin certificado
+                        </span>
+                      );
+
+                      if (status === 'al_dia') {
+                        vigenciaBadge = (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <CheckCircle2 size={12} />
+                            {daysRemaining} días restantes (Día {daysElapsed}/30)
+                          </span>
+                        );
+                      } else if (status === 'por_vencer') {
+                        vigenciaBadge = (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-300">
+                            <Clock size={12} />
+                            Por vencer: {daysRemaining} {daysRemaining === 1 ? 'día' : 'días'} (Día {daysElapsed}/30)
+                          </span>
+                        );
+                      } else if (status === 'vencida') {
+                        const overdueDays = Math.abs(daysRemaining);
+                        vigenciaBadge = (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                            <AlertTriangle size={12} />
+                            Vencido {overdueDays === 0 ? 'hoy (30 días)' : `hace ${overdueDays} días`}
+                          </span>
+                        );
+                      }
+
+                      return (
+                        <tr key={truck.id || truck.internal_number} className="hover:bg-slate-50 transition-colors">
+                          {/* N° Interno + Patente */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-black bg-slate-900 text-white">
+                                <Truck size={12} className="text-blue-400" />
+                                {truck.internal_number}
+                              </span>
+                              {truck.plate && (
+                                <span className="text-[11px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                                  {truck.plate}
+                                </span>
+                              )}
+                              {truck.region && (
+                                <span className="text-[10px] font-semibold text-slate-500">
+                                  {truck.region}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Tipo de vehículo */}
+                          <td className="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">
+                            {truck.type || '—'}
+                          </td>
+
+                          {/* Último Lavado (Telegram) */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {truck.lastTelegramWash ? (
+                              <div className="flex flex-col">
+                                <span className="font-mono font-bold text-slate-800">
+                                  {truck.lastTelegramWashDmy}
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  {truck.lastTelegramWash.chileTimeOnly} · Telegram
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 italic">Sin registro Telegram</span>
+                            )}
+                          </td>
+
+                          {/* Última Emisión Certificado */}
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            {emissionDmy ? (
+                              <span className="font-mono font-bold text-slate-800">{emissionDmy}</span>
+                            ) : (
+                              <span className="text-slate-400 italic">Sin emisión</span>
+                            )}
+                          </td>
+
+                          {/* Vigencia (30 días) */}
+                          <td className="px-4 py-3 whitespace-nowrap">{vigenciaBadge}</td>
+
+                          {/* Acción: Emitir certificado */}
+                          <td className="px-4 py-3 whitespace-nowrap text-right">
+                            <Button
+                              type="button"
+                              disabled={isEmitting}
+                              onClick={() => handleEmitCertificate(truck)}
+                              className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-2xs"
+                            >
+                              {isEmitting ? (
+                                <RefreshCw size={13} className="animate-spin" />
+                              ) : (
+                                <FileText size={13} />
+                              )}
+                              {isEmitting ? 'Generando...' : 'Emitir certificado'}
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer Modal */}
+            <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
+              <span>
+                Mostrando <strong className="text-slate-800">{filteredModalTrucks.length}</strong> de{' '}
+                <strong className="text-slate-800">{ownFleetMatrix.length}</strong> camiones de flota propia
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsEmissionModalOpen(false)}
+                className="text-xs font-bold border-slate-300 text-slate-700"
+              >
+                Cerrar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
