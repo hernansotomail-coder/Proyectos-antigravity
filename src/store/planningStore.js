@@ -13,7 +13,7 @@ import {
 import { useStaffStore } from './staffStore';
 
 // Cache invalidation version for cross-computer synchronization
-const CURRENT_STORAGE_VERSION = 'v2026_11_02_prod_sync_v12';
+const CURRENT_STORAGE_VERSION = 'v2026_11_18_prod_sync_v13';
 try {
   if (typeof window !== 'undefined' && window.localStorage) {
     const savedVer = localStorage.getItem('keylogistics_storage_version');

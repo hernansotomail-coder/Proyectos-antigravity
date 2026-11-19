@@ -829,13 +829,14 @@ export default function Briefing() {
       return null;
     };
 
-    const saved = findInObj(savedRuteoByDate);
-    if (saved) {
-      rows = saved;
+    // Priorizar siempre transmittedAssignments (sincronizado con Supabase) sobre savedRuteoByDate (caché local)
+    const trans = findInObj(transmittedAssignments);
+    if (trans) {
+      rows = trans;
     } else {
-      const trans = findInObj(transmittedAssignments);
-      if (trans) {
-        rows = trans;
+      const saved = findInObj(savedRuteoByDate);
+      if (saved) {
+        rows = saved;
       } else {
         const matchedTrans = (transformedRoutes || []).filter(r => normalizeDate(r.fecha) === normDate);
         rows = matchedTrans.length > 0 ? matchedTrans : (transformedRoutes || []);
