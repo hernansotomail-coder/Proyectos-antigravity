@@ -273,14 +273,15 @@ export const normalizeClientForBriefing = (rawName) => {
 };
 
 // Determina si una asignación corresponde a Flota Externa / Terceros
-// Valida conductor (RUT EXT-, rol externo), camión (patente/código en flota externa o prefijos TL/FG/TF/TC/VL/CS/EM/EXT),
-// transportista externo y flags directos.
+// Prioridad:
+// 1. Si la dotación (conductor o auxiliares) es externa -> Terceros (independiente del camión).
+// 2. Si el camión en fleetList es externo -> Terceros.
+// 3. Si tanto camión como dotación están confirmados como propios en los catálogos -> Propia (ignora empresa_externa residual).
+// 4. Fallbacks por prefijo de código externo, tipo_flota/empresa_externa y transportista.
 export const isAssignmentExternal = (r, fleetList = [], staffList = []) => {
   if (!r) return false;
-  if (r.tipo_flota === 'Externa') return true;
-  if (r.empresa_externa && String(r.empresa_externa).trim() !== '') return true;
 
-  // 1. Conductor y Auxiliares por RUT
+  // 1. Conductor y Auxiliares por RUT o etiquetas explícitas
   const condRut = String(r.conductor_rut || '').trim().toUpperCase();
   const aux1Rut = String(r.aux1_rut || '').trim().toUpperCase();
   const aux2Rut = String(r.aux2_rut || '').trim().toUpperCase();
@@ -288,7 +289,6 @@ export const isAssignmentExternal = (r, fleetList = [], staffList = []) => {
     return true;
   }
 
-  // 2. Conductor y Auxiliares por Nombre (etiquetas [EXT- o (EXT-) o EXTERNO)
   const condName = (r.conductor_name || '').trim();
   if (condName && /\[EXT-|\(EXT-|EXTERNO/i.test(condName)) return true;
   const aux1Name = (r.aux1_name || '').trim();
@@ -296,29 +296,32 @@ export const isAssignmentExternal = (r, fleetList = [], staffList = []) => {
   const aux2Name = (r.aux2_name || '').trim();
   if (aux2Name && /\[EXT-|\(EXT-|EXTERNO/i.test(aux2Name)) return true;
 
-  // 3. Conductor / Auxiliar en catálogo de staffList
+  // 2. Conductor / Auxiliares en catálogo de staffList (si alguno es externo -> Terceros)
   let foundStaffCond = null;
   if (condName && staffList && staffList.length > 0) {
     foundStaffCond = staffList.find(s => s.name && s.name.trim().toLowerCase() === condName.toLowerCase());
     if (foundStaffCond && isStaffExternal(foundStaffCond)) return true;
   }
+  let foundAux1 = null;
   if (aux1Name && staffList && staffList.length > 0) {
-    const foundAux1 = staffList.find(s => s.name && s.name.trim().toLowerCase() === aux1Name.toLowerCase());
+    foundAux1 = staffList.find(s => s.name && s.name.trim().toLowerCase() === aux1Name.toLowerCase());
     if (foundAux1 && isStaffExternal(foundAux1)) return true;
   }
+  let foundAux2 = null;
   if (aux2Name && staffList && staffList.length > 0) {
-    const foundAux2 = staffList.find(s => s.name && s.name.trim().toLowerCase() === aux2Name.toLowerCase());
+    foundAux2 = staffList.find(s => s.name && s.name.trim().toLowerCase() === aux2Name.toLowerCase());
     if (foundAux2 && isStaffExternal(foundAux2)) return true;
   }
 
-  // 4. Camión en catálogo de fleetList
+  // 3. Camión en catálogo de fleetList
   const camion = (r.camion || '').trim();
   const matchParen = camion.match(/^([^(]+)(?:\(([^)]+)\))?/);
   const cCode = (matchParen ? matchParen[1] : camion).trim().toLowerCase();
   const cPlate = (matchParen && matchParen[2] ? matchParen[2] : (r.patente || '')).trim().toLowerCase();
 
+  let foundTruck = null;
   if (fleetList && fleetList.length > 0 && (cCode || cPlate)) {
-    const foundTruck = fleetList.find(f => {
+    foundTruck = fleetList.find(f => {
       const fCode = (f.internal_number || '').trim().toLowerCase();
       const fPlate = (f.plate || '').trim().toLowerCase();
       if (cCode && fCode && (fCode === cCode || cCode.startsWith(fCode) || fCode.startsWith(cCode))) return true;
@@ -327,27 +330,23 @@ export const isAssignmentExternal = (r, fleetList = [], staffList = []) => {
     });
     if (foundTruck) {
       if (isVehicleExternal(foundTruck)) return true;
-      // Si el camión está en catálogo y es confirmadamente flota PROPIA:
-      // Si el conductor tampoco es externo, entonces es flota propia
-      if (!isVehicleExternal(foundTruck)) {
-        if (!condRut.startsWith('EXT-') && (!foundStaffCond || !isStaffExternal(foundStaffCond))) {
-          return false;
-        }
-      }
+      // Camión confirmado como Propio y dotación no es externa -> Flota Propia (Key)
+      return false;
     }
   }
 
-  // 5. Prefijos de códigos internos de vehículos externos conocidos (TL, FG, TF, TC, VL, CS, EM, EXT)
-  // NOTA: Se evalúa únicamente sobre el código interno (cCode como TL01, FG01), NUNCA sobre la patente para evitar
-  // falsos positivos con patentes vehiculares chilenas estándar que inician con TF, TC, etc.
+  // 4. Prefijos de códigos internos de vehículos externos conocidos (TL, FG, TF, TC, VL, CS, EM, EXT)
   if (/^(TL|FG|TF|TC|VL|CS|EM|EXT)\d+/i.test(cCode)) {
     return true;
   }
 
+  // 5. Fallback a flags directos de la fila solo si el camión no fue confirmado como Propio en fleetList
+  if (r.tipo_flota === 'Externa') return true;
+  if (r.empresa_externa && String(r.empresa_externa).trim() !== '' && !foundStaffCond) return true;
+
   // 6. Transportista externo (no código interno T100..T604 ni Sin Transportista ni Key)
   const transp = (r.transportista || '').trim();
   if (transp && !/^T\d+$/i.test(transp) && transp.toLowerCase() !== 'sin transportista' && transp.toLowerCase() !== 'key') {
-    // Si el conductor es un conductor propio confirmado en staffList, el transportista no lo convierte en externo
     if (foundStaffCond && !isStaffExternal(foundStaffCond)) {
       return false;
     }
