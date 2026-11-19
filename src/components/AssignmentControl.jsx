@@ -668,21 +668,24 @@ export default function AssignmentControl() {
       return;
     }
 
-    const payload = extraServiceRows.map((r, idx) => ({
-      fecha: r.fecha || activeDate,
-      conductor_name: r.conductor_name,
-      conductor_rut: r.conductor_rut || '',
-      aux1_name: r.aux1_name || '',
-      aux1_rut: r.aux1_rut || '',
-      camion: r.camion,
-      tipo_equipo: r.tipo_equipo || 'Camión',
-      rampla: r.rampla || '',
-      servicio: r.servicio === 'Otro' ? (r.nota || 'Servicio especial') : (r.nota && r.servicio !== 'SPID' ? `${r.servicio} - ${r.nota}` : r.servicio),
-      cliente: r.servicio === 'SPID' ? 'SPID' : (r.servicio || 'Servicio Extra'),
-      operacion: r.servicio === 'SPID' ? 'SPID' : (r.servicio || 'Servicios Extras'),
-      ruta: r.servicio === 'SPID' ? `SPID-EXTRA-${idx + 1}` : `EXTRA-${idx + 1}`,
-      nota: r.nota || ''
-    }));
+    const payload = extraServiceRows.map((r, idx) => {
+      const isSpid = String(r.servicio || '').toUpperCase().startsWith('SPID');
+      return {
+        fecha: r.fecha || activeDate,
+        conductor_name: r.conductor_name,
+        conductor_rut: r.conductor_rut || '',
+        aux1_name: r.aux1_name || '',
+        aux1_rut: r.aux1_rut || '',
+        camion: r.camion,
+        tipo_equipo: r.tipo_equipo || 'Camión',
+        rampla: r.rampla || '',
+        servicio: r.servicio === 'Otro' ? (r.nota || 'Servicio especial') : (r.nota && !isSpid ? `${r.servicio} - ${r.nota}` : r.servicio),
+        cliente: isSpid ? 'SPID' : (r.servicio || 'Servicio Extra'),
+        operacion: isSpid ? 'SPID' : (r.servicio || 'Servicios Extras'),
+        ruta: isSpid ? `SPID-EXTRA-${idx + 1}` : `EXTRA-${idx + 1}`,
+        nota: r.nota || ''
+      };
+    });
 
     const ok = addExtraServices(payload);
     if (ok) {
@@ -3943,7 +3946,9 @@ export default function AssignmentControl() {
                           <option value="Servicio de vulcanización">Servicio de vulcanización</option>
                           <option value="Traspasos">Traspasos</option>
                           <option value="Apoyo Centro">Apoyo Centro</option>
-                          <option value="SPID">SPID</option>
+                          <option value="SPID don salva">SPID don salva</option>
+                          <option value="SPID la dehesa">SPID la dehesa</option>
+                          <option value="SPID la florida">SPID la florida</option>
                           <option value="Otro">Otro (anotar personalización)</option>
                         </select>
                       </td>

@@ -11,6 +11,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from './ui/Button';
 import { usePlanningStore, normalizeDate } from '../store/planningStore';
+import { useTiendasCriticasStore, normalizeDestino } from '../store/tiendasCriticasStore';
 import { useAuthStore } from '../store/authStore';
 import { supabase } from '../lib/supabase';
 import DriveTimeMachineButton from './DriveTimeMachineButton';
@@ -130,15 +131,45 @@ export function dmyToIso(dmyStr) {
   return clean;
 }
 
-// Retorna la fecha actual en Chile como 'YYYY-MM-DD'
+// Retorna la fecha actual en Chile como 'YYYY-MM-DD' de forma determinística
 export function getChileLocalDateString(date = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Santiago',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).format(date);
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Santiago',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).formatToParts(date);
+    const y = parts.find(p => p.type === 'year')?.value;
+    const m = parts.find(p => p.type === 'month')?.value;
+    const d = parts.find(p => p.type === 'day')?.value;
+    if (y && m && d) return `${y}-${m}-${d}`;
+  } catch (e) {}
+  return new Date(date.getTime() - 3 * 3600 * 1000).toISOString().slice(0, 10);
 }
+
+const ESTATUS_CACHE_KEY = 'keylogistics_estatus_diario_cache_v1';
+
+const saveEstatusLocalCache = (record) => {
+  try {
+    if (record) localStorage.setItem(ESTATUS_CACHE_KEY, JSON.stringify(record));
+  } catch (e) {}
+};
+
+const loadEstatusLocalCache = () => {
+  try {
+    const raw = localStorage.getItem(ESTATUS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const clearEstatusLocalCache = () => {
+  try {
+    localStorage.removeItem(ESTATUS_CACHE_KEY);
+  } catch (e) {}
+};
 
 // Formatea el timestamp ISO al horario de actualización en Chile (DD-MM-YYYY HH:mm:ss)
 export function formatUpdateTimestamp(isoString) {
@@ -234,6 +265,7 @@ export default function EstatusDiario() {
     const applyRemoteRecord = (record, updatedAt = null, notifyUser = false) => {
       if (!isMounted) return;
       if (!isEstatusRecordValid(record)) {
+        clearEstatusLocalCache();
         if (lastSavedAtRef.current !== null) {
           lastSavedAtRef.current = null;
           lastUpdatedAtRef.current = null;
@@ -244,6 +276,7 @@ export default function EstatusDiario() {
         return;
       }
 
+      saveEstatusLocalCache(record);
       const incomingStamp = record.savedAt || updatedAt || '';
       const isNewUpdate = incomingStamp && incomingStamp !== lastSavedAtRef.current;
 
@@ -272,6 +305,7 @@ export default function EstatusDiario() {
 
     const handleRemoteClear = (notifyUser = false) => {
       if (!isMounted) return;
+      clearEstatusLocalCache();
       if (lastSavedAtRef.current !== null) {
         lastSavedAtRef.current = null;
         lastUpdatedAtRef.current = null;
@@ -283,6 +317,12 @@ export default function EstatusDiario() {
         }
       }
     };
+
+    // Cargar caché local inmediatamente mientras se consulta Supabase
+    const cachedRecord = loadEstatusLocalCache();
+    if (cachedRecord && isEstatusRecordValid(cachedRecord)) {
+      applyRemoteRecord(cachedRecord, cachedRecord.savedAt, false);
+    }
 
     // 1. Cargar o verificar estatus activo en Supabase
     const loadRemoteStatus = async (isBackgroundCheck = false) => {
@@ -313,7 +353,11 @@ export default function EstatusDiario() {
           .eq('fecha', '__estatus_diario__')
           .maybeSingle();
 
-        if (error || !isMounted) return;
+        if (error) {
+          console.warn('Error consultando __estatus_diario__ en Supabase:', error);
+          return;
+        }
+        if (!isMounted) return;
 
         if (data && data.assignments) {
           applyRemoteRecord(data.assignments, data.updated_at, isBackgroundCheck);
@@ -410,6 +454,7 @@ export default function EstatusDiario() {
   const handleResetStatus = async () => {
     if (!window.confirm('¿Deseas reiniciar y limpiar el estatus diario para todos los computadores?')) return;
     try {
+      clearEstatusLocalCache();
       lastSavedAtRef.current = null;
       lastUpdatedAtRef.current = null;
       setProcessedData(null);
@@ -433,11 +478,13 @@ export default function EstatusDiario() {
     }
   };
 
-  // Integración con Disponibilización
+  // Integración con Disponibilización y Tiendas Críticas
   const { transmittedAssignments, savedRuteoByDate, initPlanningFromDb } = usePlanningStore();
+  const { findTiendaCritica } = useTiendasCriticasStore();
   const [dispRowsFromDb, setDispRowsFromDb] = useState(null);
   const [isLoadingDisp, setIsLoadingDisp] = useState(false);
   const [showUncoveredModal, setShowUncoveredModal] = useState(false);
+  const [showRedespachosModal, setShowRedespachosModal] = useState(false);
 
   useEffect(() => {
     initPlanningFromDb?.();
@@ -935,13 +982,117 @@ export default function EstatusDiario() {
         _avanceNum: pctGlobal
       });
 
+      // 5. Tiendas con Redespacho (Estado contiene REDESPACHO)
+      const redespachosList = allRows
+        .filter(r => r.Estado === 'REDESPACHO' || r.Estado.includes('REDESPACHO'))
+        .map(r => ({
+          cuenta: r.Cuenta,
+          ruta: r.Ruta,
+          destino: r.Destino || '-',
+          estado: r.Estado
+        }));
+      const redespachosCount = redespachosList.length;
+
+      // 6. Obtener filas del Ruteo del día para calcular Críticos Entregados y métricas de Disponibilización
+      const targetDmy = isoToDmy(isoTarget);
+      const cleanF = normalizeDate(targetDmy) || targetDmy;
+      let ruteoRowsForDate = null;
+
+      if (normalizeDate(activeDispDate) === cleanF && activeDispRows && activeDispRows.length > 0) {
+        ruteoRowsForDate = activeDispRows;
+      } else if (transmittedAssignments?.[cleanF]?.length > 0) {
+        ruteoRowsForDate = transmittedAssignments[cleanF];
+      } else if (transmittedAssignments?.[targetDmy]?.length > 0) {
+        ruteoRowsForDate = transmittedAssignments[targetDmy];
+      } else if (savedRuteoByDate?.[cleanF]?.length > 0) {
+        ruteoRowsForDate = savedRuteoByDate[cleanF];
+      } else if (savedRuteoByDate?.[targetDmy]?.length > 0) {
+        ruteoRowsForDate = savedRuteoByDate[targetDmy];
+      }
+
+      if (!ruteoRowsForDate) {
+        try {
+          const { data: dData } = await supabase
+            .from('planning_assignments')
+            .select('*')
+            .or(`fecha.eq.${cleanF},fecha.eq.${targetDmy}`);
+          if (dData && dData.length > 0) {
+            const found = dData.find(d => Array.isArray(d.assignments) && d.assignments.length > 0);
+            if (found && found.assignments.length > 0) {
+              ruteoRowsForDate = found.assignments;
+            }
+          }
+        } catch (mErr) {
+          console.warn('Error al consultar ruteo/disponibilización del día:', mErr);
+        }
+      }
+
+      // Identificar destinos que son Tiendas Críticas en el Ruteo del día
+      const ruteoCriticasNormSet = new Set();
+      const ruteoCriticasIds = new Set();
+      if (Array.isArray(ruteoRowsForDate)) {
+        ruteoRowsForDate.forEach(r => {
+          (r.paradas || []).forEach(p => {
+            if (!p?.destino) return;
+            const matchedCritica = findTiendaCritica(p.destino);
+            if (matchedCritica) {
+              const normP = normalizeDestino(p.destino);
+              if (normP) ruteoCriticasNormSet.add(normP);
+              const normM = normalizeDestino(matchedCritica.destino);
+              if (normM) ruteoCriticasNormSet.add(normM);
+              ruteoCriticasIds.add(matchedCritica.id || normM);
+            }
+          });
+          if (r.ruteo_destino_prioritario) {
+            String(r.ruteo_destino_prioritario).split('/').forEach(part => {
+              const trimmed = part.trim();
+              if (!trimmed) return;
+              const matchedCritica = findTiendaCritica(trimmed);
+              if (matchedCritica) {
+                const normP = normalizeDestino(trimmed);
+                if (normP) ruteoCriticasNormSet.add(normP);
+                const normM = normalizeDestino(matchedCritica.destino);
+                if (normM) ruteoCriticasNormSet.add(normM);
+                ruteoCriticasIds.add(matchedCritica.id || normM);
+              }
+            });
+          }
+        });
+      }
+
+      const criticosRows = ruteoCriticasNormSet.size > 0
+        ? allRows.filter(row => {
+            if (!row.Destino) return false;
+            const normRowDest = normalizeDestino(row.Destino);
+            if (!normRowDest) return false;
+            if (ruteoCriticasNormSet.has(normRowDest)) return true;
+            for (const critNorm of ruteoCriticasNormSet) {
+              if (normRowDest.length >= 5 && critNorm.length >= 5) {
+                if (normRowDest.includes(critNorm) || critNorm.includes(normRowDest)) return true;
+              }
+            }
+            const matched = findTiendaCritica(row.Destino);
+            return matched ? ruteoCriticasIds.has(matched.id || normalizeDestino(matched.destino)) : false;
+          })
+        : [];
+
+      const criticosTotal = criticosRows.length;
+      const criticosExitosos = criticosRows.filter(r => ESTADOS_AVANCE_GLOBAL.has(r.Estado)).length;
+      const pctCriticos = criticosTotal > 0 ? (criticosExitosos / criticosTotal) * 100 : 0;
+
       const dataToSave = {
-        fechaCorteDmy: isoToDmy(isoTarget),
+        fechaCorteDmy: targetDmy,
         fechaIso: isoTarget,
         totalRegistros: allRows.length,
         totalCuentas: cuentasUnicas.length,
         grandExitosos,
         pctGlobal,
+        criticosTotal,
+        criticosExitosos,
+        pctCriticos,
+        ruteoCriticosCount: ruteoCriticasNormSet.size,
+        redespachosCount,
+        redespachosList,
         rep1,
         rep2,
         rep3,
@@ -954,44 +1105,30 @@ export default function EstatusDiario() {
       // Calcular métricas de disponibilización actuales para persistirlas junto con el reporte
       let metricsToSave = dispMetrics.hasData ? dispMetrics : null;
 
-      // Si no estaban calculadas aún, intentar obtenerlas de activeDispRows o de Supabase directamente
-      if (!metricsToSave) {
-        try {
-          const cleanF = normalizeDate(isoToDmy(isoTarget)) || isoToDmy(isoTarget);
-          const { data: dData } = await supabase
-            .from('planning_assignments')
-            .select('*')
-            .or(`fecha.eq.${cleanF},fecha.eq.${isoToDmy(isoTarget)}`);
-          if (dData && dData.length > 0) {
-            const found = dData.find(d => Array.isArray(d.assignments) && d.assignments.length > 0);
-            if (found && found.assignments.length > 0) {
-              const cubiertas = [];
-              const noCubiertas = [];
-              found.assignments.forEach(r => {
-                const cond = String(r.conductor_name || r.conductor || '').trim();
-                const hasCond = cond !== '' && cond.toLowerCase() !== 'sin asignar';
-                const cam = String(r.camion || r.patente || '').trim();
-                const hasCam = cam !== '' && cam.toLowerCase() !== 'sin asignar';
-                if (hasCond && hasCam) {
-                  cubiertas.push(r);
-                } else {
-                  noCubiertas.push({ ...r, missingCond: !hasCond, missingCam: !hasCam });
-                }
-              });
-              metricsToSave = {
-                total: found.assignments.length,
-                cubiertas: cubiertas.length,
-                noCubiertas: noCubiertas.length,
-                pctCubiertas: (cubiertas.length / found.assignments.length) * 100,
-                rutasCubiertas: cubiertas,
-                rutasNoCubiertas: noCubiertas,
-                hasData: true
-              };
-            }
+      // Si no estaban calculadas aún, computarlas desde ruteoRowsForDate
+      if (!metricsToSave && Array.isArray(ruteoRowsForDate) && ruteoRowsForDate.length > 0) {
+        const cubiertas = [];
+        const noCubiertas = [];
+        ruteoRowsForDate.forEach(r => {
+          const cond = String(r.conductor_name || r.conductor || '').trim();
+          const hasCond = cond !== '' && cond.toLowerCase() !== 'sin asignar';
+          const cam = String(r.camion || r.patente || '').trim();
+          const hasCam = cam !== '' && cam.toLowerCase() !== 'sin asignar';
+          if (hasCond && hasCam) {
+            cubiertas.push(r);
+          } else {
+            noCubiertas.push({ ...r, missingCond: !hasCond, missingCam: !hasCam });
           }
-        } catch (mErr) {
-          console.warn('Error al computar metricsToSave:', mErr);
-        }
+        });
+        metricsToSave = {
+          total: ruteoRowsForDate.length,
+          cubiertas: cubiertas.length,
+          noCubiertas: noCubiertas.length,
+          pctCubiertas: (cubiertas.length / ruteoRowsForDate.length) * 100,
+          rutasCubiertas: cubiertas,
+          rutasNoCubiertas: noCubiertas,
+          hasData: true
+        };
       }
 
       if (metricsToSave) {
@@ -1027,6 +1164,7 @@ export default function EstatusDiario() {
         uploadedBy: user?.name || user?.username || 'Usuario'
       };
 
+      saveEstatusLocalCache(payload);
       lastSavedAtRef.current = nowIso;
       lastUpdatedAtRef.current = nowIso;
 
@@ -1601,25 +1739,86 @@ export default function EstatusDiario() {
                   </p>
                 </div>
 
-                {/* TARJETA 3: FECHA DE CORTE */}
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Fecha Corte</span>
-                    <Calendar size={15} className="text-blue-500" />
-                  </div>
-                  <p className="text-2xl font-black text-slate-800 mt-2">{processedData.fechaCorteDmy}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5 truncate">Día de corte normalizado</p>
-                </div>
+                {/* TARJETA 3: TIENDAS CON REDESPACHOS */}
+                {(() => {
+                  const redespachos = processedData.redespachosList || [];
+                  const redCount = processedData.redespachosCount ?? redespachos.length;
+                  const hasRedespacho = redCount > 0;
+                  return (
+                    <div
+                      className={`p-3.5 rounded-xl border shadow-2xs transition-colors ${
+                        hasRedespacho
+                          ? 'bg-red-600 border-red-700 text-white'
+                          : 'bg-white border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          className={`text-[10px] font-black uppercase tracking-wider ${
+                            hasRedespacho ? 'text-red-100' : 'text-slate-500'
+                          }`}
+                        >
+                          Tiendas con redespachos
+                        </span>
+                        <AlertTriangle size={15} className={hasRedespacho ? 'text-white' : 'text-slate-400'} />
+                      </div>
+                      <div className="mt-2 flex items-baseline justify-between gap-2">
+                        <p className={`text-2xl font-black ${hasRedespacho ? 'text-white' : 'text-slate-800'}`}>
+                          {redCount}
+                        </p>
+                        {hasRedespacho && (
+                          <button
+                            type="button"
+                            onClick={() => setShowRedespachosModal(true)}
+                            className="text-[10px] font-bold text-red-700 bg-white hover:bg-red-50 px-2 py-0.5 rounded-md flex items-center gap-1 transition-all no-export"
+                            title="Ver detalle de tiendas con redespacho"
+                          >
+                            <Eye size={11} />
+                            <span>Ver</span>
+                          </button>
+                        )}
+                      </div>
+                      {hasRedespacho ? (
+                        <div className="mt-1.5 max-h-14 overflow-y-auto space-y-0.5 pr-1">
+                          {redespachos.map((r, idx) => (
+                            <p key={idx} className="text-[10px] text-red-50 font-semibold leading-tight truncate" title={`${r.destino} (${r.cuenta})`}>
+                              • {r.destino || r.cuenta}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-slate-400 mt-0.5 truncate">Sin redespachos detectados</p>
+                      )}
+                    </div>
+                  );
+                })()}
 
-                {/* TARJETA 4: TOTAL REGISTROS */}
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Total Registros</span>
-                    <Layers size={15} className="text-indigo-500" />
-                  </div>
-                  <p className="text-2xl font-black text-slate-800 mt-2">{processedData.totalRegistros}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5 truncate">En {processedData.totalCuentas} cuentas activas</p>
-                </div>
+                {/* TARJETA 4: CRÍTICOS ENTREGADOS */}
+                {(() => {
+                  const pctCrit = processedData.pctCriticos ?? 0;
+                  const critExitosos = processedData.criticosExitosos ?? 0;
+                  const critTotal = processedData.criticosTotal ?? 0;
+                  return (
+                    <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Críticos entregados</span>
+                        <ShieldCheck size={15} className="text-indigo-500" />
+                      </div>
+                      <p className="text-2xl font-black text-slate-800 mt-2">{pctCrit.toFixed(2)}%</p>
+                      <div className="w-full bg-slate-100 rounded-full h-1 mt-2 overflow-hidden">
+                        <div
+                          className="bg-indigo-500 h-1 rounded-full transition-all duration-500"
+                          style={{ width: `${Math.min(pctCrit, 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1 truncate">
+                        {critTotal > 0
+                          ? `${critExitosos} / ${critTotal} tiendas críticas`
+                          : 'Sin tiendas críticas en ruteo'}
+                      </p>
+                    </div>
+                  );
+                })()}
 
                 {/* TARJETA 5: ENTREGAS EXITOSAS */}
                 <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
@@ -2436,6 +2635,71 @@ export default function EstatusDiario() {
             <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
               <Button
                 onClick={() => setShowUncoveredModal(false)}
+                className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-1.5 rounded-lg"
+              >
+                Cerrar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Detalle Tiendas con Redespacho */}
+      {showRedespachosModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-red-200 overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in duration-200">
+            <div className="p-4 bg-red-50 border-b border-red-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-red-600 text-white flex items-center justify-center font-bold">
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-red-900">
+                    Tiendas con Redespacho ({processedData?.fechaCorteDmy || fechaCorte})
+                  </h3>
+                  <p className="text-xs text-red-700">
+                    {(processedData?.redespachosList || []).length} registro(s) con estado REDESPACHO en el Excel
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowRedespachosModal(false)}
+                className="w-8 h-8 rounded-lg text-red-400 hover:text-red-700 hover:bg-red-100 flex items-center justify-center transition-all"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 overflow-y-auto flex-1">
+              <table className="w-full text-xs text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-700 font-bold text-[11px] uppercase">
+                    <th className="py-2.5 px-3 border-b border-slate-200">Cuenta</th>
+                    <th className="py-2.5 px-3 border-b border-slate-200">Ruta</th>
+                    <th className="py-2.5 px-3 border-b border-slate-200">Destino / Tienda</th>
+                    <th className="py-2.5 px-3 border-b border-slate-200">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(processedData?.redespachosList || []).map((r, i) => (
+                    <tr key={i} className="hover:bg-red-50/40">
+                      <td className="py-2.5 px-3 font-bold text-slate-800">{r.cuenta || '-'}</td>
+                      <td className="py-2.5 px-3 text-slate-600">{r.ruta || '-'}</td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-800">{r.destino || '-'}</td>
+                      <td className="py-2.5 px-3">
+                        <span className="text-[11px] font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
+                          {r.estado}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <Button
+                onClick={() => setShowRedespachosModal(false)}
                 className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-1.5 rounded-lg"
               >
                 Cerrar
