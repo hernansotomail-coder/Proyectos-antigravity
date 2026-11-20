@@ -2,6 +2,66 @@
 // Vincula cada número de Ruta con su Operación, Denominación y Transportista oficial
 
 export const ROUTE_OPERATIONS_MAP = {
+  "3901": {
+    "ruta": "3901",
+    "denominacion": "RUTA PEDIDOS YA 01",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3902": {
+    "ruta": "3902",
+    "denominacion": "RUTA PEDIDOS YA 02",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3903": {
+    "ruta": "3903",
+    "denominacion": "RUTA PEDIDOS YA 03",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3904": {
+    "ruta": "3904",
+    "denominacion": "RUTA PEDIDOS YA 04",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3905": {
+    "ruta": "3905",
+    "denominacion": "RUTA PEDIDOS YA 05",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3906": {
+    "ruta": "3906",
+    "denominacion": "RUTA PEDIDOS YA 06",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3907": {
+    "ruta": "3907",
+    "denominacion": "RUTA PEDIDOS YA 07",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3908": {
+    "ruta": "3908",
+    "denominacion": "RUTA PEDIDOS YA 08",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3909": {
+    "ruta": "3909",
+    "denominacion": "RUTA PEDIDOS YA 09",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
+  "3910": {
+    "ruta": "3910",
+    "denominacion": "RUTA PEDIDOS YA 10",
+    "operacion": "Pedidos Ya",
+    "transportista": "T411"
+  },
   "1401": {
     "ruta": "1401",
     "denominacion": "RUTA SBARRO COPEC 01",
@@ -8568,6 +8628,12 @@ export function resolveOperationByTransportistaAndOwner({ transportista = '', ow
     return 'Sbarro';
   }
 
+  // 4b. Pedidos Ya: T411 o rutas 3901 a 3910
+  const baseRutaNum = parseInt(baseRuta, 10);
+  if (cleanTransp === 'T411' || (!isNaN(baseRutaNum) && baseRutaNum >= 3901 && baseRutaNum <= 3910)) {
+    return 'Pedidos Ya';
+  }
+
   // 5. Resto de transportistas de la tabla maestra
   if (TRANSPORTISTA_MASTER_INFO[cleanTransp]) {
     return TRANSPORTISTA_MASTER_INFO[cleanTransp].operacion;
@@ -8623,6 +8689,7 @@ export function resolveClienteForStop(parada, parentRoute = {}) {
   if (destUpper.includes('JUAN VALDEZ')) return 'Juan Valdez';
   if (destUpper.includes('SUBWAY')) return 'Subway';
   if (destUpper.includes('OXXO')) return 'Oxxo';
+  if (destUpper.includes('PEDIDOS YA')) return 'Pedidos Ya';
   if (/SHELL|PRONTO|EXPRESS|ASTOP|COPEC|ENEX|UPA|UPITA/.test(destUpper)) return 'Petroleras';
 
   const canon = canonicalizeOperation(fallback);
@@ -8887,6 +8954,16 @@ export function findOperationForRoute(routeCode) {
     };
   }
 
+  // Rutas 3901 a 3910 -> Pedidos Ya (T411)
+  if (!isNaN(num) && num >= 3901 && num <= 3910) {
+    return {
+      ruta: String(num),
+      denominacion: `RUTA PEDIDOS YA ${String(num - 3900).padStart(2, '0')}`,
+      operacion: 'Pedidos Ya',
+      transportista: 'T411'
+    };
+  }
+
   const entry = ROUTE_OPERATIONS_MAP[key] || ROUTE_OPERATIONS_MAP[clean] || null;
   if (entry && entry.transportista === 'T311') {
     return {
@@ -8954,6 +9031,12 @@ export function getAllOperationsForRoute(r) {
   const num = parseInt(rawRuta.replace(/\D/g, ''), 10);
   if (!isNaN(num) && num >= 1500 && num <= 1549) {
     ops.add('El Golfo');
+    return Array.from(ops);
+  }
+
+  // 1b. Rutas 3901 a 3910 siempre "Pedidos Ya"
+  if (!isNaN(num) && num >= 3901 && num <= 3910) {
+    ops.add('Pedidos Ya');
     return Array.from(ops);
   }
 

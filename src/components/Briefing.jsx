@@ -150,6 +150,15 @@ export const getBriefingOperation = (route) => {
     return 'El Golfo';
   }
 
+  // 8b. Pedidos Ya: rutas 3901 a 3910 o transportista T411
+  if (rawTransp === 'T411' || (!isNaN(rutaNum) && rutaNum >= 3901 && rutaNum <= 3910)) {
+    return 'Pedidos Ya';
+  }
+  const anyPedidosYa = [rawRuta, rawClient, rawDenom, rawOp].some(val => {
+    return String(val || '').trim().toUpperCase().includes('PEDIDOS YA');
+  });
+  if (anyPedidosYa) return 'Pedidos Ya';
+
   // 9. Rutas explícitas de Newrest para Pase de Ingreso y Briefing
   if (NEWREST_PASE_ROUTES.has(rawRuta) || (cleanRutaStr && NEWREST_PASE_ROUTES.has(cleanRutaStr)) || rawTransp === 'T502') {
     return 'Newrest ByI';
@@ -273,6 +282,7 @@ export const normalizeClientForBriefing = (rawName) => {
   if (upper.startsWith('ESPECIALES CARLS') || upper.startsWith('ESPECIAL CARLS') || upper.includes('ESPECIALES CARLS')) return 'Carls Jr';
   if (upper.startsWith('SBW') || upper.includes('SBW REDESPACHO') || upper.startsWith('SUBWAY')) return 'Subway';
   if (upper.includes('SPID')) return 'SPID';
+  if (upper.includes('PEDIDOS YA')) return 'Pedidos Ya';
   const cleaned = cleanBriefingOperationName(rawName);
   return getOperacionName('', cleaned || rawName);
 };
