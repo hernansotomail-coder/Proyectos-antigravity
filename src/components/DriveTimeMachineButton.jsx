@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Cloud, History, Calendar, Download, UploadCloud, Trash2, 
   CheckCircle2, AlertTriangle, RefreshCw, X, FolderArchive, 
-  HardDrive, Search, Eye, Database, CheckSquare, Square
+  HardDrive, Search, Eye, Database, CheckSquare, Square, Server
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { 
@@ -305,8 +305,8 @@ export default function DriveTimeMachineButton({
           } ${compact ? 'px-2.5 py-1 text-[11px] h-7.5' : 'px-3 py-1.5 text-xs'}`}
           title="Consultar fechas históricas guardadas en Google Drive o archivar datos de más de 1 mes para liberar espacio en Supabase"
         >
-          <History size={compact ? 13 : 15} className={isCurrentDateFromDrive ? 'text-amber-100' : 'text-indigo-600'} />
-          <span>{isCurrentDateFromDrive ? `Drive: ${cleanActiveDate}` : 'Consulta Temporal (Drive)'}</span>
+          <Server size={compact ? 13 : 15} className={isCurrentDateFromDrive ? 'text-amber-100' : 'text-indigo-600'} />
+          <span>{isCurrentDateFromDrive ? `Drive: ${cleanActiveDate}` : 'Consultar'}</span>
         </button>
 
         {isCurrentDateFromDrive && (

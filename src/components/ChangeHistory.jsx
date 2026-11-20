@@ -34,8 +34,6 @@ export default function ChangeHistory() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterUser, setFilterUser] = useState('TODOS');
-  const [filterConductor, setFilterConductor] = useState('TODOS');
-  const [filterCamion, setFilterCamion] = useState('TODOS');
 
   // Multi-selection de filas para eliminación masiva
   const [selectedIds, setSelectedIds] = useState([]);
@@ -71,14 +69,8 @@ export default function ChangeHistory() {
     return sortDatesDescending(Array.from(s));
   }, [changeHistoryList, savedRuteoByDate, transmittedAssignments, savedHistoryList]);
 
-  // Predeterminado: siempre la fecha más reciente
-  const [filterDate, setFilterDate] = useState(() => availableDates[0] || '28-10-2026');
-
-  useEffect(() => {
-    if (availableDates.length > 0 && filterDate !== 'TODAS' && (!filterDate || !availableDates.includes(filterDate))) {
-      setFilterDate(availableDates[0]);
-    }
-  }, [availableDates, filterDate]);
+  // Predeterminado: mostrar todas las fechas para visualizar los cambios inmediatamente
+  const [filterDate, setFilterDate] = useState('TODAS');
 
   const availableUsers = useMemo(() => {
     const s = new Set();
@@ -88,33 +80,11 @@ export default function ChangeHistory() {
     return Array.from(s).sort();
   }, [changeHistoryList]);
 
-  const availableConductores = useMemo(() => {
-    const s = new Set();
-    changeHistoryList.forEach(item => {
-      if (item.conductorModificado && item.conductorModificado !== 'Sin Asignar') {
-        s.add(item.conductorModificado);
-      }
-    });
-    return Array.from(s).sort();
-  }, [changeHistoryList]);
-
-  const availableCamiones = useMemo(() => {
-    const s = new Set();
-    changeHistoryList.forEach(item => {
-      if (item.camionModificado && item.camionModificado !== 'Sin Asignar') {
-        s.add(item.camionModificado);
-      }
-    });
-    return Array.from(s).sort();
-  }, [changeHistoryList]);
-
   // Filtered change records
   const filteredRecords = useMemo(() => {
     return changeHistoryList.filter(item => {
       if (filterDate !== 'TODAS' && normalizeDate(item.fechaPlanificacion) !== normalizeDate(filterDate)) return false;
       if (filterUser !== 'TODOS' && item.usuario !== filterUser) return false;
-      if (filterConductor !== 'TODOS' && item.conductorModificado !== filterConductor) return false;
-      if (filterCamion !== 'TODOS' && item.camionModificado !== filterCamion) return false;
 
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
@@ -127,13 +97,7 @@ export default function ChangeHistory() {
       }
       return true;
     });
-  }, [changeHistoryList, filterDate, filterUser, filterConductor, filterCamion, searchTerm]);
-
-  // KPIs
-  const totalModificaciones = changeHistoryList.length;
-  const rutasDistintas = useMemo(() => {
-    return new Set(changeHistoryList.map(item => item.ruta)).size;
-  }, [changeHistoryList]);
+  }, [changeHistoryList, filterDate, filterUser, searchTerm]);
 
   // Manejo de Selección para borrado
   const allFilteredSelected = useMemo(() => {
@@ -326,49 +290,6 @@ export default function ChangeHistory() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-hidden">
-          
-          {/* Top KPI Stat Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 shrink-0">
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Cambios</p>
-                <p className="text-2xl font-black text-slate-800">{totalModificaciones}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                <History size={20} />
-              </div>
-            </div>
-
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rutas Auditadas</p>
-                <p className="text-2xl font-black text-indigo-700">{rutasDistintas}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                <Layers size={20} />
-              </div>
-            </div>
-
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fechas Registradas</p>
-                <p className="text-2xl font-black text-emerald-700">{availableDates.length}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <Calendar size={20} />
-              </div>
-            </div>
-
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Usuarios Modificadores</p>
-                <p className="text-2xl font-black text-purple-700">{availableUsers.length}</p>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
-                <User size={20} />
-              </div>
-            </div>
-          </div>
 
           {/* Filters Bar */}
           <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3 shrink-0">
@@ -416,38 +337,12 @@ export default function ChangeHistory() {
                 ))}
               </select>
 
-              {/* Conductor Filter */}
-              <select
-                value={filterConductor}
-                onChange={(e) => setFilterConductor(e.target.value)}
-                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 focus:outline-none max-w-[160px]"
-              >
-                <option value="TODOS">Conductor: Todos</option>
-                {availableConductores.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-
-              {/* Camión Filter */}
-              <select
-                value={filterCamion}
-                onChange={(e) => setFilterCamion(e.target.value)}
-                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-slate-50 text-slate-700 focus:outline-none max-w-[140px]"
-              >
-                <option value="TODOS">Camión: Todos</option>
-                {availableCamiones.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-
-              {(searchTerm || filterDate !== 'TODAS' || filterUser !== 'TODOS' || filterConductor !== 'TODOS' || filterCamion !== 'TODOS') && (
+              {(searchTerm || filterDate !== 'TODAS' || filterUser !== 'TODOS') && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setFilterDate('TODAS');
                     setFilterUser('TODOS');
-                    setFilterConductor('TODOS');
-                    setFilterCamion('TODOS');
                   }}
                   className="text-xs text-red-600 hover:text-red-800 font-bold px-2 py-1 hover:bg-red-50 rounded"
                 >

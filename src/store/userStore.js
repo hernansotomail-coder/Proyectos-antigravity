@@ -175,6 +175,7 @@ export const persistUsers = (data) => {
     data.forEach(u => {
       perms[u.username] = {
         can_delete_history: u.role === 'Administrador' || !!u.can_delete_history,
+        can_emit_wash_cert: u.role === 'Administrador' || !!(u.can_emit_wash_cert ?? perms[u.username]?.can_emit_wash_cert),
         menus: u.permissions?.menus || perms[u.username]?.menus || getDefaultPermissionsForRole(u.role).menus,
         auto_lock_10min: u.auto_lock_10min !== undefined ? !!u.auto_lock_10min : !!perms[u.username]?.auto_lock_10min
       };
@@ -221,6 +222,7 @@ export const useUserStore = create((set, get) => ({
             ...u,
             permissions: userPerm,
             can_delete_history: u.role === 'Administrador' || u.username === 'superadmin' || !!userPerm.can_delete_history,
+            can_emit_wash_cert: u.role === 'Administrador' || u.username === 'superadmin' || !!userPerm.can_emit_wash_cert || !!u.can_emit_wash_cert,
             auto_lock_10min: u.auto_lock_10min !== undefined ? !!u.auto_lock_10min : !!userPerm.auto_lock_10min
           };
         });
@@ -259,6 +261,7 @@ export const useUserStore = create((set, get) => ({
     const defaultPerms = getDefaultPermissionsForRole(userData.role || 'Administrativo');
     const userPerms = {
       can_delete_history: isSuperOrAdmin ? true : !!userData.can_delete_history,
+      can_emit_wash_cert: isSuperOrAdmin ? true : !!userData.can_emit_wash_cert,
       menus: userData.menus || defaultPerms.menus,
       auto_lock_10min: !!userData.auto_lock_10min
     };
@@ -276,6 +279,7 @@ export const useUserStore = create((set, get) => ({
           ...res.data[0],
           permissions: userPerms,
           can_delete_history: userPerms.can_delete_history,
+          can_emit_wash_cert: userPerms.can_emit_wash_cert,
           auto_lock_10min: userPerms.auto_lock_10min
         };
       }
@@ -291,6 +295,7 @@ export const useUserStore = create((set, get) => ({
         ...dbPayload, 
         permissions: userPerms, 
         can_delete_history: userPerms.can_delete_history,
+        can_emit_wash_cert: userPerms.can_emit_wash_cert,
         auto_lock_10min: userPerms.auto_lock_10min 
       };
     }
@@ -333,6 +338,7 @@ export const useUserStore = create((set, get) => ({
 
     const userPerms = {
       can_delete_history: isSuperOrAdmin ? true : (updates.can_delete_history !== undefined ? updates.can_delete_history : current?.can_delete_history),
+      can_emit_wash_cert: isSuperOrAdmin ? true : (updates.can_emit_wash_cert !== undefined ? !!updates.can_emit_wash_cert : !!(current?.can_emit_wash_cert ?? current?.permissions?.can_emit_wash_cert)),
       menus: updates.menus !== undefined ? updates.menus : (current?.permissions?.menus || getDefaultPermissionsForRole(updates.role || current.role).menus),
       auto_lock_10min: updates.auto_lock_10min !== undefined ? !!updates.auto_lock_10min : (current?.auto_lock_10min !== undefined ? !!current.auto_lock_10min : !!current?.permissions?.auto_lock_10min)
     };
@@ -361,6 +367,7 @@ export const useUserStore = create((set, get) => ({
       ...dbUpdates, 
       permissions: userPerms,
       can_delete_history: userPerms.can_delete_history,
+      can_emit_wash_cert: userPerms.can_emit_wash_cert,
       auto_lock_10min: userPerms.auto_lock_10min 
     } : u));
 
@@ -385,6 +392,19 @@ export const useUserStore = create((set, get) => ({
     }
     const newStatus = !target.can_delete_history;
     await get().updateUser(id, { can_delete_history: newStatus });
+  },
+
+  toggleEmitWashCertPermission: async (id) => {
+    const target = get().users.find(u => String(u.id) === String(id));
+    if (!target) return;
+    if (target.username === 'superadmin' || target.role === 'Administrador') {
+      toast.info('Los administradores siempre tienen permiso para emitir certificados.');
+      return;
+    }
+    const currentStatus = !!(target.can_emit_wash_cert ?? target.permissions?.can_emit_wash_cert);
+    const newStatus = !currentStatus;
+    await get().updateUser(id, { can_emit_wash_cert: newStatus });
+    toast.success(`Permiso de emisión de certificados ${newStatus ? 'activado' : 'desactivado'} para ${target.username}`);
   },
 
   toggleAutoLock10Min: async (id) => {

@@ -1868,6 +1868,13 @@ export default function RuteoView() {
             <Copy size={15} className="text-indigo-600" />
             Copiar imagen
           </Button>
+
+          {/* Botón Consultar (Google Drive) */}
+          <DriveTimeMachineButton
+            currentMenu="Ruteo"
+            activeDate={activeDate}
+            onSelectDate={(loadedFecha) => setSelectedRuteoDate(loadedFecha)}
+          />
         </div>
       </div>
 
@@ -1976,13 +1983,6 @@ export default function RuteoView() {
               </select>
             </div>
           </div>
-
-          {/* Botón Consulta Temporal (Google Drive) */}
-          <DriveTimeMachineButton
-            currentMenu="Ruteo"
-            activeDate={activeDate}
-            onSelectDate={(loadedFecha) => setSelectedRuteoDate(loadedFecha)}
-          />
 
           {/* 1. FILTRO RÁPIDO PARA BUSCAR POR CUALQUIER COLUMNA (Requisito 1) */}
           <div className="flex flex-col gap-0.5">

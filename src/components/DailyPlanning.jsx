@@ -1015,89 +1015,6 @@ export default function DailyPlanning() {
                     className="pl-9 pr-3 py-1.5 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 w-52 bg-white"
                   />
                 </div>
-
-                {/* Filtro por Tipo de Ruta (Requisito 1: Permitir ver y elegir rutas >4 dígitos y que parten con 0) */}
-                <div className="flex items-center bg-slate-200/60 p-0.5 rounded-xl text-[11px] font-bold">
-                  <button
-                    type="button"
-                    onClick={() => setRouteTypeFilter('all')}
-                    className={`px-2.5 py-1 rounded-lg transition-all ${
-                      routeTypeFilter === 'all'
-                        ? 'bg-white text-blue-700 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Todas ({transformedRoutes.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRouteTypeFilter('standard')}
-                    className={`px-2.5 py-1 rounded-lg transition-all ${
-                      routeTypeFilter === 'standard'
-                        ? 'bg-white text-blue-700 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    4 Dígitos ({standardRoutesCount})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRouteTypeFilter('special')}
-                    className={`px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 ${
-                      routeTypeFilter === 'special'
-                        ? 'bg-amber-50 text-amber-900 border border-amber-300 shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                    title="Rutas con más de 4 dígitos o que inician con 0 (Sin ruteo)"
-                  >
-                    Sin ruteo ({specialRoutesCount})
-                  </button>
-                </div>
-
-                {/* Acciones de selección rápida */}
-                <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                  <span className="font-semibold text-slate-700">
-                    {selectedRouteIds.length} sel.
-                  </span>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    type="button"
-                    onClick={handleSelectAllRoutes}
-                    className="text-blue-600 hover:underline font-bold"
-                  >
-                    Todas
-                  </button>
-                  <span className="text-slate-300">|</span>
-                  <button
-                    type="button"
-                    onClick={handleSelectStandardRoutes}
-                    className="text-slate-600 hover:text-blue-700 hover:underline"
-                    title="Marcar solo rutas estándar de 4 dígitos"
-                  >
-                    Solo 4 Díg.
-                  </button>
-                  {specialRoutesCount > 0 && (
-                    <>
-                      <span className="text-slate-300">|</span>
-                      <button
-                        type="button"
-                        onClick={handleSelectSpecialRoutes}
-                        className="text-amber-700 hover:underline font-bold"
-                        title="Marcar solo rutas con >4 dígitos o que inicien con 0"
-                      >
-                        Solo Espec.
-                      </button>
-                    </>
-                  )}
-                  <span className="text-slate-300">|</span>
-                  <button
-                    type="button"
-                    onClick={handleClearRouteSelection}
-                    className="text-slate-400 hover:text-red-600 hover:underline"
-                  >
-                    Limpiar
-                  </button>
-                </div>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
@@ -1112,16 +1029,6 @@ export default function DailyPlanning() {
                     Modificadas ({countModified})
                   </Button>
                 )}
-
-                {/* Botón Transmitir Seleccionadas (Requisito 1: elegir cuáles transmitir) */}
-                <Button 
-                  onClick={promptTransmitSelected}
-                  className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl shadow-sm"
-                  title="Transmite las rutas que estén seleccionadas mediante las casillas"
-                >
-                  <Send size={13} />
-                  Transmitir a Disponibilización ({selectedRouteIds.length})
-                </Button>
               </div>
             </div>
 

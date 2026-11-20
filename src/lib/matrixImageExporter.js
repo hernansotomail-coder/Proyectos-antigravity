@@ -252,18 +252,18 @@ export function generateBriefingHtmlTable({ rows = [], totals = {}, activeDate =
     rowsHtml += `
     <tr style="background-color: ${rowBg};">
       <td style="${cellL} font-weight: ${isSub ? '600' : 'bold'}; ${isSub ? 'color: #334155;' : 'text-transform: uppercase;'}">${escapeHtml(opLabel)}</td>
-      <td style="${cellC} font-weight: bold; background-color: ${isSub ? '#F1F5F9' : '#EBF3FF'};">${r.numRutas || 0}</td>
-      <td style="${cellC}">${r.propia1v || 0}</td>
-      <td style="${cellC}">${r.externa1v || 0}</td>
-      <td style="${cellC}">${r.propia2v || 0}</td>
-      <td style="${cellC}">${r.externa2v || 0}</td>
-      <td style="${cellC} color: #DC2626; font-weight: bold;">${r.sinCobertura || 0}</td>
+      <td style="${cellC} font-weight: bold; background-color: ${isSub ? '#F1F5F9' : '#EBF3FF'}; color: #1E3A8A;">${r.numRutas || 0}</td>
+      <td style="${cellC} background-color: #EFF6FF; color: #1E3A8A; font-weight: bold;">${r.propia1v || 0}</td>
+      <td style="${cellC} background-color: #FFFBEB; color: #92400E; font-weight: bold;">${r.externa1v || 0}</td>
+      <td style="${cellC} background-color: #EEF2FF; color: #312E81; font-weight: bold;">${r.propia2v || 0}</td>
+      <td style="${cellC} background-color: #FEF3C7; color: #78350F; font-weight: bold;">${r.externa2v || 0}</td>
+      <td style="${cellC} background-color: ${r.sinCobertura > 0 ? '#FEF2F2' : rowBg}; color: ${r.sinCobertura > 0 ? '#DC2626' : '#64748B'}; font-weight: bold;">${r.sinCobertura || 0}</td>
       <td style="${cellR} mso-number-format:'#,##0';">${r.cajas || 0}</td>
       <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.kilos) || 0).toFixed(2)} Kg</td>
-      <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.congeladoM3) || 0).toFixed(2)}</td>
-      <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.refrigeradoM3) || 0).toFixed(2)}</td>
-      <td style="${cellR} mso-number-format:'#,##0.00';">${(Number(r.secoM3) || 0).toFixed(2)}</td>
-      <td style="${cellR} font-weight: bold; mso-number-format:'#,##0.00';">${(Number(r.volumenM3) || 0).toFixed(2)} m3</td>
+      <td style="${cellR} background-color: #EFF6FF; color: #1D4ED8; font-weight: bold; mso-number-format:'#,##0.00';">${(Number(r.congeladoM3) || 0).toFixed(2)}</td>
+      <td style="${cellR} background-color: #ECFEFF; color: #0E7490; font-weight: bold; mso-number-format:'#,##0.00';">${(Number(r.refrigeradoM3) || 0).toFixed(2)}</td>
+      <td style="${cellR} background-color: #FFFBEB; color: #B45309; font-weight: bold; mso-number-format:'#,##0.00';">${(Number(r.secoM3) || 0).toFixed(2)}</td>
+      <td style="${cellR} background-color: #ECFDF5; color: #065F46; font-weight: bold; mso-number-format:'#,##0.00';">${(Number(r.volumenM3) || 0).toFixed(2)} m3</td>
       <td style="${cellC}">${r.numDestinos || 0}</td>
     </tr>`;
 
@@ -951,6 +951,56 @@ export function renderBriefingWithCanvas2D(briefingData) {
 
     let cellX = 0;
     cols.forEach(col => {
+      // Fondo pastel por columna en el PNG igual que en la vista web / Excel
+      let cellBg = bg;
+      let textColor = '#1E293B';
+      let isBold = col.bold;
+
+      if (col.key === 'numRutas') {
+        cellBg = r.isSubRow ? '#F1F5F9' : '#EBF3FF';
+        textColor = '#1E3A8A';
+        isBold = true;
+      } else if (col.key === 'propia1v') {
+        cellBg = '#EFF6FF';
+        textColor = '#1E3A8A';
+        isBold = true;
+      } else if (col.key === 'externa1v') {
+        cellBg = '#FFFBEB';
+        textColor = '#92400E';
+        isBold = true;
+      } else if (col.key === 'propia2v') {
+        cellBg = '#EEF2FF';
+        textColor = '#312E81';
+        isBold = true;
+      } else if (col.key === 'externa2v') {
+        cellBg = '#FEF3C7';
+        textColor = '#78350F';
+        isBold = true;
+      } else if (col.key === 'sinCobertura') {
+        cellBg = r.sinCobertura > 0 ? '#FEF2F2' : bg;
+        textColor = r.sinCobertura > 0 ? '#DC2626' : '#64748B';
+        isBold = true;
+      } else if (col.key === 'congeladoM3') {
+        cellBg = '#EFF6FF';
+        textColor = '#1D4ED8';
+        isBold = true;
+      } else if (col.key === 'refrigeradoM3') {
+        cellBg = '#ECFEFF';
+        textColor = '#0E7490';
+        isBold = true;
+      } else if (col.key === 'secoM3') {
+        cellBg = '#FFFBEB';
+        textColor = '#B45309';
+        isBold = true;
+      } else if (col.key === 'volumenM3') {
+        cellBg = '#ECFDF5';
+        textColor = '#065F46';
+        isBold = true;
+      }
+
+      ctx.fillStyle = cellBg;
+      ctx.fillRect(cellX, currentY, col.width, rowHeight);
+
       ctx.strokeStyle = '#CBD5E1';
       ctx.lineWidth = 1;
       ctx.strokeRect(cellX, currentY, col.width, rowHeight);
@@ -971,8 +1021,8 @@ export function renderBriefingWithCanvas2D(briefingData) {
       else if (col.key === 'volumenM3') text = `${(Number(r.volumenM3) || 0).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} m3`;
       else if (col.key === 'numDestinos') text = String(r.numDestinos || 0);
 
-      ctx.fillStyle = col.key === 'sinCobertura' && r.sinCobertura > 0 ? '#DC2626' : '#1E293B';
-      ctx.font = col.bold ? 'bold 11px "Segoe UI", Arial, sans-serif' : '11px "Segoe UI", Arial, sans-serif';
+      ctx.fillStyle = textColor;
+      ctx.font = isBold ? 'bold 11px "Segoe UI", Arial, sans-serif' : '11px "Segoe UI", Arial, sans-serif';
       ctx.textBaseline = 'middle';
 
       let tx = cellX + 8;

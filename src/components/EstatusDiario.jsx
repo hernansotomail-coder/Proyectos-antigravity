@@ -1123,6 +1123,7 @@ export default function EstatusDiario() {
         totalRegistros: allRows.length,
         totalCuentas: cuentasUnicas.length,
         grandExitosos,
+        grandTotalRep4,
         pctGlobal,
         criticosTotal,
         criticosExitosos,
@@ -1838,7 +1839,7 @@ export default function EstatusDiario() {
                   return (
                     <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Críticos entregados</span>
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Tiendas criticas entregadas</span>
                         <ShieldCheck size={15} className="text-indigo-500" />
                       </div>
                       <p className="text-2xl font-black text-slate-800 mt-2">{pctCrit.toFixed(2)}%</p>
@@ -1857,15 +1858,26 @@ export default function EstatusDiario() {
                   );
                 })()}
 
-                {/* TARJETA 5: ENTREGAS EXITOSAS */}
-                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Entregas Exitosas</span>
-                    <CheckCircle2 size={15} className="text-emerald-500" />
-                  </div>
-                  <p className="text-2xl font-black text-emerald-600 mt-2">{processedData.grandExitosos}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5 truncate">Estados de avance global</p>
-                </div>
+                {/* TARJETA 5: TIENDAS CON ENTREGAS EXITOSAS */}
+                {(() => {
+                  const totalTiendasRep4 =
+                    processedData.grandTotalRep4 ??
+                    processedData.rep4?.find(r => r['Cuenta de destino'] === 'Total General')?.['Total General'] ??
+                    processedData.totalRegistros ??
+                    0;
+                  return (
+                    <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Tiendas con entregas exitosas</span>
+                        <CheckCircle2 size={15} className="text-emerald-500" />
+                      </div>
+                      <p className="text-2xl font-black text-emerald-600 mt-2">
+                        {processedData.grandExitosos}/{totalTiendasRep4}
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5 truncate">Estados de avance global</p>
+                    </div>
+                  );
+                })()}
 
                 {/* TARJETA 6: AVANCE GENERAL */}
                 <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">

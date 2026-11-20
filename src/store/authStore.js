@@ -21,6 +21,25 @@ export const canUserDeleteHistory = (user) => {
   return false;
 };
 
+export const canUserEmitWashCert = (user) => {
+  if (!user) return false;
+  const username = String(user.username || '').trim().toLowerCase();
+  if (username === 'superadmin') return true;
+  if (user.role === 'Administrador') return true;
+  if (user.can_emit_wash_cert === true || user.permissions?.can_emit_wash_cert === true) return true;
+
+  try {
+    const saved = localStorage.getItem('keylogistics_user_permissions');
+    if (saved) {
+      const perms = JSON.parse(saved);
+      if (perms[username]?.can_emit_wash_cert === true) return true;
+      if (user.id && perms[user.id]?.can_emit_wash_cert === true) return true;
+    }
+  } catch (e) {}
+
+  return false;
+};
+
 // Verificar si el usuario tiene permiso para VER un menú
 export const canUserViewMenu = (user, menuKey) => {
   if (!user) return false;
@@ -204,6 +223,7 @@ export const useAuthStore = create((set, get) => ({
           ...foundUser,
           permissions: permissions || { menus: {} },
           can_delete_history: isSuperOrAdmin ? true : (permissions?.can_delete_history === true || foundUser.can_delete_history === true),
+          can_emit_wash_cert: isSuperOrAdmin ? true : (permissions?.can_emit_wash_cert === true || foundUser.can_emit_wash_cert === true),
           auto_lock_10min: permissions?.auto_lock_10min === true || foundUser.auto_lock_10min === true
         };
 

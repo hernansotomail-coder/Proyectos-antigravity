@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
 import { supabase } from '../lib/supabase';
 import { useFleetStore, isVehicleExternal } from '../store/fleetStore';
+import { useAuthStore, canUserEmitWashCert } from '../store/authStore';
 import { matchVehicleByCode, normalizeVehicleCode } from '../lib/vehicleMatcher';
 import {
   generateAndSaveCertificatePdf,
@@ -197,6 +198,8 @@ const getServiceBadgeConfig = (serviceName) => {
 
 export default function WashCertification() {
   const { fleetList, fetchFleet, updateSingleFleetWash } = useFleetStore();
+  const { user } = useAuthStore();
+  const canEmitCert = useMemo(() => canUserEmitWashCert(user), [user]);
 
   const [records, setRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -354,12 +357,32 @@ export default function WashCertification() {
 
         const certInfo = getCert30DayStatus(truck.ultima_certificacion, todayChileYmd);
 
+        // Criterio "Emisión de certificado":
+        // 1) ¿Camión tiene emisión de certificación entre los 30 días? -> Si es NO (vencida o sin_cert)
+        // 2) ¿La fecha del último lavado es como máximo 3 días antes de la fecha actual? -> Si es SÍ
+        const hasCertWithin30Days = certInfo.status === 'al_dia' || certInfo.status === 'por_vencer';
+        const washDateStr = lastTelegramWash?.chileDateOnly || truck.fecha_ultimo_lavado || '';
+        const washDateParsed = parseDateOnly(washDateStr);
+        const todayParsed = parseDateOnly(todayChileYmd) || new Date();
+        let daysSinceWash = null;
+        if (washDateParsed) {
+          const t0 = new Date(todayParsed.getTime());
+          const w0 = new Date(washDateParsed.getTime());
+          t0.setHours(0, 0, 0, 0);
+          w0.setHours(0, 0, 0, 0);
+          daysSinceWash = Math.floor((t0.getTime() - w0.getTime()) / (1000 * 60 * 60 * 24));
+        }
+        const isLastWashRecent = daysSinceWash !== null && daysSinceWash >= 0 && daysSinceWash <= 3;
+        const isPendingEmission = !hasCertWithin30Days && isLastWashRecent;
+
         return {
           ...truck,
           lastTelegramWash,
           lastTelegramWashDmy: lastTelegramWash?.chileDateOnly || '',
           lastTelegramWashFormatted: lastTelegramWash?.chileFormatted || '',
-          certInfo
+          certInfo,
+          daysSinceWash,
+          isPendingEmission
         };
       })
       .sort((a, b) =>
@@ -392,12 +415,14 @@ export default function WashCertification() {
     let porVencerCount = 0;
     let vencidaCount = 0;
     let sinCertCount = 0;
+    let pendingEmissionCount = 0;
 
     regionTrucks.forEach((t) => {
       if (t.certInfo.status === 'al_dia') alDiaCount += 1;
       else if (t.certInfo.status === 'por_vencer') porVencerCount += 1;
       else if (t.certInfo.status === 'vencida') vencidaCount += 1;
       else sinCertCount += 1;
+      if (t.isPendingEmission) pendingEmissionCount += 1;
     });
 
     return {
@@ -405,7 +430,8 @@ export default function WashCertification() {
       alDiaCount,
       porVencerCount,
       vencidaCount,
-      sinCertCount
+      sinCertCount,
+      pendingEmissionCount
     };
   }, [ownFleetMatrix, regionFilter]);
 
@@ -418,7 +444,9 @@ export default function WashCertification() {
       if (modalVehicleType !== 'Todos' && String(t.type || '').trim() !== modalVehicleType) {
         return false;
       }
-      if (modalStatusFilter !== 'Todos' && t.certInfo.status !== modalStatusFilter) {
+      if (modalStatusFilter === 'pendiente_emision') {
+        if (!t.isPendingEmission) return false;
+      } else if (modalStatusFilter !== 'Todos' && t.certInfo.status !== modalStatusFilter) {
         return false;
       }
       if (modalSearch.trim() !== '') {
@@ -633,15 +661,6 @@ export default function WashCertification() {
         <div className="flex items-center gap-2 flex-wrap">
           <Button
             type="button"
-            onClick={() => openEmissionModal('Todos')}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs"
-          >
-            <FileText size={15} />
-            Emisión de certificado
-          </Button>
-
-          <Button
-            type="button"
             variant="outline"
             onClick={() => fetchRecords(true)}
             className="flex items-center gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50 text-xs font-bold"
@@ -686,7 +705,7 @@ export default function WashCertification() {
           </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Tarjeta 1: Camiones certificación al día (dentro de los 27 días) */}
           <div
             onClick={() => openEmissionModal('al_dia')}
@@ -768,6 +787,27 @@ export default function WashCertification() {
             </div>
             <span className="text-[11px] text-slate-600 font-medium">
               Sin fecha de emisión de documento registrada
+            </span>
+          </div>
+
+          {/* Tarjeta 5: Emisión de certificado (pendientes por emitir: sin cert <=30d y lavado <=3d) */}
+          <div
+            onClick={() => openEmissionModal('pendiente_emision')}
+            className="p-4 rounded-xl border bg-blue-50/90 border-blue-300 text-blue-950 flex flex-col justify-between cursor-pointer transition-all hover:shadow-md hover:border-blue-500 ring-1 ring-blue-200"
+            title="Camiones sin certificación vigente en 30 días y con lavado dentro de los últimos 3 días (única etiqueta habilitada para emitir)"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-blue-800">
+                Emisión de certificado
+              </span>
+              <FileText size={18} className="text-blue-600 shrink-0" />
+            </div>
+            <div className="my-2 flex items-baseline gap-2">
+              <span className="text-3xl font-black text-blue-900">{kpiStats.pendingEmissionCount}</span>
+              <span className="text-xs font-semibold text-blue-700">pendientes</span>
+            </div>
+            <span className="text-[11px] text-blue-800 font-semibold">
+              {canEmitCert ? 'Lavado ≤ 3 días · Clic para emitir' : 'Lavado ≤ 3 días · Solo lectura'}
             </span>
           </div>
         </div>
@@ -1110,6 +1150,7 @@ export default function WashCertification() {
                   className="text-xs font-semibold text-slate-700 bg-transparent outline-none cursor-pointer pr-1"
                 >
                   <option value="Todos">Vigencia: Todos ({ownFleetMatrix.length})</option>
+                  <option value="pendiente_emision">Emisión de certificado (pendientes)</option>
                   <option value="al_dia">Al día (≤ 27 días)</option>
                   <option value="por_vencer">Por vencer (últimos 3 días)</option>
                   <option value="vencida">Vencida (&gt; 30 días)</option>
@@ -1128,13 +1169,15 @@ export default function WashCertification() {
                     <th className="px-4 py-3">Último Lavado (Telegram)</th>
                     <th className="px-4 py-3">Última Emisión Certificado</th>
                     <th className="px-4 py-3">Vigencia (30 días)</th>
-                    <th className="px-4 py-3 text-right">Acción</th>
+                    {modalStatusFilter === 'pendiente_emision' && (
+                      <th className="px-4 py-3 text-right">Acción</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
                   {filteredModalTrucks.length === 0 ? (
                     <tr>
-                      <td colSpan="6" className="py-12 text-center text-slate-400">
+                      <td colSpan={modalStatusFilter === 'pendiente_emision' ? 6 : 5} className="py-12 text-center text-slate-400">
                         <Truck size={32} className="mx-auto text-slate-300 mb-2" />
                         <p className="font-semibold text-sm text-slate-600">
                           No se encontraron camiones de flota propia con los filtros seleccionados.
@@ -1279,22 +1322,30 @@ export default function WashCertification() {
                           {/* Vigencia (30 días) */}
                           <td className="px-4 py-3 whitespace-nowrap">{vigenciaBadge}</td>
 
-                          {/* Acción: Emitir certificado */}
-                          <td className="px-4 py-3 whitespace-nowrap text-right">
-                            <Button
-                              type="button"
-                              disabled={isEmitting}
-                              onClick={() => handleEmitCertificate(truck)}
-                              className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-2xs"
-                            >
-                              {isEmitting ? (
-                                <RefreshCw size={13} className="animate-spin" />
+                          {/* Acción: Emitir certificado (solo en etiqueta "Emisión de certificado" y si el usuario tiene permiso) */}
+                          {modalStatusFilter === 'pendiente_emision' && (
+                            <td className="px-4 py-3 whitespace-nowrap text-right">
+                              {canEmitCert ? (
+                                <Button
+                                  type="button"
+                                  disabled={isEmitting}
+                                  onClick={() => handleEmitCertificate(truck)}
+                                  className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-2xs"
+                                >
+                                  {isEmitting ? (
+                                    <RefreshCw size={13} className="animate-spin" />
+                                  ) : (
+                                    <FileText size={13} />
+                                  )}
+                                  {isEmitting ? 'Generando...' : 'Emitir certificado'}
+                                </Button>
                               ) : (
-                                <FileText size={13} />
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-slate-100 text-slate-500 text-[11px] font-semibold">
+                                  Sin permiso de emisión
+                                </span>
                               )}
-                              {isEmitting ? 'Generando...' : 'Emitir certificado'}
-                            </Button>
-                          </td>
+                            </td>
+                          )}
                         </tr>
                       );
                     })

@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 
 export default function UsersManager() {
   const { user } = useAuthStore();
-  const { users, isLoading, fetchUsers, addUser, updateUser, deleteUser, toggleDeleteHistoryPermission, toggleAutoLock10Min } = useUserStore();
+  const { users, isLoading, fetchUsers, addUser, updateUser, deleteUser, toggleDeleteHistoryPermission, toggleEmitWashCertPermission, toggleAutoLock10Min } = useUserStore();
   const [editingId, setEditingId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({ 
@@ -17,6 +17,7 @@ export default function UsersManager() {
     password: '', 
     role: 'Administrativo',
     can_delete_history: false,
+    can_emit_wash_cert: false,
     auto_lock_10min: false,
     menus: getDefaultPermissionsForRole('Administrativo').menus
   });
@@ -45,6 +46,7 @@ export default function UsersManager() {
       password: u.password, 
       role: u.role,
       can_delete_history: u.role === 'Administrador' || u.username === 'superadmin' || !!u.can_delete_history,
+      can_emit_wash_cert: u.role === 'Administrador' || u.username === 'superadmin' || !!(u.can_emit_wash_cert ?? u.permissions?.can_emit_wash_cert),
       auto_lock_10min: u.auto_lock_10min !== undefined ? !!u.auto_lock_10min : !!u.permissions?.auto_lock_10min,
       menus: userMenus
     });
@@ -59,6 +61,7 @@ export default function UsersManager() {
       password: '', 
       role: 'Administrativo', 
       can_delete_history: false,
+      can_emit_wash_cert: false,
       auto_lock_10min: false,
       menus: getDefaultPermissionsForRole('Administrativo').menus
     });
@@ -70,6 +73,7 @@ export default function UsersManager() {
       ...prev,
       role: newRole,
       can_delete_history: newRole === 'Administrador' ? true : prev.can_delete_history,
+      can_emit_wash_cert: newRole === 'Administrador' ? true : prev.can_emit_wash_cert,
       menus: defaults.menus
     }));
   };
@@ -326,6 +330,27 @@ export default function UsersManager() {
               </label>
             </div>
 
+            {/* Permiso Especial: Emitir Certificados de Lavado */}
+            <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+              <label className="flex items-start gap-2 cursor-pointer select-none">
+                <input 
+                  type="checkbox"
+                  checked={formData.role === 'Administrador' ? true : formData.can_emit_wash_cert}
+                  disabled={formData.role === 'Administrador'}
+                  onChange={e => setFormData({...formData, can_emit_wash_cert: e.target.checked})}
+                  className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
+                />
+                <div className="text-xs">
+                  <span className="font-bold text-slate-800 block">Permiso: Emitir Certificados de Lavado</span>
+                  <span className="text-[10px] text-slate-400">
+                    {formData.role === 'Administrador' 
+                      ? 'Administrador siempre tiene este permiso activo.' 
+                      : 'Permite emitir certificados PDF desde la etiqueta "Emisión de certificado".'}
+                  </span>
+                </div>
+              </label>
+            </div>
+
             {/* Inactividad: Bloqueo de sesión tras 10 minutos sin interacción */}
             <div className="bg-white p-2.5 rounded-xl border border-slate-200">
               <label className="flex items-start gap-2 cursor-pointer select-none">
@@ -383,6 +408,7 @@ export default function UsersManager() {
                   <th className="px-3 py-2.5">Rol</th>
                   <th className="px-3 py-2.5 text-center">Menús Permitidos</th>
                   <th className="px-3 py-2.5 text-center">Eliminar Hist.</th>
+                  <th className="px-3 py-2.5 text-center">Emitir Cert.</th>
                   <th className="px-3 py-2.5 text-center">Bloqueo 10m</th>
                   <th className="px-3 py-2.5 text-right">Acciones</th>
                 </tr>
@@ -395,6 +421,7 @@ export default function UsersManager() {
                   const viewCount = isSuper ? ALL_MENU_KEYS.length : Object.values(userMenus).filter(p => p.view).length;
                   const editCount = isSuper ? ALL_MENU_KEYS.length : Object.values(userMenus).filter(p => p.edit).length;
                   const hasDeletePerm = isSuper || !!u.can_delete_history;
+                  const hasEmitCertPerm = isSuper || !!(u.can_emit_wash_cert ?? u.permissions?.can_emit_wash_cert);
 
                   return (
                     <tr 
@@ -472,6 +499,29 @@ export default function UsersManager() {
                           >
                             <span className={`w-1.5 h-1.5 rounded-full ${hasDeletePerm ? 'bg-emerald-600' : 'bg-slate-400'}`}></span>
                             {hasDeletePerm ? 'Sí' : 'No'}
+                          </button>
+                        )}
+                      </td>
+
+                      {/* Emitir Certificado de Lavado */}
+                      <td className="px-3 py-2.5 text-center">
+                        {isSuper ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                            <Check size={10} /> Total
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleEmitWashCertPermission(u.id)}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-all ${
+                              hasEmitCertPerm
+                                ? 'bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100'
+                                : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                            }`}
+                            title="Clic para activar/desactivar permiso de emisión de certificados"
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${hasEmitCertPerm ? 'bg-blue-600' : 'bg-slate-400'}`}></span>
+                            {hasEmitCertPerm ? 'Sí' : 'No'}
                           </button>
                         )}
                       </td>
