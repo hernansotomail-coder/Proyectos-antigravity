@@ -648,13 +648,37 @@ export const persistTransformedRoutesToDb = async (transformedRoutes, meta = {})
 
 export const fetchPlanningStateFromDb = async () => {
   try {
+    // 1. Consultar primero solo las claves disponibles (~1.5 KB) para evitar descargar >7 MB de historial antiguo
+    const { data: keysData, error: keysError } = await withTimeout(
+      supabase
+        .from('planning_assignments')
+        .select('fecha')
+        .neq('fecha', '__saved_history__')
+        .neq('fecha', '__change_history__')
+        .not('fecha', 'like', '__pago_%'),
+      25000
+    );
+    if (keysError) {
+      console.warn('Error leyendo claves de planning_assignments:', keysError);
+      return null;
+    }
+
+    const allKeys = (keysData || []).map(k => k.fecha).filter(Boolean);
+    if (allKeys.length === 0) return null;
+
+    const internalKeys = allKeys.filter(k => k.startsWith('__'));
+    const recentDateKeys = allKeys
+      .filter(k => !k.startsWith('__') && k !== 'Sin Fecha')
+      .sort((a, b) => parseDmyTimestamp(b) - parseDmyTimestamp(a))
+      .slice(0, 12);
+
+    const targetKeys = Array.from(new Set([...internalKeys, ...recentDateKeys]));
+
     const { data, error } = await withTimeout(
       supabase
         .from('planning_assignments')
         .select('*')
-        .neq('fecha', '__saved_history__')
-        .neq('fecha', '__change_history__')
-        .not('fecha', 'like', '__pago_%'),
+        .in('fecha', targetKeys),
       25000
     );
     if (error) {
@@ -791,13 +815,34 @@ const loadPersistedAssignments = () => {
   }
 };
 
+// Helper para ordenar fechas DD-MM-YYYY descendente (más recientes primero)
+const parseDmyTimestamp = (fechaStr) => {
+  if (!fechaStr || typeof fechaStr !== 'string') return 0;
+  const m = fechaStr.trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!m) return 0;
+  return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+};
+
 export const persistAssignments = (data) => {
   try {
     localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(data));
     return true;
   } catch (e) {
-    console.error('Error saving transmitted assignments to localStorage:', e);
-    return false;
+    // Si supera el límite de 5MB de localStorage, conservar solo las 10 fechas más recientes
+    try {
+      const sortedDates = Object.keys(data || {})
+        .filter(k => k && !k.startsWith('__') && k !== 'Sin Fecha')
+        .sort((a, b) => parseDmyTimestamp(b) - parseDmyTimestamp(a))
+        .slice(0, 10);
+      const pruned = {};
+      sortedDates.forEach(k => { pruned[k] = data[k]; });
+      localStorage.setItem('keylogistics_transmitted_assignments', JSON.stringify(pruned));
+      console.warn('[Storage] localStorage lleno: se conservaron las 10 fechas más recientes en caché local.');
+      return true;
+    } catch (e2) {
+      console.error('Error saving transmitted assignments to localStorage:', e2);
+      return false;
+    }
   }
 };
 
@@ -1378,10 +1423,14 @@ export const usePlanningStore = create((set, get) => ({
     }
 
     const newAssignmentsByDate = { ...transmittedAssignments };
+    const touchedDates = new Set();
     let totalTransmitted = 0;
 
     transformedRoutes.forEach((route) => {
       const fecha = route.fecha || 'Sin Fecha';
+      if (fecha && !fecha.startsWith('__') && fecha !== 'Sin Fecha') {
+        touchedDates.add(fecha);
+      }
       if (!newAssignmentsByDate[fecha]) {
         newAssignmentsByDate[fecha] = [];
       }
@@ -1441,10 +1490,12 @@ export const usePlanningStore = create((set, get) => ({
       totalTransmitted++;
     });
 
-    // Guardar en localStorage y Supabase (esperar a que la BD confirme)
+    // Guardar en localStorage y Supabase (solo las fechas modificadas en esta transmisión)
     persistAssignments(newAssignmentsByDate);
     await persistTransformedRoutesToDb(transformedRoutes, { fileName, date: transformedRoutes[0]?.fecha });
-    await Promise.all(Object.entries(newAssignmentsByDate).map(([f, rows]) => persistAssignmentsToDb(f, rows)));
+    await Promise.all(
+      Array.from(touchedDates).map(f => persistAssignmentsToDb(f, newAssignmentsByDate[f]))
+    );
 
     const dates = Object.keys(newAssignmentsByDate);
     const targetDate = transformedRoutes[0]?.fecha || dates[0] || '';
@@ -1575,11 +1626,15 @@ export const usePlanningStore = create((set, get) => ({
     }
 
     const newAssignmentsByDate = JSON.parse(JSON.stringify(transmittedAssignments));
+    const touchedDates = new Set();
     let totalUpdated = 0;
     let totalAdded = 0;
 
     targetRoutes.forEach((route) => {
       const fecha = route.fecha || 'Sin Fecha';
+      if (fecha && !fecha.startsWith('__') && fecha !== 'Sin Fecha') {
+        touchedDates.add(fecha);
+      }
       if (!newAssignmentsByDate[fecha]) {
         newAssignmentsByDate[fecha] = [];
       }
@@ -1651,7 +1706,9 @@ export const usePlanningStore = create((set, get) => ({
 
     persistTransformedRoutes(nextTransformed, { fileName, date: nextTransformed[0]?.fecha });
     persistAssignments(newAssignmentsByDate);
-    await Promise.all(Object.entries(newAssignmentsByDate).map(([f, rows]) => persistAssignmentsToDb(f, rows)));
+    await Promise.all(
+      Array.from(touchedDates).map(f => persistAssignmentsToDb(f, newAssignmentsByDate[f]))
+    );
 
     const targetDate = targetRoutes[0]?.fecha || Object.keys(newAssignmentsByDate)[0] || '14-10-2026';
     const synced = syncHistoryAndSavedForDate(get(), targetDate, newAssignmentsByDate[targetDate] || []);

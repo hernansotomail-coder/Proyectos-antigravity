@@ -161,11 +161,11 @@ export default function FleetDashboard({ isSpidOnly: propIsSpidOnly }) {
 
   useEffect(() => {
     fetchFleet();
-    // Refrescar automáticamente cada 15s y al volver a enfocar la ventana/pestaña para mantener sincronización entre computadores
+    // Refrescar automáticamente cada 30s y al volver a enfocar la ventana/pestaña para mantener sincronización entre computadores
     const pollTimer = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       fetchFleet();
-    }, 15000);
+    }, 30000);
     const onFocus = () => {
       fetchFleet();
     };

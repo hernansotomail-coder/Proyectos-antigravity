@@ -443,11 +443,11 @@ export default function EstatusDiario() {
 
     channelRef.current = channel;
 
-    // 3. Respaldo de sincronización continua (Polling ligero cada 5 segundos + al enfocar ventana)
+    // 3. Respaldo de sincronización continua (Polling ligero cada 15 segundos + al enfocar ventana)
     const syncInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       loadRemoteStatus(true);
-    }, 5000);
+    }, 15000);
 
     const handleVisibilityOrFocus = () => {
       if (typeof document !== 'undefined' && !document.hidden) {
@@ -611,11 +611,11 @@ export default function EstatusDiario() {
       })
       .subscribe();
 
-    // 3. Polling ligero cada 5 segundos + al enfocar pestaña para garantizar actualización en todo momento
+    // 3. Polling ligero cada 15 segundos + al enfocar pestaña para garantizar actualización en todo momento
     const dispPollInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;
       fetchDisp(true);
-    }, 5000);
+    }, 15000);
 
     const handleDispFocus = () => {
       if (typeof document !== 'undefined' && !document.hidden) {
